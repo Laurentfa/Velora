@@ -1,0 +1,33 @@
+# Tests automatiques et construction de l'application sur Windows et Mac : c'est ainsi qu'on vérifie Windows sans avoir de PC sous la main.
+# À utiliser si le projet est hébergé sur GitHub ; sans effet sinon.
+name: CI
+on: [push, pull_request]
+jobs:
+  tests-et-construction:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Dépendances
+        run: |
+          python -m venv .venv
+          ${{ matrix.os == 'windows-latest' && '.venv\\Scripts\\python' || '.venv/bin/python' }} -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Tests (sans accès réseau)
+        run: ${{ matrix.os == 'windows-latest' && '.venv\\Scripts\\python' || '.venv/bin/python' }} -m pytest -q -m "not network"
+      - name: Construction Windows
+        if: matrix.os == 'windows-latest'
+        shell: cmd
+        run: build_windows.bat
+      - name: Construction Mac
+        if: matrix.os == 'macos-latest'
+        run: ./build_mac.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: velora-${{ matrix.os }}
+          path: dist/

@@ -1,0 +1,23 @@
+# environnement et fichiers générés
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+build/
+dist/
+*.spec
+
+# données personnelles et secrets : jamais dans le dépôt
+.env
+.env.*
+accounts.json
+*.db
+*.db-wal
+*.db-shm
+*.sqlite*
+imgcache/
+backups/
+logs/
+.nicegui/
+*.plain.old
+*.enc.old

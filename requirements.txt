@@ -1,0 +1,21 @@
+nicegui
+pywebview
+exchangelib
+imap-tools
+anthropic
+python-dotenv
+platformdirs
+pyinstaller
+pillow
+nh3
+keyring
+mammoth
+openpyxl
+python-pptx
+pillow-heif
+pypdf
+zeroconf
+segno
+sqlcipher3-wheels
+pyobjc-framework-LocalAuthentication; sys_platform == "darwin"
+dnspython

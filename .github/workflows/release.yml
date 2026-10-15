@@ -1,0 +1,76 @@
+# Publication d'une version : git tag v1.2.0 && git push --tags
+# Construit Mac et Windows, signe les mises à jour avec votre clé (secret UPDATE_PRIVATE_KEY) et crée la page de la version sur GitHub.
+name: Publication
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  construire:
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: Numéro de version
+        shell: bash
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+          python -c "import re,pathlib;p=pathlib.Path('mailia/version.py');p.write_text(re.sub(r'APP_VERSION = \"[^\"]*\"','APP_VERSION = \"$V\"',p.read_text(),count=1))"
+      - name: Dépôt des versions
+        shell: bash
+        run: python -c "import re,pathlib,os;p=pathlib.Path('mailia/version.py');p.write_text(re.sub(r'UPDATE_REPO = \"[^\"]*\"','UPDATE_REPO = \"'+os.environ['GITHUB_REPOSITORY']+'\"',p.read_text(),count=1))"
+      - name: Dépendances
+        shell: bash
+        run: |
+          python -m venv .venv
+          PY=$([ "$RUNNER_OS" = Windows ] && echo .venv/Scripts/python || echo .venv/bin/python)
+          $PY -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Tests
+        shell: bash
+        run: |
+          PY=$([ "$RUNNER_OS" = Windows ] && echo .venv/Scripts/python || echo .venv/bin/python)
+          $PY -m pytest -q -m "not network"
+      - name: Construction et empaquetage Mac
+        if: runner.os == 'macOS'
+        run: |
+          ./build_mac.sh
+          scripts/package_mac.sh "$VERSION"
+      - name: Construction et installateur Windows
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          call build_windows.bat
+          choco install innosetup -y --no-progress
+          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=%VERSION% scripts\velora.iss
+      - name: Signature des mises à jour
+        shell: bash
+        env:
+          UPDATE_PRIVATE_KEY: ${{ secrets.UPDATE_PRIVATE_KEY }}
+        run: |
+          PY=$([ "$RUNNER_OS" = Windows ] && echo .venv/Scripts/python || echo .venv/bin/python)
+          for f in dist/release/*-mac.zip dist/release/*-setup.exe; do [ -f "$f" ] && $PY tools/sign_release.py "$f"; done
+          ls -l dist/release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: velora-${{ runner.os }}
+          path: dist/release/*
+  publier:
+    needs: construire
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: fichiers
+          merge-multiple: true
+      - name: Page de la version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" fichiers/* --repo "$GITHUB_REPOSITORY" --title "Velora ${GITHUB_REF_NAME#v}" --generate-notes

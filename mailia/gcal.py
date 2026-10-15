@@ -1,0 +1,99 @@
+"""Google Agenda : création de rendez-vous (et ajout d'une invitation acceptée) avec l'API Calendar, par OAuth.
+
+Portée demandée : « calendar.events » seulement (créer et modifier des rendez-vous ; pas de lecture des autres agendas ni des contacts).
+Il faut un identifiant d'application Google (OAUTH_GOOGLE_CLIENT_ID / OAUTH_GOOGLE_CLIENT_SECRET, de type « application de bureau »)
+dont l'API Google Agenda est activée : voir Paramètres › Agenda. Si l'application Google est en mode « test », Google fait expirer
+la connexion au bout de 7 jours : il suffit de se reconnecter."""
+import logging
+from datetime import datetime
+
+import httpx
+
+from . import config, oauth
+
+log = logging.getLogger("gcal")
+API = "https://www.googleapis.com/calendar/v3/calendars/primary"
+
+
+class GCalError(Exception):
+    """Message destiné à l'utilisateur."""
+
+
+def configured() -> bool:
+    return oauth.configured("google")
+
+
+def connected() -> bool:
+    return bool(config.env("GCAL_REFRESH_TOKEN"))
+
+
+def connect(email: str = "", open_browser=None, cancel=None) -> None:
+    """Ouvre le navigateur pour autoriser l'accès à l'agenda ; mémorise le jeton de renouvellement (trousseau si activé). Bloquant."""
+    kw = {"scope": oauth.CALENDAR_SCOPE, "cancel": cancel}
+    if open_browser:
+        kw["open_browser"] = open_browser
+    packed = oauth.authorize("google", email, **kw)
+    config.write_env({"GCAL_REFRESH_TOKEN": oauth.unpack(packed)[1]})
+
+
+def disconnect() -> None:
+    config.forget_env("GCAL_REFRESH_TOKEN")
+
+
+def _token() -> str:
+    refresh = config.env("GCAL_REFRESH_TOKEN")
+    if not refresh:
+        raise GCalError("Google Agenda n'est pas connecté (Paramètres › Agenda).")
+    try:
+        access, new = oauth.refresh_access("google", refresh, oauth.CALENDAR_SCOPE)
+    except oauth.OAuthError as e:
+        raise GCalError(str(e)) from e
+    if new != refresh:
+        config.write_env({"GCAL_REFRESH_TOKEN": new})
+    return access
+
+
+def _error(r: httpx.Response) -> GCalError:
+    try:
+        msg = (r.json().get("error") or {}).get("message") or ""
+    except ValueError:
+        msg = ""
+    if (r.status_code in (401, 403) and "has not been used" in msg) or "accessNotConfigured" in r.text:
+        return GCalError("L'API Google Agenda n'est pas activée dans votre projet Google Cloud (voir l'aide, Paramètres › Agenda).")
+    if r.status_code == 401:
+        return GCalError("Google a refusé l'accès : reconnectez l'agenda (Paramètres › Agenda).")
+    if r.status_code == 403:
+        return GCalError("Google a refusé l'opération : " + (msg or "autorisation insuffisante") + ".")
+    return GCalError(f"Google Agenda a répondu une erreur (code {r.status_code}) : {msg[:200]}")
+
+
+def _call(method: str, path: str, **kw) -> dict:
+    try:
+        r = httpx.request(method, API + path, headers={"Authorization": f"Bearer {_token()}"}, timeout=30, **kw)
+    except httpx.HTTPError as e:
+        raise GCalError(f"Google Agenda injoignable : {type(e).__name__}") from e
+    if r.status_code >= 300:
+        raise _error(r)
+    return r.json() if r.content else {}
+
+
+def create_event(title: str, start: datetime, end: datetime, location: str = "", body: str = "", tentative: bool = False) -> str:
+    """Ajoute un rendez-vous sans invité (personne n'est prévenu). Heures naïves = fuseau de l'ordinateur. Retourne le lien de l'événement."""
+    aware = lambda d: (d if d.tzinfo else d.astimezone()).isoformat(timespec="seconds")
+    ev = {"summary": title, "start": {"dateTime": aware(start)}, "end": {"dateTime": aware(end)}}
+    if location:
+        ev["location"] = location
+    if body:
+        ev["description"] = body
+    if tentative:
+        ev["status"] = "tentative"
+    return _call("POST", "/events", params={"sendUpdates": "none"}, json=ev).get("htmlLink", "")
+
+
+def test() -> tuple[bool, str]:
+    """Vérifie la connexion : lit l'agenda principal (un seul rendez-vous demandé). (ok, message)"""
+    try:
+        d = _call("GET", "/events", params={"maxResults": 1})
+    except GCalError as e:
+        return False, str(e)
+    return True, f"Connexion réussie : agenda « {d.get('summary') or 'principal'} »."
