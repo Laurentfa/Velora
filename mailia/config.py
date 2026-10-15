@@ -62,13 +62,15 @@ def _read_env_file() -> dict[str, str]:
 def atomic_write(path: Path, text: str, private: bool = True) -> None:
     """Écriture sans risque de fichier tronqué : on écrit à côté, on force sur disque, puis on remplace d'un coup."""
     tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(text, encoding="utf-8")
     if private:
         try:
+            tmp.touch(mode=0o600)
             tmp.chmod(0o600)
         except OSError:
             pass  # Windows : droits gérés par le profil utilisateur
-    with open(tmp, "rb") as f:
+    with open(tmp, "w", encoding="utf-8", newline="") as f:  # fsync exige un fichier ouvert en écriture (Windows refuse sinon)
+        f.write(text)
+        f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path)
 

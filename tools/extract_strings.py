@@ -148,6 +148,7 @@ def main() -> None:
                                                         and not text.strip().startswith(("http", "/", "<", ".", "#")) and not SQL.search(text)))
             if text and ok:
                 found.setdefault(text.strip(), set()).add(f.name)
+    sys.stdout.reconfigure(encoding="utf-8")  # Windows : la console utilise sinon un encodage qui ne connaît pas les accents
     json.dump(sorted(found), sys.stdout, ensure_ascii=False, indent=0)
 
 
