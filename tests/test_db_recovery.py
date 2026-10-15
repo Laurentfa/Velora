@@ -16,6 +16,7 @@ def isolated_db(tmp_path, monkeypatch):
 
 
 def corrupt(path):
+    db.close_shared()  # comme si l'appli était fermée : la connexion gardée ouverte ne doit pas survivre au fichier détruit
     for suffix in ("-wal", "-shm"):
         path.with_name(path.name + suffix).unlink(missing_ok=True)
     path.write_bytes(b"SQLite format 3\x00" + b"\xff" * 8000)  # l'en-tête est intact (ce n'est pas une base chiffrée), les pages sont détruites
@@ -49,3 +50,43 @@ def test_recover_without_any_backup_starts_empty(isolated_db):
     db.init()
     assert db.kv_get("user_name") in (None, "")
     sqlite3.connect(db.DB_PATH).execute("select count(*) from messages").fetchone()  # la nouvelle base est utilisable
+
+
+def test_one_connection_is_kept_and_reopened_when_the_file_is_replaced(isolated_db):
+    with db.conn() as a:
+        pass
+    with db.conn() as b:
+        assert b is a  # pas de nouvelle connexion à chaque requête (c'était ~30 ms chacune sous Windows)
+    db.close_shared()
+    db.DB_PATH.replace(isolated_db / "ailleurs.db")  # déplaçable : plus aucun fichier tenu ouvert
+    db.DB_PATH.write_bytes(b"")
+    (isolated_db / "ailleurs.db").replace(db.DB_PATH)
+    with db.conn() as c:
+        assert c is not a
+
+
+def test_failed_use_is_rolled_back_and_the_connection_survives(isolated_db):
+    with pytest.raises(ZeroDivisionError):
+        with db.conn() as c:
+            c.execute("INSERT INTO kv(k,v) VALUES('x','1')")
+            1 / 0
+    assert db.kv_get("x") is None
+    db.kv_set("y", "2")
+    assert db.kv_get("y") == "2"
+
+
+def test_threads_share_the_connection_safely(isolated_db):
+    import threading
+    errors = []
+
+    def work(n):
+        try:
+            for i in range(50):
+                db.kv_set(f"k{n}", str(i))
+                db.kv_get(f"k{n}")
+        except Exception as e:
+            errors.append(e)
+    ts = [threading.Thread(target=work, args=(n,)) for n in range(6)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert not errors and db.kv_get("k3") == "49"

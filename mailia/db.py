@@ -1,3 +1,4 @@
+import atexit
 import json
 import threading
 import time
@@ -81,24 +82,62 @@ CREATE TABLE IF NOT EXISTS folders (
 """
 
 
+_shared: dict = {"conn": None, "id": None}  # connexion gardée ouverte, toujours sous _lock
+
+
+def _file_id() -> tuple:
+    """Identité du fichier de la base : si on le remplace (réparation, chiffrement), la connexion gardée doit être rouverte."""
+    try:
+        st = DB_PATH.stat()
+        return str(DB_PATH), st.st_ino, st.st_dev
+    except OSError:
+        return str(DB_PATH), None, None
+
+
+def close_shared() -> None:
+    """Ferme la connexion gardée ouverte (avant de déplacer ou remplacer le fichier : Windows refuse sinon ; à l'arrêt pour nettoyer le journal)."""
+    with _lock:
+        c, _shared["conn"], _shared["id"] = _shared["conn"], None, None
+        if c is not None:
+            try:
+                c.close()
+            except Exception:
+                pass
+
+
+atexit.register(close_shared)
+
+
 @contextmanager
 def conn():
+    """Une seule connexion, gardée ouverte : en ouvrir une à chaque requête coûte ~30 ms sous Windows (l'antivirus analyse les fichiers
+    temporaires de la base recréés à chaque fois), soit des dizaines de secondes de perdues par minute. Le verrou _lock les sérialise."""
     t = time.perf_counter()
     with _lock:
         perf.record("base : attente du verrou", time.perf_counter() - t)  # long = un autre traitement garde la base
         t = time.perf_counter()
-        c = vault.connect(DB_PATH, timeout=30)  # chiffrée ou non, selon le fichier
+        if _shared["conn"] is None or _shared["id"] != _file_id():
+            close_shared()
+            _shared["conn"] = vault.connect(DB_PATH, timeout=30, check_same_thread=False)  # chiffrée ou non, selon le fichier
+            _shared["id"] = _file_id()
+        c = _shared["conn"]
         try:
             yield c
             c.commit()
+        except BaseException:
+            try:
+                c.rollback()
+            except Exception:
+                close_shared()  # connexion inutilisable : la prochaine utilisation en rouvre une
+            raise
         finally:
-            c.close()
-            perf.record("base : une utilisation (ouverture à fermeture)", time.perf_counter() - t)
+            perf.record("base : une utilisation", time.perf_counter() - t)
 
 
 def exclusive(fn):
     """Exécute fn() pendant qu'aucune autre partie de l'appli n'utilise la base (changement de chiffrement)."""
     with _lock:
+        close_shared()
         return fn()
 
 
@@ -224,6 +263,7 @@ def recover() -> str:
     est remise en place. Sans copie valable, on repart d'une base vide : les mails se relisent depuis les serveurs.
     Retourne « sauvegarde <nom> » ou « vide »."""
     import shutil
+    close_shared()
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     for suffix in ("", "-wal", "-shm"):
         f = DB_PATH.with_name(DB_PATH.name + suffix)

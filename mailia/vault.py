@@ -77,7 +77,7 @@ def key() -> str | None:
     return _key
 
 
-def connect(path, timeout: float = 30):
+def connect(path, timeout: float = 30, check_same_thread: bool = True):
     """Connexion à la base : chiffrée (clé du trousseau) si le fichier l'est, sinon SQLite ordinaire."""
     import sqlite3
     if is_encrypted(path):
@@ -86,12 +86,12 @@ def connect(path, timeout: float = 30):
         if not sc or not k:
             raise RuntimeError("La base de données est chiffrée, mais sa clé est introuvable dans le trousseau du système. "
                                "Restaurez la clé de récupération (Paramètres › Confidentialité et sécurité).")
-        c = sc.connect(str(path), timeout=timeout)
+        c = sc.connect(str(path), timeout=timeout, check_same_thread=check_same_thread)
         c.execute(f"PRAGMA key=\"x'{k}'\"")
         c.execute("PRAGMA synchronous=NORMAL")
         c.row_factory = sc.Row
         return c
-    c = sqlite3.connect(path, timeout=timeout)
+    c = sqlite3.connect(path, timeout=timeout, check_same_thread=check_same_thread)
     c.execute("PRAGMA synchronous=NORMAL")
     c.row_factory = sqlite3.Row
     return c
