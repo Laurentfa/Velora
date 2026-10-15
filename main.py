@@ -25,6 +25,8 @@ if "--mcp-stdio" in sys.argv:  # pont pour les assistants qui lancent un program
     sys.exit(0)
 
 from mailia import perf  # en premier : le chronomètre de démarrage part d'ici
+from mailia import nicegui_tweaks
+nicegui_tweaks.install()
 from mailia import config as _config  # léger : sert à ranger le stockage de session de l'interface dans le dossier de données
 os.environ.setdefault("NICEGUI_STORAGE_PATH", str(_config.DATA_DIR / ".nicegui"))
 
@@ -106,6 +108,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self.brief: dict | None = None
         self.counts: dict = queries.counts()
         self.ver = queries.version()
+        self._build_cost, self._last_bg = 0.0, 0.0
         self.rows_sig = None
         self.busy = False
         self.compose = False
@@ -518,6 +521,14 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
 
     @ui.refreshable_method
     def rows_view(self) -> None:
+        t = time.perf_counter()
+        try:
+            self._rows_view_body()
+        finally:
+            self._build_cost = time.perf_counter() - t  # sert à espacer les redessins automatiques sur un ordinateur lent
+            perf.record("liste : dessin", self._build_cost)
+
+    def _rows_view_body(self) -> None:
         self._pins = db.pin_keys()
         if (self.picked or self.select_mode) and self.view not in NOLIST_VIEWS - {"brief"}:
             self.bulk_bar()
@@ -1115,6 +1126,11 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
     async def tick(self) -> None:
         v = queries.version()
         if v != self.ver:
+            # le dessin de la liste fige la fenêtre pendant sa durée : sur un ordinateur lent (1,5 s), l'analyse IA du retard de mails la
+            # redessinait toutes les 3 s. Les redessins venus de l'arrière-plan sont donc espacés de 6 fois la durée d'un dessin.
+            if time.monotonic() - self._last_bg < 6 * self._build_cost:
+                return
+            self._last_bg = time.monotonic()
             self.ver = v
             await self.reload()
 
