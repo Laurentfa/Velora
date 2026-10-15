@@ -109,6 +109,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self.counts: dict = queries.counts()
         self.ver = queries.version()
         self._build_cost, self._last_bg = 0.0, 0.0
+        self._row_els: dict[str, ui.element] = {}  # id du mail -> élément de sa ligne dans la liste (pour ne redessiner que les lignes modifiées)
         self.rows_sig = None
         self.busy = False
         self.compose = False
@@ -394,6 +395,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         what = "Lu" if unread else "Non lu"
         wrap = ui.element("div").classes("swrap" + (" selmode" if (self.picked or self.select_mode) else "")).on("swipe", lambda e, m=m: self.swiped(m, e.args), args=["detail"])
         wrap._props.update({"draggable": "true", "data-id": m["id"], "data-acct": m["account"], "data-folder": m["folder"]})
+        self._row_els[m["id"]] = wrap
         with wrap:
             with ui.element("div").classes("swl"):  # révélé en glissant vers la droite
                 ui.icon("drafts" if unread else "mark_email_unread", size="22px")
@@ -475,28 +477,42 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         dlg.open()
 
     def row_menu(self, m: dict, unread: bool) -> None:
-        """Clic droit sur un mail de la liste : les actions courantes, sur toute la conversation."""
-        pinned = bool(m.get("pinned")) or m.get("ckey") in self._pins
-        with ui.context_menu():
-            ui.menu_item("Répondre", on_click=lambda: self.reply_to(m))
-            ui.menu_item("Transférer…", on_click=lambda: self.forward(m))
-            if m["folder"] == "INBOX":
-                ui.menu_item("Retirer l'épingle" if pinned else "Épingler en haut", on_click=lambda: self.toggle_pin(m))
-            ui.menu_item("Marquer comme lu" if unread else "Marquer comme non lu", on_click=lambda: self.toggle_read(m))
-            if m["folder"] == "INBOX":
-                opts = self.snooze_options()
-                ui.menu_item("Reporter : " + opts[0][0].lower(), on_click=lambda w=opts[0][1]: self.snooze(m, w))
-                ui.menu_item("Reporter…", on_click=lambda: self.snooze_dialog(m))
-            ui.menu_item("Créer une tâche…", on_click=lambda: self.task_dialog(m))
-            if m["folder"] == "INBOX" and security.quick_row(m):
-                ui.menu_item("Ce message n'est pas suspect", on_click=lambda: self.mark_not_suspect(m))
-            if m["folder"] == "INBOX":
-                vip = aipolicy.is_vip(m["sender"])
-                ui.menu_item("Retirer des expéditeurs prioritaires" if vip else "★ Expéditeur prioritaire", on_click=lambda: self.toggle_vip(m))
-            ui.separator()
-            ui.menu_item("Archiver", on_click=lambda: self.swipe_act(m, "archive"))
-            ui.menu_item("Déplacer vers…", on_click=lambda: self.move_dialog(m))
-            ui.menu_item("Supprimer", on_click=lambda: self.swipe_act(m, "delete")).classes("text-negative")
+        """Clic droit sur un mail de la liste : les actions courantes, sur toute la conversation.
+        Le menu représente la moitié des éléments d'une ligne : ses entrées ne sont créées qu'au premier survol de la ligne (avant tout clic droit),
+        sauf sur téléphone où le survol n'existe pas."""
+        menu = ui.context_menu()
+        done = []
+
+        def build(_=None) -> None:
+            if done:
+                return
+            done.append(1)
+            pinned = bool(m.get("pinned")) or m.get("ckey") in self._pins
+            with menu:
+                ui.menu_item("Répondre", on_click=lambda: self.reply_to(m))
+                ui.menu_item("Transférer…", on_click=lambda: self.forward(m))
+                if m["folder"] == "INBOX":
+                    ui.menu_item("Retirer l'épingle" if pinned else "Épingler en haut", on_click=lambda: self.toggle_pin(m))
+                ui.menu_item("Marquer comme lu" if unread else "Marquer comme non lu", on_click=lambda: self.toggle_read(m))
+                if m["folder"] == "INBOX":
+                    opts = self.snooze_options()
+                    ui.menu_item("Reporter : " + opts[0][0].lower(), on_click=lambda w=opts[0][1]: self.snooze(m, w))
+                    ui.menu_item("Reporter…", on_click=lambda: self.snooze_dialog(m))
+                ui.menu_item("Créer une tâche…", on_click=lambda: self.task_dialog(m))
+                if m["folder"] == "INBOX" and security.quick_row(m):
+                    ui.menu_item("Ce message n'est pas suspect", on_click=lambda: self.mark_not_suspect(m))
+                if m["folder"] == "INBOX":
+                    vip = aipolicy.is_vip(m["sender"])
+                    ui.menu_item("Retirer des expéditeurs prioritaires" if vip else "★ Expéditeur prioritaire", on_click=lambda: self.toggle_vip(m))
+                ui.separator()
+                ui.menu_item("Archiver", on_click=lambda: self.swipe_act(m, "archive"))
+                ui.menu_item("Déplacer vers…", on_click=lambda: self.move_dialog(m))
+                ui.menu_item("Supprimer", on_click=lambda: self.swipe_act(m, "delete")).classes("text-negative")
+
+        if SERVER_MODE:
+            build()
+        else:
+            menu.parent_slot.parent.on("mouseenter.once", build)
 
     async def toggle_vip(self, m: dict) -> None:
         s = m["sender"].lower()
@@ -529,6 +545,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             perf.record("liste : dessin", self._build_cost)
 
     def _rows_view_body(self) -> None:
+        self._row_els = {}
         self._pins = db.pin_keys()
         if (self.picked or self.select_mode) and self.view not in NOLIST_VIEWS - {"brief"}:
             self.bulk_bar()
@@ -1120,8 +1137,34 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             self._side_sig = side_sig
             self.side.refresh()
         if force or sig != self.rows_sig:
+            if force or not self._patch_rows(sig):
+                self.rows_view.refresh()
             self.rows_sig = sig
-            self.rows_view.refresh()
+
+    def _patch_rows(self, sig: tuple) -> bool:
+        """Quelques lignes ont changé (lu, résumé IA, nombre de messages) alors que la liste est la même : on ne reconstruit que celles-là.
+        Redessiner les 80 lignes coûte plus d'une seconde de fenêtre figée sur un ordinateur lent. False = il faut tout redessiner."""
+        old = self.rows_sig
+        if not (old and old[0] == "l" and sig[0] == "l" and old[:7] == sig[:7] and len(old) == len(sig) and self._row_els and not (self.picked or self.select_mode)):
+            return False
+        changed = []
+        for o, n, m in zip(old[7:], sig[7:], self.rows):
+            if o != n:
+                if o[0] != n[0] or o[5] != n[5] or m["id"] not in self._row_els:  # autre mail, épinglage changé (sections) ou ligne repliée
+                    return False
+                changed.append(m)
+        if len(changed) > 15:
+            return False
+        self._pins = db.pin_keys()
+        for m in changed:
+            former = self._row_els[m["id"]]
+            parent = former.parent_slot.parent
+            index = list(parent.default_slot.children).index(former)
+            with parent:
+                self.row(m)
+            self._row_els[m["id"]].move(parent, target_index=index)
+            former.delete()
+        return True
 
     async def tick(self) -> None:
         v = queries.version()
