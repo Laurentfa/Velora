@@ -33,7 +33,7 @@ def test_i18n_templates_and_server_side():
 
 def test_translation_coverage_of_interface_strings():
     """Les textes d'interface (extraits du code) doivent presque tous avoir leur traduction : relancer tools/make_locale.py sinon."""
-    out = subprocess.run([sys.executable, "tools/extract_strings.py"], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    out = subprocess.run([sys.executable, "tools/extract_strings.py"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", check=True).stdout
     strings = [s for s in json.loads(out) if not re.search(r"\\|\(\?|\[\^|\[a-|\|[a-z]", s) and not (" " not in s and len(s) < 4) and not s.isupper()]
     have = json.loads((ROOT / "mailia" / "locales" / "en.json").read_text(encoding="utf-8"))
     missing = [s for s in strings if s not in have]

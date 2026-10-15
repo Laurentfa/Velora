@@ -1,4 +1,5 @@
 """Base abîmée : réparation automatique au démarrage (copie la plus récente valide, sinon base vide), sans jamais supprimer le fichier abîmé."""
+from pathlib import Path
 import sqlite3
 
 import pytest
@@ -35,7 +36,7 @@ def test_recover_restores_latest_valid_backup_and_keeps_the_damaged_file(isolate
     (isolated_db / "backups" / "mail-29990101-000000.db").write_bytes(b"copie elle-meme abimee")  # la plus récente est inutilisable
     corrupt(db.DB_PATH)
     outcome = db.recover()
-    assert outcome == f"sauvegarde {old.rsplit('/', 1)[-1]}"  # on saute la copie abîmée et on prend la précédente
+    assert outcome == f"sauvegarde {Path(old).name}"  # on saute la copie abîmée et on prend la précédente
     db.init()
     assert db.kv_get("user_name") == "Marie Dupont"
     assert list(isolated_db.glob("mail.db.abimee-*"))  # le fichier abîmé est conservé

@@ -1,3 +1,4 @@
+from pathlib import Path
 import sqlite3
 import time
 
@@ -19,7 +20,7 @@ def test_backup_rotation_and_consistency():
     for _ in range(4):
         paths.append(db.backup_now(keep=2)); time.sleep(1.1)
     files = sorted(db.backups_dir().glob("mail-*.db"))
-    assert len(files) == 2 and files[-1].name == paths[-1].split("/")[-1]
+    assert len(files) == 2 and files[-1].name == Path(paths[-1]).name
     c = sqlite3.connect(files[-1]); assert c.execute("select v from kv where k='temoin'").fetchone()[0] == "valeur"
     assert not db.backup_due()
     db.kv_set("db_backup", "0"); db.kv_set("db_backup_at", ""); assert not db.backup_due()

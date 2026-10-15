@@ -1,3 +1,4 @@
+import os
 import subprocess
 
 import pytest
@@ -15,10 +16,11 @@ def test_open_to_print_writes_file_and_opens_it(monkeypatch, tmp_path):
     opened = []
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, *a, **k: opened.append(cmd))
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: None)
+    monkeypatch.setattr(os, "startfile", lambda f: opened.append(["startfile", f]), raising=False)  # Windows ouvre ainsi le fichier
     monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
     p = ui_common.open_to_print("../../évil/Facture 1.pdf", b"%PDF-1.4")
     assert p.name == "Facture 1.pdf" and p.read_bytes() == b"%PDF-1.4" and p.parent.parent == tmp_path
-    assert opened and opened[0][-1] == str(p) and opened[0][0] in ("open", "xdg-open")
+    assert opened and opened[0][-1] == str(p) and opened[0][0] in ("open", "xdg-open", "startfile")
     with pytest.raises(ValueError):
         ui_common.open_to_print("macro.docm", b"x")
 
