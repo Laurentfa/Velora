@@ -82,7 +82,9 @@ CREATE TABLE IF NOT EXISTS folders (
 """
 
 
-_shared: dict = {"conn": None, "id": None}  # connexion gardée ouverte, toujours sous _lock
+_shared: dict = {"conn": None, "id": None, "checked": 0.0}  # connexion gardée ouverte, toujours sous _lock
+_kv_cache: dict[str, tuple[float, str | None]] = {}  # lectures de réglages : l'affichage d'une liste en demande des centaines
+KV_TTL = 5.0  # secondes ; le cache est aussi vidé dès qu'une écriture a lieu
 
 
 def _file_id() -> tuple:
@@ -97,6 +99,7 @@ def _file_id() -> tuple:
 def close_shared() -> None:
     """Ferme la connexion gardée ouverte (avant de déplacer ou remplacer le fichier : Windows refuse sinon ; à l'arrêt pour nettoyer le journal)."""
     with _lock:
+        _kv_cache.clear()
         c, _shared["conn"], _shared["id"] = _shared["conn"], None, None
         if c is not None:
             try:
@@ -116,14 +119,22 @@ def conn():
     with _lock:
         perf.record("base : attente du verrou", time.perf_counter() - t)  # long = un autre traitement garde la base
         t = time.perf_counter()
-        if _shared["conn"] is None or _shared["id"] != _file_id():
+        now = time.monotonic()
+        # l'identité du fichier est revérifiée au plus toutes les 2 s : un appel système par requête coûte cher sous Windows (antivirus)
+        if _shared["conn"] is not None and (_shared["id"][0] != str(DB_PATH) or (now - _shared["checked"] > 2 and _shared["id"] != _file_id())):
             close_shared()
+        if _shared["conn"] is None:
             _shared["conn"] = vault.connect(DB_PATH, timeout=30, check_same_thread=False)  # chiffrée ou non, selon le fichier
             _shared["id"] = _file_id()
+            _kv_cache.clear()
+        _shared["checked"] = now
         c = _shared["conn"]
+        changes = getattr(c, "total_changes", 0)
         try:
             yield c
             c.commit()
+            if getattr(c, "total_changes", 0) != changes:
+                _kv_cache.clear()
         except BaseException:
             try:
                 c.rollback()
@@ -438,9 +449,14 @@ def set_folder_state(account: str, key: str, state: str | None) -> None:
 
 # ---------- divers ----------
 def kv_get(k: str) -> str | None:
+    hit = _kv_cache.get(k)
+    if hit and time.monotonic() - hit[0] < KV_TTL:
+        return hit[1]
     with conn() as c:
         r = c.execute("SELECT v FROM kv WHERE k=?", (k,)).fetchone()
-        return r["v"] if r else None
+        v = r["v"] if r else None
+        _kv_cache[k] = (time.monotonic(), v)  # sous le verrou : une écriture concurrente ne peut pas glisser une valeur périmée
+        return v
 
 
 def kv_set(k: str, v: str) -> None:

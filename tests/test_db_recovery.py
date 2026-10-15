@@ -90,3 +90,23 @@ def test_threads_share_the_connection_safely(isolated_db):
     [t.start() for t in ts]
     [t.join() for t in ts]
     assert not errors and db.kv_get("k3") == "49"
+
+
+def test_settings_are_cached_but_never_stale_after_a_write(isolated_db):
+    db.kv_set("a", "1")
+    assert db.kv_get("a") == "1"
+    with db.conn() as c:  # écriture directe, sans passer par kv_set
+        c.execute("UPDATE kv SET v='2' WHERE k='a'")
+    assert db.kv_get("a") == "2"
+    with db.conn() as c:
+        c.execute("DELETE FROM kv WHERE k='a'")
+    assert db.kv_get("a") is None
+    calls = []
+    real = db.conn
+    db.kv_get("b")
+    db.conn = lambda: calls.append(1) or real()  # une 2e lecture identique ne touche pas la base
+    try:
+        db.kv_get("b")
+    finally:
+        db.conn = real
+    assert not calls
