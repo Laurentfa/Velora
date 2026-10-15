@@ -1,9 +1,10 @@
 import json
 import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 
-from . import vault
+from . import perf, vault
 from .config import DB_PATH
 
 _lock = threading.RLock()  # réentrant : un appel imbriqué ne doit jamais bloquer toute l'appli
@@ -82,13 +83,17 @@ CREATE TABLE IF NOT EXISTS folders (
 
 @contextmanager
 def conn():
+    t = time.perf_counter()
     with _lock:
+        perf.record("base : attente du verrou", time.perf_counter() - t)  # long = un autre traitement garde la base
+        t = time.perf_counter()
         c = vault.connect(DB_PATH, timeout=30)  # chiffrée ou non, selon le fichier
         try:
             yield c
             c.commit()
         finally:
             c.close()
+            perf.record("base : une utilisation (ouverture à fermeture)", time.perf_counter() - t)
 
 
 def exclusive(fn):

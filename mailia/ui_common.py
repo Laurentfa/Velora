@@ -164,6 +164,19 @@ def reveal(path: Path) -> None:
         pass
 
 
+def open_folder(path: Path) -> None:
+    """Ouvre un dossier dans le Finder / l'Explorateur."""
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        elif sys.platform.startswith("win"):
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+    except Exception:
+        pass
+
+
 PRINTABLE = {"pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "heic", "heif", "txt", "csv", "tsv", "log", "md", "json", "xml",
              "docx", "xlsx", "pptx"}  # jamais de formats à macros (docm…), de scripts, de courriers (eml) ni d'archives
 PRINT_DIR_PREFIX = "mailia-impression-"

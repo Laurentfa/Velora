@@ -24,6 +24,7 @@ if "--mcp-stdio" in sys.argv:  # pont pour les assistants qui lancent un program
     _bridge(sys.argv)
     sys.exit(0)
 
+from mailia import perf  # en premier : le chronomètre de démarrage part d'ici
 from mailia import config as _config  # léger : sert à ranger le stockage de session de l'interface dans le dossier de données
 os.environ.setdefault("NICEGUI_STORAGE_PATH", str(_config.DATA_DIR / ".nicegui"))
 
@@ -48,6 +49,9 @@ from mailia.ui_search import SearchMixin
 from mailia.ui_settings import open_settings
 from mailia.ui_tasks import TasksMixin
 from mailia.ui_update import auto_check
+
+perf.mark("modules chargés")
+perf.install()
 
 
 _IS_CHILD = multiprocessing.current_process().name != "MainProcess" or any(
@@ -1546,6 +1550,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
 
 
 async def index_page() -> None:
+    t_page = time.perf_counter()
     ui.colors(primary="#0a66e8", secondary="#4a9bff", accent="#0a66e8")
     ui.add_head_html(SWIPE_JS)
     if (script := i18n.client_script()):
@@ -1589,6 +1594,9 @@ async def index_page() -> None:
         DB_NOTICE = ""
     await box.reload(force=True)
     await box.restore_open()
+    perf.record("page : construction de l'interface", time.perf_counter() - t_page)
+    if not any(n == "interface affichée" for n, _ in perf.MARKS):
+        perf.mark("interface affichée")
     if lock_applies() and vault.lock_enabled(db) and vault.idle_minutes(db):
         ui.on("idlelock", lambda: lock_screen_now())
         ui.run_javascript("""(() => { const lim = %d * 60000; let t = Date.now();
@@ -1768,6 +1776,8 @@ async def _start_api() -> None:
 
 
 if not DB_ERROR:
+    app.on_startup(lambda: perf.mark("serveur de l'interface démarré"))
+    app.on_startup(lambda: background_tasks.create(perf.lag_monitor()))
     app.on_startup(lambda: background_tasks.create(sync_loop()))
     app.on_startup(lambda: background_tasks.create(outbox_loop()))
     app.on_startup(lambda: background_tasks.create(_start_api()))

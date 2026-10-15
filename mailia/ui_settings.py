@@ -7,11 +7,11 @@ from pathlib import Path
 
 from nicegui import run, ui
 
-from mailia import ai, api_ui, gcal, onemin, outgoing, compose, config, db, htmlmail, i18n, logs, notify, queries, settings_ui, sync, wizard
+from mailia import ai, api_ui, gcal, onemin, outgoing, compose, config, db, htmlmail, i18n, logs, notify, perf, queries, settings_ui, sync, wizard
 from mailia.textutil import html_to_text
 
 from mailia.ui_account import delete_account_dialog, friendly_error, open_account
-from mailia.ui_common import CAT, SERVER_MODE, default_account, make_editor, reveal
+from mailia.ui_common import CAT, SERVER_MODE, default_account, make_editor, open_folder, reveal
 from mailia.ui_lock import lock_screen_now
 from mailia.ui_update import panel as update_panel
 
@@ -554,6 +554,33 @@ def _tab_use(host) -> None:
         ui.button("Copier le diagnostic", icon="bug_report", on_click=copy_diag).props("outline no-caps dense").tooltip(
             "Version, système, réglages généraux et dernières lignes du journal, sans aucun contenu de mail")
         ui.button("Ouvrir le dossier du journal", icon="folder_open", on_click=lambda: reveal(logs.log_dir() / "mailia.log")).props("outline no-caps dense")
+        ui.button("Ouvrir le dossier des données", icon="folder_special", on_click=lambda: open_folder(config.DATA_DIR)).props("outline no-caps dense").mark(
+            "open-data").tooltip(str(config.DATA_DIR))
+
+    async def measure() -> None:
+        ui.notify("Mesure en cours (quelques secondes)…")
+        bench = await run.io_bound(perf.benchmark)
+        try:
+            browser = await ui.run_javascript("navigator.userAgent", timeout=5)
+        except Exception:
+            browser = ""
+        text = logs.scrub(perf.report(bench, browser))
+        try:
+            (logs.log_dir() / "performance.txt").write_text(text, encoding="utf-8")
+        except OSError:
+            pass
+        with host, ui.dialog() as pd, ui.card().style("width:min(820px,96vw)"):
+            ui.label("Performances").classes("text-h6")
+            ui.label("Rapport sans aucun contenu de mail. Il est aussi enregistré dans le dossier du journal (performance.txt).").classes("text-caption text-grey")
+            ui.html("<pre style='margin:0;font-size:12px;white-space:pre-wrap;max-height:56vh;overflow:auto'>" + html.escape(text) + "</pre>")
+            with ui.row().classes("justify-end w-full gap-2"):
+                ui.button("Copier", icon="content_copy", on_click=lambda: (ui.clipboard.write(text), ui.notify("Rapport copié.", type="positive"))).props("outline no-caps")
+                ui.button("Fermer", on_click=pd.close).props("flat no-caps")
+        pd.open()
+
+    with ui.row().classes("items-center gap-3"):
+        ui.button("Mesurer les performances", icon="speed", on_click=measure).props("outline no-caps dense").mark("perf-measure").tooltip(
+            "Chronomètre quelques opérations de cet ordinateur et affiche où le temps est perdu (démarrage, base de données, disque, antivirus…)")
     ui.label("Les copies sont dans le dossier « backups » des données. Pour restaurer : fermez l'appli et remplacez le fichier mail.db par une copie.").classes("text-caption text-grey")
     if SERVER_MODE:
         ui.label(f"Jeton d'accès mobile : {config.ensure('APP_TOKEN')}").classes("text-caption")
