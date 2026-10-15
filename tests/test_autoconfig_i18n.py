@@ -38,3 +38,15 @@ def test_translation_coverage_of_interface_strings():
     have = json.loads((ROOT / "mailia" / "locales" / "en.json").read_text(encoding="utf-8"))
     missing = [s for s in strings if s not in have]
     assert len(missing) / max(1, len(strings)) < 0.03, f"{len(missing)} textes sans traduction, par exemple : {missing[:8]}"
+
+
+def test_exchange_announced_by_srv_record(monkeypatch):
+    """Un domaine dont Exchange est hébergé ailleurs l'annonce par un enregistrement SRV : il doit être reconnu, avec le bon serveur."""
+    monkeypatch.setattr(autoconfig, "_get", lambda url: None)
+    monkeypatch.setattr(autoconfig, "mx_hosts", lambda d: ["mx.hebergeur.example"])
+    monkeypatch.setattr(autoconfig, "has_autodiscover", lambda d: False)
+    monkeypatch.setattr(autoconfig, "autodiscover_srv", lambda d: "mail.hebergeur.example")
+    r = autoconfig.detect("marie@entreprise-exemple.fr")
+    assert r["kind"] == "ews" and r["host"] == "mail.hebergeur.example" and r["found"]
+    monkeypatch.setattr(autoconfig, "autodiscover_srv", lambda d: "")
+    assert autoconfig.detect("marie@entreprise-exemple.fr")["kind"] == "imap"  # sans annonce : réglages IMAP supposés, comme avant

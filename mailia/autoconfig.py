@@ -116,6 +116,16 @@ def has_autodiscover(domain: str) -> bool:
         return False
 
 
+def autodiscover_srv(domain: str) -> str:
+    """Serveur Exchange annoncé par le domaine (enregistrement SRV « _autodiscover._tcp »), comme le font les entreprises dont Exchange n'est pas hébergé sous leur nom."""
+    try:
+        import dns.resolver
+        answers = sorted(dns.resolver.resolve("_autodiscover._tcp." + domain, "SRV", lifetime=3), key=lambda r: (r.priority, -r.weight))
+        return str(answers[0].target).rstrip(".").lower()
+    except Exception:
+        return ""
+
+
 def detect(email: str) -> dict:
     """Réglages probables pour cette adresse. {found, provider, name, kind, host, port, tls, smtp_host, smtp_port, oauth, help, source}"""
     m = re.fullmatch(r"[^@\s]+@([^@\s]+\.[^@\s]+)", (email or "").strip().lower())
@@ -135,8 +145,9 @@ def detect(email: str) -> dict:
     for needle, prov in MX_HINTS:
         if any(needle in h for h in mx):
             return _result(prov, source="serveur de messagerie du domaine")
-    if has_autodiscover(domain):
-        return _result(None, found=True, kind="ews", name="Exchange", host="", source="Exchange (autodiscover)",
+    srv = autodiscover_srv(domain)
+    if srv or has_autodiscover(domain):
+        return _result(None, found=True, kind="ews", name="Exchange", host=srv, source="Exchange (autodiscover)",
                        help="Un serveur Exchange semble répondre pour ce domaine. L'identifiant est souvent « domaine\\utilisateur » ou l'adresse e-mail.")
     if mx:  # on a au moins le serveur de messagerie : le plus courant est imap.<domaine>
         return _result(None, found=False, host=f"imap.{domain}", smtp_host=f"smtp.{domain}", source="supposé", name=domain,
