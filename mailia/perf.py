@@ -15,7 +15,23 @@ from contextlib import contextmanager
 from pathlib import Path
 
 log = logging.getLogger("perf")
-T0 = time.time()
+
+
+def _origin() -> tuple[float, bool]:
+    """Instant de lancement du programme, partagé avec la fenêtre native : elle tourne dans un second processus qui hérite de cette variable
+    (le numéro du processus évite de reprendre l'heure d'un lancement précédent, par ex. après une mise à jour)."""
+    try:
+        pid, t0 = os.environ.get("VELORA_T0", "").split(":")
+        if int(pid) in (os.getpid(), os.getppid()):
+            return float(t0), int(pid) == os.getppid()
+    except ValueError:
+        pass
+    t0 = time.time()
+    os.environ["VELORA_T0"] = f"{os.getpid()}:{t0}"
+    return t0, False
+
+
+T0, IS_WINDOW = _origin()  # IS_WINDOW : ce processus est la fenêtre native, pas le programme principal
 SLOW = 0.5  # secondes : au-delà, l'opération est notée dans le journal
 STATS: dict[str, list[float]] = {}  # nom -> [nombre, total, maximum]
 MARKS: list[tuple[str, float]] = []
@@ -41,10 +57,36 @@ def span(name: str):
         record(name, time.perf_counter() - t)
 
 
-def mark(name: str) -> None:
-    """Jalon depuis le lancement du programme (ex : « fenêtre prête »)."""
-    MARKS.append((name, time.time() - T0))
+def mark(name: str, at: float | None = None) -> None:
+    """Jalon depuis le lancement du programme (ex : « fenêtre prête »). `at` : instant (heure Unix) si l'événement a eu lieu avant."""
+    name = ("fenêtre native : " if IS_WINDOW else "") + name
+    MARKS.append((name, (at if at is not None else time.time()) - T0))
     log.info("jalon : %s à %.1f s après le lancement", name, MARKS[-1][1])
+
+
+def save_window_marks() -> None:
+    """Appelé par la fenêtre native (autre processus) : ses jalons sont rangés dans la base pour figurer dans le rapport du programme principal."""
+    import json
+    from . import db
+    try:
+        db.kv_set("perf:window", json.dumps({"t0": T0, "marks": MARKS}))
+    except Exception:
+        log.warning("jalons de la fenêtre non enregistrés", exc_info=True)
+
+
+def browser_marks(info: dict) -> None:
+    """Jalons mesurés par le navigateur intégré (envoyés une fois la page dessinée) : début du chargement, document chargé, premier affichage."""
+    if any(n.startswith("navigateur") for n, _ in MARKS):
+        return
+    try:
+        origin = float(info["origin"]) / 1000
+        for label, ms in (("navigateur : page demandée", 0), ("navigateur : document chargé", info.get("dcl")),
+                          ("navigateur : ressources chargées", info.get("load")), ("navigateur : interface dessinée à l'écran", info.get("now"))):
+            if ms is not None and (ms or label.endswith("demandée")):
+                MARKS.append((label, origin + float(ms) / 1000 - T0))
+    except (KeyError, TypeError, ValueError):
+        return
+    log.info("jalons du navigateur : " + " · ".join(f"{n.split(' : ')[1]} {t:.1f} s" for n, t in MARKS if n.startswith("navigateur")))
 
 
 def wrap(module, attr: str, label: str | None = None) -> None:
@@ -157,8 +199,17 @@ def report(bench: dict[str, str] | None = None, browser: str = "") -> str:
     if browser:
         lines.append(f"Moteur d'affichage de la fenêtre : {browser}")
     lines.append(f"Programme lancé depuis {time.time() - T0:.0f} s")
-    if MARKS:
-        lines += ["", "Jalons depuis le lancement :"] + [f"  {t:6.1f} s  {n}" for n, t in MARKS]
+    marks = list(MARKS)
+    try:
+        import json
+        from . import db
+        win = json.loads(db.kv_get("perf:window") or "{}")
+        if win.get("t0") == T0:  # jalons de la fenêtre native, du lancement en cours seulement
+            marks += [(n, t) for n, t in win["marks"] if n.startswith("fenêtre native")]
+    except Exception:
+        pass
+    if marks:
+        lines += ["", "Jalons depuis le lancement :"] + [f"  {t:6.1f} s  {n}" for n, t in sorted(marks, key=lambda m: m[1])]
     with _lock:
         rows = sorted(STATS.items(), key=lambda kv: -kv[1][1])
     if rows:

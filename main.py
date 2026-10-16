@@ -1625,6 +1625,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
 
 async def index_page() -> None:
     t_page = time.perf_counter()
+    if not any(n == "page demandée par la fenêtre" for n, _ in perf.MARKS):
+        perf.mark("page demandée par la fenêtre")
     ui.colors(primary="#0a66e8", secondary="#4a9bff", accent="#0a66e8")
     ui.add_head_html(SWIPE_JS)
     if (script := i18n.client_script()):
@@ -1677,6 +1679,9 @@ async def index_page() -> None:
           for (const e of ['mousemove', 'keydown', 'mousedown', 'touchstart', 'wheel']) document.addEventListener(e, () => { t = Date.now(); }, true);
           if (window.__idleT) clearInterval(window.__idleT);
           window.__idleT = setInterval(() => { if (Date.now() - t > lim) { clearInterval(window.__idleT); emitEvent('idlelock', {}); } }, 15000); })()""" % vault.idle_minutes(db))
+    ui.on("uiready", lambda e: perf.browser_marks(e.args))
+    ui.run_javascript("""requestAnimationFrame(() => requestAnimationFrame(() => { const n = performance.getEntriesByType('navigation')[0] || {};
+      emitEvent('uiready', {origin: performance.timeOrigin, dcl: n.domContentLoadedEventEnd || 0, load: n.loadEventEnd || 0, now: performance.now()}); }))""")
     ui.timer(3, box.tick)
     ui.timer(5, box.autosave)
     ui.timer(2, box.watch_outbox)
@@ -1804,6 +1809,8 @@ def _tidy_mac_menus(cocoa) -> None:
 def _native_context_menu() -> None:
     """Fenêtre native (macOS) : la bibliothèque de fenêtre supprime tout menu clic droit hors mode débogage.
     On rétablit le menu standard (couper, copier, coller, orthographe…) sans les entrées qui feraient quitter l'appli."""
+    perf.mark("moteur d'affichage démarré")
+    perf.save_window_marks()
     if sys.platform != "darwin":
         return
     try:
@@ -1842,6 +1849,7 @@ try:
                      "de mails se resynchroniseront." if outcome != "vide" else "Aucune copie valable : Velora repart d'une base vide, et vos mails se relisent depuis vos serveurs.")
                      + " L'ancien fichier est conservé à côté (mail.db.abimee-…).")
     compose.seed_templates()
+    perf.mark("base prête")
 except RuntimeError as e:  # base chiffrée dont la clé est introuvable : on affiche l'écran de récupération au lieu de planter
     DB_ERROR = str(e)
     logging.getLogger("mailia").error("base inaccessible : %s", e)
@@ -1884,6 +1892,7 @@ if __name__ in {"__main__", "__mp_main__"}:
 
     app.on_connect(_client_connected)
     app.on_disconnect(_client_disconnected)
+    perf.mark("ui.run lancé")
     ui.run(
         # Délai laissé à la fenêtre pour se reconnecter avant que le serveur ne l'oublie (et que la page se recharge, en perdant ce qui était ouvert).
         # Le réglage par défaut (3 s) est trop court : une veille, une fenêtre masquée ou sur un autre bureau suffit à le dépasser.

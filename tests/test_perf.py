@@ -63,3 +63,37 @@ async def test_settings_buttons(user: User):
     await user.open("/usage")
     await user.should_see(marker="open-data")
     await user.should_see(marker="perf-measure")
+
+
+def test_origin_is_shared_with_the_window_process_but_not_across_launches(monkeypatch):
+    import os
+    monkeypatch.setenv("VELORA_T0", f"{os.getppid()}:1234.5")  # posé par le programme principal, dont ce processus est l'enfant
+    assert perf._origin() == (1234.5, True)
+    monkeypatch.setenv("VELORA_T0", f"{os.getpid()}:99.0")  # même processus
+    assert perf._origin() == (99.0, False)
+    monkeypatch.setenv("VELORA_T0", "424242:5.0")  # variable laissée par un lancement précédent (ex : l'ancienne version avant une mise à jour)
+    t0, child = perf._origin()
+    assert t0 > 1e9 and not child and os.environ["VELORA_T0"].startswith(f"{os.getpid()}:")
+
+
+def test_browser_marks_are_converted_to_seconds_since_launch(monkeypatch):
+    monkeypatch.setattr(perf, "T0", 1000.0)
+    monkeypatch.setattr(perf, "MARKS", [])
+    perf.browser_marks({"origin": 1_005_000, "dcl": 400, "load": 900, "now": 2000})  # le navigateur compte en millisecondes
+    got = dict(perf.MARKS)
+    assert round(got["navigateur : page demandée"], 1) == 5.0 and round(got["navigateur : document chargé"], 1) == 5.4
+    assert round(got["navigateur : interface dessinée à l'écran"], 1) == 7.0
+    perf.browser_marks({"origin": 1_999_000, "now": 1})
+    assert len(perf.MARKS) == 4  # une seule série, même si la page est rechargée
+
+
+def test_window_marks_appear_in_the_report_of_the_same_launch_only(monkeypatch):
+    import json
+    from mailia import db
+    monkeypatch.setattr(perf, "MARKS", [("modules chargés", 2.0)])
+    db.kv_set("perf:window", json.dumps({"t0": perf.T0, "marks": [["fenêtre native : moteur d'affichage démarré", 4.5], ["autre", 1.0]]}))
+    text = perf.report()
+    assert "fenêtre native : moteur d'affichage démarré" in text and "autre" not in text
+    assert text.index("modules chargés") < text.index("moteur d'affichage")  # triés par heure
+    db.kv_set("perf:window", json.dumps({"t0": perf.T0 + 1, "marks": [["fenêtre native : ancien lancement", 9.0]]}))
+    assert "ancien lancement" not in perf.report()
