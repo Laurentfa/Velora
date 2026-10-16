@@ -4,7 +4,7 @@ from nicegui import run, ui
 
 from mailia import config, db, sync, ui_zoom
 
-FILTERS = {"unread": "Non lus", "pinned": "Épinglés", "att": "Avec pièce jointe", "today": "Aujourd'hui", "week": "7 derniers jours",
+FILTERS = {"unread": "Non lus", "pinned": "Épinglés", "att": "Avec pièce jointe", "high": "Importance haute", "today": "Aujourd'hui", "week": "7 derniers jours",
            "reply": "Réponse attendue", "urgent": "Urgent"}
 AI_FILTERS = {"reply", "urgent"}  # ces deux filtres viennent de l'IA : absents quand elle n'est pas disponible
 DATE_FILTERS = {"today", "week"}

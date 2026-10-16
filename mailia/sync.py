@@ -123,6 +123,22 @@ def _apply(account: str, folder: str, delta) -> None:
                 log.exception("règles de tri")
 
 
+def _backfill_importance(key: str, folder: str) -> None:
+    """Une seule fois par dossier : repère les mails d'importance haute ou basse reçus avant que Velora lise cette marque (ensuite, elle est lue à l'arrivée)."""
+    flag = f"imp_backfill:{key}|{folder}"
+    if db.kv_get(flag):
+        return
+    try:
+        marks = provider(key).importance_marks(folder, config.sync_limit())
+    except Exception as e:
+        log_failure(f"importance des mails ({key}/{folder})", e)
+        return  # on réessaiera au prochain passage
+    for level, uids in marks.items():
+        if uids:
+            db.set_importance(key, folder, uids, level)
+    db.kv_set(flag, "1")
+
+
 def _backfill_threads(key: str, folder: str) -> int:
     """Rattache aux conversations les messages synchronisés avant leur introduction (quelques centaines à la fois)."""
     uids = db.uids_without_conv(key, folder)
@@ -162,6 +178,7 @@ def sync_account(key: str) -> int:
             _apply(key, f["key"], delta)
             changed += len(delta.upserts) + len(delta.deleted) + len(delta.read_changes) + len(delta.flag_changes)
             changed += _backfill_threads(key, f["key"])
+            _backfill_importance(key, f["key"])
     db.kv_set("last_sync", datetime.now(timezone.utc).isoformat())
     return changed
 
@@ -218,7 +235,8 @@ def mirror_drafts(max_items: int = 5) -> int:
         if not row:
             continue
         try:
-            ref = provider(d["account"]).save_draft({"to": row["to_addrs"], "cc": row["cc"], "bcc": row.get("bcc") or "", "subject": row["subject"], "html": row["html"]},
+            ref = provider(d["account"]).save_draft({"to": row["to_addrs"], "cc": row["cc"], "bcc": row.get("bcc") or "", "subject": row["subject"], "html": row["html"],
+                                                     "importance": 1 if row.get("importance") is None else int(row["importance"])},
                                                     files, d.get("server_ref") or None, folder)
         except Exception as e:
             log_failure(f"copie d'un brouillon ({d['account']})", e)
@@ -267,7 +285,7 @@ def load_server_draft(m: dict) -> str:
     data = provider(m["account"]).load_draft(m["uid"], m["folder"])
     did = uuid.uuid4().hex
     db.draft_save({"id": did, "account": m["account"], "is_new": True, "reply_to": None, "to": data["to"], "cc": data["cc"], "bcc": data["bcc"],
-                   "subject": data["subject"], "html": data["html"]}, data["files"])
+                   "subject": data["subject"], "html": data["html"], "importance": data.get("importance", 1)}, data["files"])
     row, _ = db.draft_load(did)
     db.draft_set_server(did, m["uid"], row["updated"], m["folder"])  # la copie du serveur est déjà à jour : pas de recopie tant qu'on ne modifie rien
     return did
@@ -580,8 +598,8 @@ def thread_ref(account: str, reply_to: str | None) -> tuple | None:
 
 
 def send_mail(account: str, to: str, subject: str, body: str, cc: str = "", attachments: list | None = None,
-              html: str | None = None, bcc: str = "", reply_to: str | None = None) -> None:
-    """Envoie un message (réponse ou nouveau) avec contrôles élémentaires avant d'appeler le serveur."""
+              html: str | None = None, bcc: str = "", reply_to: str | None = None, importance: int = 1) -> None:
+    """Envoie un message (réponse ou nouveau) avec contrôles élémentaires avant d'appeler le serveur. `importance` : 0 basse, 1 normale, 2 haute."""
     addrs = [a.strip() for a in (to + "," + cc + "," + bcc).replace(";", ",").split(",") if a.strip()]
     bad = [a for a in addrs if not re.fullmatch(r"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+", a)]
     if not [a for a in to.replace(";", ",").split(",") if a.strip()]:
@@ -599,12 +617,13 @@ def send_mail(account: str, to: str, subject: str, body: str, cc: str = "", atta
     if config.env("MAILIA_DRY_RUN") == "1":  # essais : rien ne part, on garde seulement une trace
         log.warning("ENVOI SIMULÉ (MAILIA_DRY_RUN) : %s -> %s « %s »", account, to, subject)
         sent = json.loads(db.kv_get("dryrun_sent") or "[]")
-        sent.append({"account": account, "to": to, "cc": cc, "bcc": bcc, "subject": subject, "files": [a[0] for a in attachments or []]})
+        sent.append({"account": account, "to": to, "cc": cc, "bcc": bcc, "subject": subject, "files": [a[0] for a in attachments or []], "importance": importance})
         db.kv_set("dryrun_sent", json.dumps(sent[-50:]))
         return
     # l'objet part tel quel, espaces finaux compris : Exchange range le message dans la conversation de l'original d'après l'objet exact
     # (« Document mutuelle␠ » et « TR: Document mutuelle » seraient deux conversations différentes)
-    provider(account).send(to, subject if subject.strip() else "(sans objet)", body, cc, attachments, html, inline, bcc, ref=thread_ref(account, reply_to))
+    provider(account).send(to, subject if subject.strip() else "(sans objet)", body, cc, attachments, html, inline, bcc, ref=thread_ref(account, reply_to),
+                           importance=importance)
 
 
 def digest_upkeep() -> None:
@@ -693,7 +712,7 @@ def send_due() -> int:
             continue
         try:
             send_mail(row["account"], row["to_addrs"], row["subject"], row["body"], row["cc"], db.outbox_files(row["id"]), row["html"], row["bcc"] or "",
-                      reply_to=row["reply_to"])
+                      reply_to=row["reply_to"], importance=1 if row.get("importance") is None else int(row["importance"]))
         except Exception as e:
             log.warning("envoi %s : %s", row["id"], e)
             db.outbox_mark(row["id"], "error", str(e)[:300])

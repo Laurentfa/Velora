@@ -84,7 +84,7 @@ class OutboxMixin:
         else:
             at = opts[choice["when"]]
         oid = outgoing.queue(account, d["to"], d["cc"], d.get("bcc", ""), d["subject"], d["html"], d["files"], at, draft_id=d.get("id"),
-                             reply_to=d.get("reply_to"), followup_days=choice["follow"])
+                             reply_to=d.get("reply_to"), followup_days=choice["follow"], importance=d.get("importance", 1))
         self.close_compose()
         self._watch[oid] = d["subject"] or "(sans objet)"
         with self.host:  # le bouton cliqué a disparu avec l'éditeur : on repart d'un élément stable

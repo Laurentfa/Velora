@@ -20,6 +20,7 @@ class Msg:
     flagged: bool = False  # drapeau posé sur le serveur : c'est ce qui épingle une conversation
     verb: int = 0  # 1 = on a répondu à ce message, 2 = on l'a transféré (marque posée par nous ou par Outlook)
     meeting: str = ""  # JSON d'une invitation / réponse / annulation de réunion (Exchange), sinon ""
+    importance: int = 1  # importance fixée par l'expéditeur : 0 basse, 1 normale, 2 haute
 
 
 @dataclass
@@ -57,4 +58,5 @@ class Provider(Protocol):
     def save_draft(self, d: dict, files: list, ref: str | None, folder_key: str) -> str: ...  # copie du brouillon dans le dossier Brouillons ; remplace `ref`
     def load_draft(self, ref: str, folder_key: str) -> dict: ...  # {"to","cc","bcc","subject","html","files":[(nom, octets, type)]}
     def delete_draft(self, ref: str, folder_key: str) -> None: ...
+    def importance_marks(self, key: str, limit: int) -> dict[int, list[str]]: ...  # {2: [uids à importance haute], 0: [uids à importance basse]}
     def wait_for_changes(self, keys: list[str], timeout: int) -> bool: ...

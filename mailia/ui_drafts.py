@@ -72,6 +72,7 @@ class DraftsMixin:
             with ui.row().classes("gap-1 q-mt-xs"):
                 ui.button("Cci", icon="visibility_off", on_click=lambda: bcc_field.set_visibility(not bcc_field.visible)).props(
                     "flat dense no-caps size=sm").tooltip("Ajouter des destinataires en copie cachée (invisibles pour les autres)")
+                self.importance_tool()
                 ui.button("Image", icon="image", on_click=self.insert_image).props("flat dense no-caps size=sm").tooltip("Insérer une image dans le message")
                 ui.button("Ma signature", icon="draw", on_click=self.insert_signature).props("flat dense no-caps size=sm").tooltip("Insérer ma signature à l'endroit du curseur")
                 with ui.button("Modèles", icon="description").props("flat dense no-caps size=sm"):
@@ -118,6 +119,22 @@ class DraftsMixin:
                 hint.set_text(f"→ {self.RCPT_NAMES[target]}")
             except Exception:
                 pass
+
+    def set_importance(self, level: int) -> None:
+        self.draft["importance"] = level
+        self.importance_tool.refresh()
+
+    @ui.refreshable_method
+    def importance_tool(self) -> None:
+        """Importance du message (comme Outlook et Apple Mail) : normale, haute (« ! » chez le destinataire) ou basse. Une réponse part toujours en normale d'abord."""
+        level = self.draft.get("importance", 1)
+        names = {2: "Importance haute", 1: "Importance", 0: "Importance basse"}
+        props = "flat dense no-caps size=sm" + (" color=negative" if level == 2 else "")
+        with ui.button(names[level], icon={2: "priority_high", 1: "flag", 0: "arrow_downward"}[level]).props(props).tooltip(
+                "Marquer le message comme important ou peu important : le destinataire le voit dans sa liste").mark("importance-tool"):
+            with ui.menu():
+                for lvl, label in ((1, "Normale"), (2, "Haute (!)"), (0, "Basse")):
+                    ui.menu_item(("✓  " if level == lvl else "     ") + label, on_click=lambda _, v=lvl: self.set_importance(v)).mark(f"importance-{lvl}")
 
     @ui.refreshable_method
     def shortcuts_bar(self) -> None:
@@ -198,7 +215,7 @@ class DraftsMixin:
         if not accounts:
             return ui.notify("Aucun compte configuré (⚙ Paramètres).", type="warning")
         self.draft.update(account=self.account if self.account in accounts else accounts[0], to="", cc="", bcc="", subject="",
-                          body="", ins="", tone="neutre", files=[], quote=False, html=compose.initial_html(account=self.account if self.account in accounts else accounts[0]), gen=False)
+                          body="", ins="", tone="neutre", files=[], quote=False, importance=1, html=compose.initial_html(account=self.account if self.account in accounts else accounts[0]), gen=False)
         self.new, self.cur, self.compose = True, None, True
         self.draft.update(id=uuid.uuid4().hex, reply_to=None)
         self._saved_sig = self._files_sig = None
@@ -237,7 +254,7 @@ class DraftsMixin:
         acct = m["account"] if m["account"] in sync.ACCOUNTS and sync.ACCOUNTS[m["account"]].password else self.draft["account"]
         subject = m["subject"] or ""
         # « TR: » sans espace avant les deux-points : Exchange ne reconnaît pas « TR : » et ouvrirait une autre conversation
-        self.draft.update(account=acct, subject=subject if re.match(r"(?i)\s*(tr|fwd?)\s*:", subject) else "TR: " + subject, files=files,
+        self.draft.update(account=acct, subject=subject if re.match(r"(?i)\s*(tr|fwd?)\s*:", subject) else "TR: " + subject, files=files, importance=1,
                           html=compose.initial_html(reply_to=m, account=acct, images=True), reply_to="fwd:" + m["id"])  # « fwd: » : à l'envoi, l'original est marqué « transféré »
         self.files_view.refresh()
         self.reader.refresh()
@@ -268,7 +285,7 @@ class DraftsMixin:
 
     def _draft_sigs(self) -> tuple:
         d = self.draft
-        return ((d["account"] if self.new else (self.cur or {}).get("account", "")), d["to"], d["cc"], d.get("bcc", ""), d["subject"], d["html"]), \
+        return ((d["account"] if self.new else (self.cur or {}).get("account", "")), d["to"], d["cc"], d.get("bcc", ""), d["subject"], d["html"], d.get("importance", 1)), \
             tuple((f[0], len(f[1])) for f in d["files"])
 
     async def _save_draft_now(self) -> bool:
@@ -280,7 +297,7 @@ class DraftsMixin:
             return False
         account = d["account"] if self.new else (self.cur or {}).get("account", "")
         row = {"id": d["id"], "account": account, "is_new": self.new, "reply_to": d.get("reply_to"),
-               "to": d["to"], "cc": d["cc"], "bcc": d.get("bcc", ""), "subject": d["subject"], "html": d["html"]}
+               "to": d["to"], "cc": d["cc"], "bcc": d.get("bcc", ""), "subject": d["subject"], "html": d["html"], "importance": d.get("importance", 1)}
         await run.io_bound(db.draft_save, row, list(d["files"]) if files_sig != self._files_sig else None)
         self._saved_sig, self._files_sig = sig, files_sig
         if self.save_label is not None:
@@ -338,7 +355,7 @@ class DraftsMixin:
         else:
             self.new_message()
         self.draft.update(id=did, to=row["to_addrs"] or "", cc=row["cc"] or "", bcc=row.get("bcc") or "", subject=row["subject"] or "", html=row["html"] or "",
-                          files=files, gen=False, reply_to=row["reply_to"])
+                          files=files, gen=False, reply_to=row["reply_to"], importance=1 if row.get("importance") is None else int(row["importance"]))
         if row["account"] in sync.ACCOUNTS and self.new:
             self.draft["account"] = row["account"]
         self._saved_sig = self._files_sig = None

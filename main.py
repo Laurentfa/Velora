@@ -145,7 +145,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self.tsum: dict[str, str] = {}
         self.new = False  # True : formulaire « nouveau message » affiché à la place d'un mail
         self.draft = {"account": "", "to": "", "cc": "", "bcc": "", "subject": "", "body": "", "ins": "", "tone": "neutre",
-                      "files": [], "quote": True, "html": "", "gen": False, "id": "", "reply_to": None}
+                      "files": [], "quote": True, "html": "", "gen": False, "id": "", "reply_to": None, "importance": 1}
         self.drafts: list[dict] = []
         self.outbox: list[dict] = []
         self.snoozed: list[dict] = []
@@ -494,6 +494,10 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                                 ui.icon("alarm", size="14px").style("color:var(--accent)").tooltip("Message reporté : c'est l'heure de le revoir")
                             if m.get("pinned"):
                                 ui.icon("push_pin", size="14px").style("color:#d92d3a").tooltip("Épinglé en haut")
+                            if m.get("importance") == 2:
+                                ui.icon("priority_high", size="16px").style("color:#d92d3a;font-weight:700").tooltip("Importance haute : l'expéditeur a marqué ce message important")
+                            elif m.get("importance") == 0:
+                                ui.icon("arrow_downward", size="14px").style("color:var(--muted)").tooltip("Importance basse")
                             if m.get("verb"):
                                 ui.icon("forward" if m["verb"] == 2 else "reply", size="14px").style("color:var(--muted)").tooltip(
                                     "Vous avez transféré ce message" if m["verb"] == 2 else "Vous avez répondu à ce message")
@@ -747,6 +751,11 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         with ui.column().classes("rhead gap-1"):
             ui.button("‹ Retour", on_click=self.back).props("flat dense no-caps").classes("lt-md self-start")
             ui.label(m["subject"]).classes("text-h6").style("line-height:1.3;font-weight:700")
+            if m.get("importance") in (0, 2):
+                with ui.row().classes("items-center gap-1 no-wrap"):
+                    ui.icon("priority_high" if m["importance"] == 2 else "arrow_downward", size="16px").style(f"color:{'#d92d3a' if m['importance'] == 2 else 'var(--muted)'}")
+                    ui.label("Importance haute" if m["importance"] == 2 else "Importance basse").classes("rmeta").style(
+                        "font-weight:600;" + ("color:#d92d3a" if m["importance"] == 2 else ""))
             with ui.row().classes("items-center gap-3 no-wrap"):
                 ui.avatar(initials(m["sender_name"] or m["sender"]), color="blue-1", text_color="blue-9", size="34px")
                 when = full_date(m["date"])
@@ -1250,7 +1259,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                     db.kv_get("pins_folded"), repr(settings_ui.send_alert()), config.ai_enabled(), tuple(label_of(a) for a in sync.ACCOUNTS))
             cur_key = self.cur.get("ckey") if self.cur else None
             sig = ("l", look, tuple((x["id"], x["is_read"], x["summary"], x.get("conv_n"), x.get("conv_unread"), x.get("pinned"), x.get("woke"),
-                                     cur_key is not None and cur_key == x.get("ckey")) for x in self.rows))
+                                     cur_key is not None and cur_key == x.get("ckey"), x.get("importance")) for x in self.rows))
         # la colonne de gauche n'est redessinée que si ce qu'elle affiche a changé : sinon un clic sur ses icônes pouvait tomber
         # pile pendant un redessin (toutes les 12 s environ, à chaque synchro) et se perdre
         side_sig = (repr(sorted(self.counts.items(), key=lambda kv: kv[0])), vault.lock_enabled(db), self.view, self.account, self.folder, self.busy,
@@ -1370,7 +1379,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                 m["is_read"] = 1
                 background_tasks.create(self._mark_remote(dict(m)))
         c = self.cur
-        self.draft.update(files=[], quote=True, to=c["sender"], cc="", body="", ins="", html="", gen=False,
+        self.draft.update(files=[], quote=True, to=c["sender"], cc="", body="", ins="", html="", gen=False, importance=1,
                           subject=c["subject"] if c["subject"].lower().startswith("re:") else "RE: " + c["subject"])
         self.root.classes(add="reading")
         await self.reload(force=True)

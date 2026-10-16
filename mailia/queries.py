@@ -7,7 +7,7 @@ import time
 from . import ai, aipolicy, config, db, search
 
 TODO_SQL = "(needs_reply=1 OR category='action' OR priority=3) AND category NOT IN ('newsletter','notification')"
-LIST_COLS = "id,account,folder,ckey,subject,sender,sender_name,date,is_read,has_att,summary,category,priority,needs_reply,suggested,verb"
+LIST_COLS = "id,account,folder,ckey,subject,sender,sender_name,date,is_read,has_att,summary,category,priority,needs_reply,suggested,verb,importance"
 
 
 SORT_SQL = {"date": "date", "sender": "lower(COALESCE(NULLIF(sender_name,''), sender))", "subject": "lower(subject)"}
@@ -23,6 +23,8 @@ def _flag_conditions(flags, where: list, args: list) -> tuple[list, list]:
         args += pins
     if "att" in flags:
         where.append("has_att=1")
+    if "high" in flags:
+        where.append("importance=2")
     if "today" in flags:
         start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
         where.append("date>=?"); args.append(start.astimezone(timezone.utc).isoformat())

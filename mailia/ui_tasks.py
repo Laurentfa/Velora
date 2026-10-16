@@ -100,7 +100,7 @@ class TasksMixin:
         if not self.new:
             return
         subject = f["subject"] or ""
-        self.draft.update(account=f["account"] if f["account"] in sync.ACCOUNTS else self.draft["account"], to=f["to_addrs"],
+        self.draft.update(importance=1, account=f["account"] if f["account"] in sync.ACCOUNTS else self.draft["account"], to=f["to_addrs"],
                           subject=subject if subject.lower().startswith("relance") else "Relance : " + subject,
                           html=compose.from_text("Bonjour,\n\nJe me permets de revenir vers vous au sujet de mon message ci-dessous, resté sans réponse. "
                                                  "Pourriez-vous me tenir informé ?\n\nMerci d'avance.", account=self.draft["account"]))

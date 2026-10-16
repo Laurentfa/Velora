@@ -196,9 +196,13 @@ def init() -> None:
             have = {r["name"] for r in c.execute(f"PRAGMA table_info({tbl})")}
             if "bcc" not in have:
                 c.execute(f"ALTER TABLE {tbl} ADD COLUMN bcc TEXT DEFAULT ''")
+            if "importance" not in have:
+                c.execute(f"ALTER TABLE {tbl} ADD COLUMN importance INTEGER DEFAULT 1")
             for col in ("source", "api_key") + (("api_note", "server_ref", "server_at", "server_folder") if tbl == "drafts" else ()):  # origine : « api » quand un programme ou un assistant l'a créé ; copie sur le serveur
                 if col not in have:
                     c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} TEXT DEFAULT ''")
+        if "importance" not in cols:  # importance fixée par l'expéditeur (0 basse, 1 normale, 2 haute)
+            c.execute("ALTER TABLE messages ADD COLUMN importance INTEGER DEFAULT 1")
         if "verb" not in cols:
             c.execute("ALTER TABLE messages ADD COLUMN verb INTEGER DEFAULT 0")
             c.execute("UPDATE folders SET state=NULL")  # relecture complète une fois : récupère les marques « répondu / transféré » du serveur
@@ -307,8 +311,8 @@ def upsert(account: str, folder: str, m) -> bool:
     with conn() as c:
         att = json.dumps(m.attachments) if m.attachments is not None else None
         if c.execute("SELECT 1 FROM messages WHERE id=?", (mid,)).fetchone():
-            c.execute("UPDATE messages SET is_read=?, subject=?, flagged=?, verb=MAX(COALESCE(verb,0), ?) WHERE id=?",
-                      (int(m.is_read), m.subject, int(m.flagged), int(m.verb or 0), mid))
+            c.execute("UPDATE messages SET is_read=?, subject=?, flagged=?, verb=MAX(COALESCE(verb,0), ?), importance=? WHERE id=?",
+                      (int(m.is_read), m.subject, int(m.flagged), int(m.verb or 0), int(m.importance), mid))
             if m.meeting:
                 c.execute("UPDATE messages SET meeting=? WHERE id=?", (m.meeting, mid))
             if m.conv:
@@ -320,13 +324,24 @@ def upsert(account: str, folder: str, m) -> bool:
                           (m.cc, att, m.to, mid))
             return False
         c.execute(
-            "INSERT INTO messages(id,account,uid,folder,subject,sender,sender_name,to_addrs,cc_addrs,att_json,date,body,is_read,has_att,conv_id,ckey,body_html,flagged,meeting,verb)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO messages(id,account,uid,folder,subject,sender,sender_name,to_addrs,cc_addrs,att_json,date,body,is_read,has_att,conv_id,ckey,body_html,flagged,meeting,verb,importance)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (mid, account, m.uid, folder, m.subject, m.sender, m.sender_name, m.to, m.cc, att, m.date, m.body,
-             int(m.is_read), int(m.has_att), m.conv, f"{account}|{m.conv}" if m.conv else mid, m.html, int(m.flagged), m.meeting or None, int(m.verb or 0)))
+             int(m.is_read), int(m.has_att), m.conv, f"{account}|{m.conv}" if m.conv else mid, m.html, int(m.flagged), m.meeting or None, int(m.verb or 0), int(m.importance)))
         c.execute("INSERT INTO fts(id,subject,sender,body) VALUES(?,?,?,?)",
                   (mid, m.subject, f"{m.sender_name} {m.sender}", m.body))
         return True
+
+
+def set_importance(account: str, folder: str, uids: list[str], level: int) -> int:
+    """Pose l'importance (0 basse, 2 haute) sur des messages déjà copiés (rattrapage des mails reçus avant que Velora lise cette marque)."""
+    n = 0
+    with conn() as c:
+        for i in range(0, len(uids), 400):
+            part = uids[i:i + 400]
+            n += c.execute(f"UPDATE messages SET importance=? WHERE account=? AND folder=? AND uid IN ({','.join('?' * len(part))}) AND COALESCE(importance,1)<>?",
+                           (level, account, folder, *part, level)).rowcount
+    return n
 
 
 def known(account: str, folder: str) -> dict[str, tuple[int, str]]:
@@ -507,11 +522,12 @@ def draft_save(d: dict, files: list | None = None) -> None:
     """Enregistre (ou met à jour) un brouillon. `files` : None = pièces jointes inchangées, sinon liste (nom, octets, type)."""
     with conn() as c:
         c.execute(
-            "INSERT INTO drafts(id,account,is_new,reply_to,to_addrs,cc,bcc,subject,html,updated) VALUES(?,?,?,?,?,?,?,?,?,?) "
+            "INSERT INTO drafts(id,account,is_new,reply_to,to_addrs,cc,bcc,subject,html,updated,importance) VALUES(?,?,?,?,?,?,?,?,?,?,?) "
             "ON CONFLICT(id) DO UPDATE SET account=excluded.account, is_new=excluded.is_new, reply_to=excluded.reply_to, "
-            "to_addrs=excluded.to_addrs, cc=excluded.cc, bcc=excluded.bcc, subject=excluded.subject, html=excluded.html, updated=excluded.updated",
+            "to_addrs=excluded.to_addrs, cc=excluded.cc, bcc=excluded.bcc, subject=excluded.subject, html=excluded.html, updated=excluded.updated, "
+            "importance=excluded.importance",
             (d["id"], d["account"], int(d["is_new"]), d.get("reply_to"), d["to"], d["cc"], d.get("bcc", ""), d["subject"], d["html"],
-             datetime.now().astimezone().isoformat()))
+             datetime.now().astimezone().isoformat(), int(d.get("importance", 1))))
         if files is not None:
             c.execute("DELETE FROM draft_files WHERE draft_id=?", (d["id"],))
             for name, data, mime in files:
@@ -762,10 +778,11 @@ def _now_iso() -> str:
 def outbox_add(row: dict, files: list | None = None) -> None:
     with conn() as c:
         c.execute(
-            "INSERT OR REPLACE INTO outbox(id,account,to_addrs,cc,bcc,subject,html,body,draft_id,reply_to,send_at,status,error,created,followup_days,source,api_key) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,'pending','',?,?,?,?)",
+            "INSERT OR REPLACE INTO outbox(id,account,to_addrs,cc,bcc,subject,html,body,draft_id,reply_to,send_at,status,error,created,followup_days,source,api_key,importance) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,'pending','',?,?,?,?,?)",
             (row["id"], row["account"], row["to"], row["cc"], row.get("bcc", ""), row["subject"], row["html"], row["body"], row.get("draft_id"),
-             row.get("reply_to"), row["send_at"], _now_iso(), int(row.get("followup_days") or 0), row.get("source", ""), row.get("api_key", "")))
+             row.get("reply_to"), row["send_at"], _now_iso(), int(row.get("followup_days") or 0), row.get("source", ""), row.get("api_key", ""),
+             int(row.get("importance", 1))))
         c.execute("DELETE FROM outbox_files WHERE outbox_id=?", (row["id"],))
         for name, data, mime in files or []:
             c.execute("INSERT INTO outbox_files(outbox_id,name,mime,data) VALUES(?,?,?,?)", (row["id"], name, mime, data))

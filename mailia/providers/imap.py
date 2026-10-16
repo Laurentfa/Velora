@@ -48,6 +48,17 @@ def thread_headers(msg, message_id: str, references: str = "") -> None:
     msg["References"] = " ".join(chain[-20:])  # on borne la chaîne, comme le font les clients courants
 
 
+def importance_of(headers: dict) -> int:
+    """Importance fixée par l'expéditeur, d'après les en-têtes que posent les messageries (Importance, X-Priority, Priority, X-MSMail-Priority) :
+    0 basse, 1 normale, 2 haute. Une marque « haute » l'emporte sur une marque « basse » contradictoire."""
+    def one(name: str) -> str:
+        return " ".join(headers.get(name, ()) if not isinstance(headers.get(name), str) else [headers[name]]).strip().lower()
+    xp, imp, pri, ms = one("x-priority"), one("importance"), one("priority"), one("x-msmail-priority")
+    high = xp[:1] in ("1", "2") or imp == "high" or pri == "urgent" or ms == "high"
+    low = xp[:1] in ("4", "5") or imp == "low" or pri == "non-urgent" or ms == "low"
+    return 2 if high else 0 if low else 1
+
+
 def _atts(m) -> list:
     return [{"id": str(n), "name": a.filename or "(sans nom)", "size": a.size or 0, "type": a.content_type or ""}
             for n, a in enumerate(m.attachments) if a.content_disposition != "inline" or a.filename]
@@ -72,6 +83,7 @@ def _msg(m) -> Msg:
         html=(m.html or "") if len(m.html or "") <= 600_000 else "",
         flagged=MailMessageFlags.FLAGGED in m.flags,
         verb=2 if "$Forwarded" in m.flags else 1 if MailMessageFlags.ANSWERED in m.flags else 0,
+        importance=importance_of(m.headers or {}),
     )
 
 
@@ -81,7 +93,7 @@ def _stub(m) -> Msg:
     return Msg(uid=m.uid, subject=m.subject or "(sans objet)", sender=m.from_ or "", sender_name=m.from_values.name if m.from_values else "",
                to=", ".join(m.to), cc=", ".join(m.cc), date=dt.astimezone(timezone.utc).isoformat(), body="", is_read=MailMessageFlags.SEEN in m.flags,
                has_att=False, attachments=None, conv=_conv(m), html=None, flagged=MailMessageFlags.FLAGGED in m.flags,
-               verb=2 if "$Forwarded" in m.flags else 1 if MailMessageFlags.ANSWERED in m.flags else 0)
+               verb=2 if "$Forwarded" in m.flags else 1 if MailMessageFlags.ANSWERED in m.flags else 0, importance=importance_of(m.headers or {}))
 
 
 class ImapProvider:
@@ -225,9 +237,13 @@ class ImapProvider:
         return a.payload, a.filename or "piece-jointe"
 
     def build(self, to: str, subject: str, body: str, cc: str = "", attachments: list | None = None,
-              html: str | None = None, inline: list | None = None, bcc: str = "") -> EmailMessage:
+              html: str | None = None, inline: list | None = None, bcc: str = "", importance: int = 1) -> EmailMessage:
         msg = EmailMessage()
         msg["From"], msg["To"], msg["Subject"] = self.cfg.email, to, subject
+        if importance == 2:  # les marques que lisent Outlook, Apple Mail et Thunderbird
+            msg["Importance"], msg["X-Priority"], msg["Priority"], msg["X-MSMail-Priority"] = "high", "1 (Highest)", "urgent", "High"
+        elif importance == 0:
+            msg["Importance"], msg["X-Priority"], msg["Priority"], msg["X-MSMail-Priority"] = "low", "5 (Lowest)", "non-urgent", "Low"
         if cc.strip():
             msg["Cc"] = cc
         if bcc.strip():
@@ -265,8 +281,8 @@ class ImapProvider:
         return s
 
     def send(self, to: str, subject: str, body: str, cc: str = "", attachments: list | None = None,
-             html: str | None = None, inline: list | None = None, bcc: str = "", ref: tuple | None = None) -> None:
-        msg = self.build(to, subject, body, cc, attachments, html, inline, bcc)
+             html: str | None = None, inline: list | None = None, bcc: str = "", ref: tuple | None = None, importance: int = 1) -> None:
+        msg = self.build(to, subject, body, cc, attachments, html, inline, bcc, importance)
         if ref:
             try:
                 orig = self._full(ref[1], ref[2])
@@ -290,11 +306,28 @@ class ImapProvider:
             log.warning("copie dans « Envoyés » impossible (le message est bien parti)", exc_info=True)
             sendstats.record("nocopy", subject)
 
+    def importance_marks(self, key: str, limit: int = 2000) -> dict[int, list[str]]:
+        """Messages d'importance haute et basse d'un dossier, par recherche sur les en-têtes (rattrapage des anciens mails)."""
+        out: dict[int, list[str]] = {2: [], 0: []}
+        searches = {2: (("Importance", "high"), ("X-Priority", "1"), ("X-Priority", "2"), ("Priority", "urgent")),
+                    0: (("Importance", "low"), ("X-Priority", "4"), ("X-Priority", "5"), ("Priority", "non-urgent"))}
+        with self._box(key) as mb:
+            for level, headers in searches.items():
+                found: set[str] = set()
+                for name, value in headers:
+                    try:
+                        found.update(str(u) for u in mb.uids(AND(header=H(name, value))))
+                    except Exception as e:
+                        log.warning("recherche d'importance (%s) dans %s : %s", name, key, e)
+                out[level] = sorted(found, key=int, reverse=True)[:limit]
+        return out
+
     # ---------- brouillons (copie dans le dossier Brouillons du serveur) ----------
     def save_draft(self, d: dict, files: list, ref: str | None, folder_key: str) -> str:
         """Ajoute le brouillon au dossier Brouillons (drapeau « brouillon », jamais envoyé) et retire la version précédente. Retourne son UID."""
         html = d.get("html") or ""
-        msg = self.build(d.get("to") or "", d.get("subject") or "", html_to_text(html), d.get("cc") or "", files, html or None, None, d.get("bcc") or "")
+        msg = self.build(d.get("to") or "", d.get("subject") or "", html_to_text(html), d.get("cc") or "", files, html or None, None, d.get("bcc") or "",
+                         int(d.get("importance", 1)))
         mid = msg["Message-ID"]
         with self._box(folder_key) as mb:
             mb.append(msg.as_bytes(), folder_key, flag_set=[MailMessageFlags.DRAFT, MailMessageFlags.SEEN])
@@ -310,7 +343,8 @@ class ImapProvider:
         html = (m.html or "") or "<p>" + "<br>".join(html_mod.escape(m.text or "").splitlines()) + "</p>"
         files = [(a.filename or "piece-jointe", a.payload, a.content_type or "application/octet-stream")
                  for a in m.attachments if a.content_disposition != "inline"]
-        return {"to": ", ".join(m.to), "cc": ", ".join(m.cc), "bcc": " ".join(m.headers.get("bcc", ())), "subject": m.subject or "", "html": html, "files": files}
+        return {"to": ", ".join(m.to), "cc": ", ".join(m.cc), "bcc": " ".join(m.headers.get("bcc", ())), "subject": m.subject or "", "html": html, "files": files,
+                "importance": importance_of(m.headers or {})}
 
     def delete_draft(self, ref: str, folder_key: str) -> None:
         with self._box(folder_key) as mb:

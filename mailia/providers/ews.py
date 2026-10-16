@@ -58,13 +58,21 @@ Message.register("icon_index", _IconIndex)
 Message.register("flag_status", _FlagStatus)
 Message.register("followup_icon", _FollowupIcon)
 
-FIELDS = ["subject", "sender", "to_recipients", "cc_recipients", "datetime_received", "is_read", "body", "has_attachments", "attachments", "conversation_id", "flag_status", "last_verb",
+FIELDS = ["subject", "sender", "to_recipients", "cc_recipients", "datetime_received", "is_read", "body", "has_attachments", "attachments", "conversation_id", "flag_status", "last_verb", "importance",
           "start", "end", "location"]  # les trois derniers : invitations à une réunion
 EVENTS = ["NewMailEvent", "CreatedEvent", "DeletedEvent", "ModifiedEvent", "MovedEvent"]
 
 
 def _html_escape(text: str) -> str:
     return _html_mod.escape(text)
+
+
+_IMPORTANCE = {"Low": 0, "Normal": 1, "High": 2}
+_IMPORTANCE_NAME = {0: "Low", 1: "Normal", 2: "High"}
+
+
+def _importance(i) -> int:
+    return _IMPORTANCE.get(str(getattr(i, "importance", "") or "Normal"), 1)
 
 
 def _utc_iso(dt) -> str:
@@ -128,10 +136,11 @@ def _to_msg(i) -> Msg | None:
         flagged=getattr(i, "flag_status", None) == 2,
         verb={102: 1, 103: 1, 104: 2}.get(getattr(i, "last_verb", None) or 0, 0),
         meeting=_meeting(i),
+        importance=_importance(i),
     )
 
 
-SEARCH_FIELDS = ["subject", "sender", "to_recipients", "cc_recipients", "datetime_received", "is_read", "has_attachments", "conversation_id"]
+SEARCH_FIELDS = ["subject", "sender", "to_recipients", "cc_recipients", "datetime_received", "is_read", "has_attachments", "conversation_id", "importance"]
 
 
 def _stub(i) -> Msg | None:
@@ -142,7 +151,8 @@ def _stub(i) -> Msg | None:
     return Msg(
         uid=i.id, subject=i.subject or "(sans objet)", sender=(s.email_address if s else "") or "", sender_name=(s.name if s else "") or "",
         to=_addrs(i.to_recipients), cc=_addrs(i.cc_recipients), date=_utc_iso(i.datetime_received), body="", is_read=bool(i.is_read),
-        has_att=bool(i.has_attachments), attachments=None, conv=("ews:" + i.conversation_id.id) if getattr(i, "conversation_id", None) else None, html=None)
+        has_att=bool(i.has_attachments), attachments=None, conv=("ews:" + i.conversation_id.id) if getattr(i, "conversation_id", None) else None, html=None,
+        importance=_importance(i))
 
 
 _COND = {
@@ -299,6 +309,12 @@ class EwsProvider:
         d.new_state = folder.item_sync_state
         return d
 
+    def importance_marks(self, key: str, limit: int = 2000) -> dict[int, list[str]]:
+        """Les messages d'importance haute et basse d'un dossier : rare, donc deux petites requêtes suffisent (rattrapage des anciens mails)."""
+        folder = self._folder(key)
+        return {level: [i.id for i in folder.filter(importance=name).only("subject").order_by("-datetime_received")[:limit]]
+                for level, name in ((2, "High"), (0, "Low"))}
+
     def search(self, text: str, folder_keys: list[str], per_folder: int = 100) -> list[tuple[str, Msg]]:
         """Recherche plein texte faite par Exchange lui-même (objet, expéditeur, corps) : un dossier à la fois, car le serveur refuse de chercher
         dans plusieurs dossiers d'un coup. Un dossier qui échoue n'empêche pas les autres."""
@@ -451,12 +467,13 @@ class EwsProvider:
         raise RuntimeError("Pièce jointe introuvable (ou message joint non téléchargeable)")
 
     def send(self, to: str, subject: str, body: str, cc: str = "", attachments: list | None = None,
-             html: str | None = None, inline: list | None = None, bcc: str = "", ref: tuple | None = None) -> None:
-        """`ref` = (« reply » ou « forward », dossier, uid) du message d'origine : le message part alors dans SA conversation."""
+             html: str | None = None, inline: list | None = None, bcc: str = "", ref: tuple | None = None, importance: int = 1) -> None:
+        """`ref` = (« reply » ou « forward », dossier, uid) du message d'origine : le message part alors dans SA conversation.
+        `importance` : 0 basse, 1 normale, 2 haute."""
         box = lambda s: [Mailbox(email_address=a.strip()) for a in s.replace(";", ",").split(",") if a.strip()]
         if ref and env("MAILIA_THREADED_SEND", "1") != "0":  # MAILIA_THREADED_SEND=0 : retour à l'envoi simple (dépannage)
             try:
-                if self._send_threaded(ref, subject, body, box(to), box(cc), box(bcc), attachments, html, inline):
+                if self._send_threaded(ref, subject, body, box(to), box(cc), box(bcc), attachments, html, inline, importance):
                     _stat("threaded")
                     return
             except _AlreadySent:
@@ -465,10 +482,10 @@ class EwsProvider:
             except Exception:
                 _stat("fallback", subject)
                 log.warning("envoi rattaché à la conversation impossible : envoi simple", exc_info=True)
-        m = self.build(subject, body, box(to), box(cc), attachments, html, inline, box(bcc))
+        m = self.build(subject, body, box(to), box(cc), attachments, html, inline, box(bcc), importance)
         m.send()  # une copie est enregistrée dans les éléments envoyés
 
-    def _send_threaded(self, ref, subject, body, to, cc, bcc, attachments, html, inline) -> bool:
+    def _send_threaded(self, ref, subject, body, to, cc, bcc, attachments, html, inline, importance: int = 1) -> bool:
         """Réponse ou transfert rattaché à la conversation de l'original, quel que soit son âge ou son objet exact : Exchange le fait quand
         le brouillon est créé « à partir de » l'original (sinon il ne regroupe que d'après l'objet, et seulement les messages récents).
         Le brouillon créé par le serveur ne sert que de support : on le remplace par ce que l'utilisateur a rédigé (texte, citation, pièces jointes)."""
@@ -487,7 +504,8 @@ class EwsProvider:
             d.body = HTMLBody(html) if html else body
             d.to_recipients, d.cc_recipients, d.bcc_recipients = to, cc or None, bcc or None
             d.support_mark = "1"
-            d.save(update_fields=["subject", "body", "to_recipients", "cc_recipients", "bcc_recipients", "support_mark"])
+            d.importance = _IMPORTANCE_NAME.get(importance, "Normal")
+            d.save(update_fields=["subject", "body", "to_recipients", "cc_recipients", "bcc_recipients", "support_mark", "importance"])
             for name, data, ctype in attachments or []:
                 d.attach(FileAttachment(name=name, content=data, content_type=ctype or "application/octet-stream"))
             for cid, data, mime, name in inline or []:
@@ -509,7 +527,8 @@ class EwsProvider:
         """Enregistre le brouillon dans le dossier Brouillons (sans jamais l'envoyer) et retire la version précédente. Retourne l'identifiant de la nouvelle."""
         box = lambda s: [Mailbox(email_address=a.strip()) for a in (s or "").replace(";", ",").split(",") if a.strip()] or None
         m = Message(account=self.account, folder=self.account.drafts, subject=d.get("subject") or "", body=HTMLBody(d.get("html") or ""),
-                    to_recipients=box(d.get("to")), cc_recipients=box(d.get("cc")), bcc_recipients=box(d.get("bcc")))
+                    to_recipients=box(d.get("to")), cc_recipients=box(d.get("cc")), bcc_recipients=box(d.get("bcc")),
+                    importance=_IMPORTANCE_NAME.get(int(d.get("importance", 1)), "Normal"))
         for name, data, ctype in files or []:
             m.attach(FileAttachment(name=name, content=data, content_type=ctype or "application/octet-stream"))
         m.save()  # le dossier Brouillons est celui du message : enregistré, jamais envoyé
@@ -524,7 +543,8 @@ class EwsProvider:
         html = str(body) if isinstance(body, HTMLBody) else "<p>" + "<br>".join(_html_escape(str(body or "")).splitlines()) + "</p>"
         files = [(a.name or "piece-jointe", bytes(a.content), getattr(a, "content_type", "") or "application/octet-stream")
                  for a in (i.attachments or []) if hasattr(a, "content") and not getattr(a, "is_inline", False)]
-        return {"to": _addrs(i.to_recipients), "cc": _addrs(i.cc_recipients), "bcc": _addrs(i.bcc_recipients), "subject": i.subject or "", "html": html, "files": files}
+        return {"to": _addrs(i.to_recipients), "cc": _addrs(i.cc_recipients), "bcc": _addrs(i.bcc_recipients), "subject": i.subject or "", "html": html, "files": files,
+                "importance": _importance(i)}
 
     def delete_draft(self, ref: str, folder_key: str = "") -> None:
         try:
@@ -548,9 +568,9 @@ class EwsProvider:
         except Exception:
             log.warning("nettoyage des brouillons de support impossible", exc_info=True)
 
-    def build(self, subject, body, to, cc, attachments, html=None, inline=None, bcc=None):
+    def build(self, subject, body, to, cc, attachments, html=None, inline=None, bcc=None, importance: int = 1):
         m = Message(account=self.account, subject=subject, body=HTMLBody(html) if html else body,
-                    to_recipients=to, cc_recipients=cc or None, bcc_recipients=bcc or None)
+                    to_recipients=to, cc_recipients=cc or None, bcc_recipients=bcc or None, importance=_IMPORTANCE_NAME.get(importance, "Normal"))
         for name, data, ctype in attachments or []:
             m.attach(FileAttachment(name=name, content=data, content_type=ctype or "application/octet-stream"))
         for cid, data, mime, name in inline or []:  # images affichées dans le corps du message

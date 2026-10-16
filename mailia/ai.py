@@ -122,6 +122,8 @@ def _mail_block(m) -> str:
         + (f"Cc : {m['cc_addrs']}\n" if m.get("cc_addrs") else "")
         + (f"Pièces jointes (noms seulement) : {', '.join(a['name'] for a in json.loads(m['att_json']))}\n"
            if m.get("att_json") not in (None, "[]") else "")
+        + {2: "Importance indiquée par l'expéditeur : HAUTE (indice seulement, à confronter au contenu)\n",
+           0: "Importance indiquée par l'expéditeur : basse (indice seulement)\n"}.get(int(m.get("importance") if m.get("importance") is not None else 1), "")
         + f"Date : {m['date']}\nObjet : {m['subject']}\n\n{for_ai(m['body'] or '')}"
     )
 
@@ -174,7 +176,8 @@ Réponds UNIQUEMENT par un objet JSON, sans texte autour :
  "suggested": "action recommandée en quelques mots (ex : Répondre, Archiver, Transmettre à X, Planifier)"}}
 Critères de tri choisis par ‹‹PRENOM›› :
 {(prompt_text("analyze") if criteria is None else criteria).strip()}
-{_rules_block(rules)}{aipolicy.few_shot_block()}{_UNTRUSTED}"""
+{_rules_block(rules)}{aipolicy.few_shot_block()}Si l'en-tête indique une « Importance » fixée par l'expéditeur, c'est un indice parmi d'autres : une importance haute n'impose pas « urgent » (beaucoup d'expéditeurs la mettent partout), et une importance basse n'empêche pas « urgent » si le contenu l'est.
+{_UNTRUSTED}"""
 
 
 def test_analyze(m: dict, criteria: str, rules: str) -> dict:
