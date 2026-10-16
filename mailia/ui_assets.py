@@ -314,6 +314,32 @@ SWIPE_JS = """<script>
       if (el && el.closest && el.closest('.q-editor__content')) edRange = s.getRangeAt(0).cloneRange();
     }
   });
+  // listes « Police » et « Taille » : la ligne qui correspond au texte sous le curseur est mise en évidence à l'ouverture
+  const marks = menu => {
+    const n = edRange && (edRange.startContainer.nodeType === 1 ? edRange.startContainer : edRange.startContainer.parentElement);
+    if (!n || !n.closest || !n.closest('.q-editor__content')) return;
+    const items = [...menu.querySelectorAll('.q-item')];
+    const label = i => (i.innerText || '').trim().toLowerCase();
+    const cs = getComputedStyle(n);
+    let want = null;
+    const isDef = i => label(i) === 'police par défaut' || label(i) === 'default font';
+    if (items.some(isDef)) {
+      const fam = (cs.fontFamily || '').split(',')[0].replace(/["']/g, '').trim().toLowerCase();
+      want = items.find(i => label(i) === fam) || items.find(isDef);
+    } else if (items.some(i => /^[0-9,]+ pt/.test(label(i)))) {
+      const pt = Math.round(parseFloat(cs.fontSize) * 0.75 * 2) / 2;
+      const txt = String(pt).replace('.', ',');
+      want = items.find(i => label(i).replace(' (normal)', '').replace(/ pt$/, '') === txt);
+    }
+    if (want) { want.classList.add('q-item--active'); want.style.fontWeight = '700'; want.style.background = 'rgba(10,102,232,.10)'; }
+  };
+  new MutationObserver(ms => {
+    for (const m of ms) for (const a of m.addedNodes) {
+      if (a.nodeType !== 1) continue;
+      const menu = a.classList && a.classList.contains('q-menu') ? a : (a.querySelector && a.querySelector('.q-menu'));
+      if (menu) setTimeout(() => marks(menu), 0);
+    }
+  }).observe(document.documentElement, {childList: true, subtree: true});
   // taille du texte en points (comme Outlook) : execCommand ne connaît que 7 niveaux ; on s'en sert comme repère puis on remplace
   // chaque <font size=7> par un <span> à la taille exacte. Sans sélection, la taille s'applique à ce qu'on tape ensuite.
   window.__pt = 11;
