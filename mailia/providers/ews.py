@@ -126,6 +126,20 @@ def _to_msg(i) -> Msg | None:
     )
 
 
+SEARCH_FIELDS = ["subject", "sender", "to_recipients", "cc_recipients", "datetime_received", "is_read", "has_attachments", "conversation_id"]
+
+
+def _stub(i) -> Msg | None:
+    """Résultat de recherche sur le serveur : en-têtes seulement (le texte et les pièces jointes sont chargés à l'ouverture du message)."""
+    if not isinstance(i, (Message, *MEETING_TYPES)) or i.datetime_received is None:
+        return None
+    s = i.sender
+    return Msg(
+        uid=i.id, subject=i.subject or "(sans objet)", sender=(s.email_address if s else "") or "", sender_name=(s.name if s else "") or "",
+        to=_addrs(i.to_recipients), cc=_addrs(i.cc_recipients), date=_utc_iso(i.datetime_received), body="", is_read=bool(i.is_read),
+        has_att=bool(i.has_attachments), attachments=None, conv=("ews:" + i.conversation_id.id) if getattr(i, "conversation_id", None) else None, html=None)
+
+
 _COND = {
     "contains_sender_strings": ("l'expéditeur contient", "list"), "contains_subject_strings": ("l'objet contient", "list"),
     "contains_body_strings": ("le texte contient", "list"), "contains_subject_or_body_strings": ("l'objet ou le texte contient", "list"),
@@ -279,6 +293,18 @@ class EwsProvider:
                 d.deleted.append(item.id)
         d.new_state = folder.item_sync_state
         return d
+
+    def search(self, text: str, folder_keys: list[str], per_folder: int = 100) -> list[tuple[str, Msg]]:
+        """Recherche plein texte faite par Exchange lui-même (objet, expéditeur, corps) : un dossier à la fois, car le serveur refuse de chercher
+        dans plusieurs dossiers d'un coup. Un dossier qui échoue n'empêche pas les autres."""
+        out: list[tuple[str, Msg]] = []
+        for key in folder_keys:
+            try:
+                found = self._folder(key).filter(text).only(*SEARCH_FIELDS).order_by("-datetime_received")[:per_folder]
+                out += [(key, m) for m in (_stub(i) for i in found) if m]
+            except Exception as e:
+                log.warning("recherche dans %s : %s", key, e)
+        return out
 
     # ---------- actions ----------
     def _item(self, uid: str):

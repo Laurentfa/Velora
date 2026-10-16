@@ -1,9 +1,16 @@
-"""Recherche : saisie, recherches enregistrées."""
+"""Recherche : saisie, recherches enregistrées, complément de recherche sur les serveurs."""
+import asyncio
 import json
+import logging
+import time
 
-from nicegui import ui
+from nicegui import background_tasks, run, ui
 
-from mailia import db
+from mailia import db, search, sync
+from mailia.ui_common import NOLIST_VIEWS
+
+log = logging.getLogger("mailia")
+REMOTE_TTL = 600  # secondes : la même recherche n'interroge pas deux fois le serveur
 
 
 class SearchMixin:
@@ -44,3 +51,38 @@ class SearchMixin:
         if q != self.q:
             self.q = q
             await self.reload(force=True)
+            if q.strip():
+                background_tasks.create(self.remote_search(q))
+
+    async def remote_search(self, q: str) -> None:
+        """Après la recherche dans la copie locale, interroge aussi les serveurs (mails plus anciens que ceux copiés ici, dossiers non suivis),
+        puis complète la liste : mêmes dossiers que la recherche locale (le dossier affiché et ses sous-dossiers, ou tous avec « dossier:tous »)."""
+        adv = search.parse(q)
+        text = (adv["text"] if adv["advanced"] else q).strip()
+        if self.view in NOLIST_VIEWS or not sync.server_search_on() or len(sync.clean_query(text)) < 3:
+            return
+        folder = self.folder if self.view == "folder" else "INBOX"
+        accounts = [self.account] if self.account else list(sync.ACCOUNTS)
+        key = (sync.clean_query(text), tuple(accounts), folder, adv["all_folders"])
+        cached = self._remote_cache.get(key)
+        if cached and time.time() - cached[0] < REMOTE_TTL:
+            ids = cached[1]
+        else:
+            await asyncio.sleep(0.7)  # on laisse finir la frappe
+            if q != self.q:
+                return
+            self.remote_busy = True
+            self.refresh_title()
+            try:
+                ids = await run.io_bound(sync.search_remote, text, accounts, folder, adv["all_folders"])
+            except Exception:
+                log.exception("recherche sur le serveur")
+                ids = set()
+            finally:
+                self.remote_busy = False
+            self._remote_cache[key] = (time.time(), ids)
+        self.refresh_title()
+        if q != self.q:  # la recherche a changé pendant l'attente
+            return
+        self.remote_ids, self.remote_for = ids, q
+        await self.reload()

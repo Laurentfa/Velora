@@ -138,6 +138,11 @@ def _tab_dos(cfgs, dlg, on_folders) -> None:
     with ui.row().classes("gap-2"):
         for k, c in cfgs.items():
             ui.button(f"Dossiers de {c.label}…", icon="folder_open", on_click=lambda _, a=k: open_folders(a)).props("outline no-caps dense")
+    ui.switch("Chercher aussi sur le serveur de messagerie", value=sync.server_search_on(),
+              on_change=lambda e: db.kv_set("server_search", "1" if e.value else "0")).props("dense").classes("q-mt-md").mark("server-search")
+    ui.label("Une recherche regarde d'abord les mails copiés dans l'application, puis interroge aussi votre messagerie (Exchange, IMAP) pour retrouver des "
+             "mails plus anciens que ceux gardés ici. Les mots cherchés ne sont envoyés qu'à votre propre serveur, jamais à l'IA. Les mails trouvés sont "
+             "ajoutés à la liste, leur texte est chargé quand vous les ouvrez.").classes("text-caption text-grey")
 
 
 def _tab_ia(f) -> None:

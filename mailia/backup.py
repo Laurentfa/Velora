@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from . import config, db
 
 KV_PREFIXES = ("prompt:", "signature", "undo_delay", "ai_tone", "notify_urgent", "quick_replies", "ai_intents", "trusted_senders",
-               "side_", "cols", "list_sort", "archive:", "theme", "default_account", "user_name", "phish_safe")
+               "side_", "cols", "list_sort", "server_search", "archive:", "theme", "default_account", "user_name", "phish_safe")
 ENV_KEYS = ("AI_ENABLED", "AI_UNREAD_ONLY", "AI_MAX_AGE_DAYS", "CONVERSATIONS", "SYNC_LIMIT", "AI_PROVIDER",
             *(f"{p}_{t}" for p in ("MODEL", "MODEL1", "PROVIDER") for t in ("ANALYZE", "BRIEF", "DRAFT", "ASK")))
 VERSION = 1

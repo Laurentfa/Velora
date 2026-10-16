@@ -74,6 +74,15 @@ def _msg(m) -> Msg:
     )
 
 
+def _stub(m) -> Msg:
+    """Résultat de recherche sur le serveur : en-têtes seulement (le texte et les pièces jointes sont chargés à l'ouverture du message)."""
+    dt = m.date if m.date.tzinfo else m.date.replace(tzinfo=timezone.utc)
+    return Msg(uid=m.uid, subject=m.subject or "(sans objet)", sender=m.from_ or "", sender_name=m.from_values.name if m.from_values else "",
+               to=", ".join(m.to), cc=", ".join(m.cc), date=dt.astimezone(timezone.utc).isoformat(), body="", is_read=MailMessageFlags.SEEN in m.flags,
+               has_att=False, attachments=None, conv=_conv(m), html=None, flagged=MailMessageFlags.FLAGGED in m.flags,
+               verb=2 if "$Forwarded" in m.flags else 1 if MailMessageFlags.ANSWERED in m.flags else 0)
+
+
 class ImapProvider:
     def __init__(self, cfg: AccountCfg) -> None:
         self.cfg = cfg
@@ -101,6 +110,19 @@ class ImapProvider:
                 if not role and "archive" in f.name.lower():
                     role = "archive"
                 out.append(FolderInfo(f.name, f.name.split(f.delim)[-1], f.name.replace(f.delim, "/"), role))
+        return out
+
+    def search(self, text: str, folder_keys: list[str], per_folder: int = 100) -> list[tuple[str, Msg]]:
+        """Recherche TEXT du serveur (en-têtes et corps) dans chaque dossier, sur une seule connexion. Un dossier qui échoue n'empêche pas les autres."""
+        out: list[tuple[str, Msg]] = []
+        with self._box() as mb:
+            for key in folder_keys:
+                try:
+                    mb.folder.set(key)
+                    found = mb.fetch(AND(text=text), charset="UTF-8", limit=per_folder, reverse=True, headers_only=True, mark_seen=False, bulk=True)
+                    out += [(key, _stub(m)) for m in found]
+                except Exception as e:
+                    log.warning("recherche dans %s : %s", key, e)
         return out
 
     # ---------- synchro ----------

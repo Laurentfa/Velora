@@ -166,6 +166,65 @@ def sync_account(key: str) -> int:
     return changed
 
 
+# ---------- recherche sur le serveur ----------
+def server_search_on() -> bool:
+    return db.kv_get("server_search") != "0"
+
+
+def clean_query(text: str) -> str:
+    """Les mots cherchés, sans les signes (guillemets, deux-points, parenthèses…) que le serveur lirait comme des opérateurs de recherche."""
+    return " ".join(re.findall(r"[\w'@.\-]+", text or ""))
+
+
+def search_scope(account: str, folder: str, everywhere: bool = False) -> list[str]:
+    """Dossiers à interroger : celui qu'on regarde et ses sous-dossiers (comme Apple Mail), ou tous sauf corbeille, indésirables et brouillons."""
+    rows = db.folders(account)
+    skip = {"trash", "junk", "drafts"}
+    if everywhere:
+        return [f["key"] for f in rows if f["role"] not in skip][:40]
+    cur = next((f for f in rows if f["key"] == (folder or "INBOX")), None)
+    if cur is None:
+        return [folder or "INBOX"]
+    prefixes = (cur["path"] + "/", cur["key"] + "/", cur["key"] + ".")
+    sub = [f["key"] for f in rows if f["key"] != cur["key"] and f["role"] not in skip and (f["path"].startswith(prefixes) or f["key"].startswith(prefixes))]
+    return ([cur["key"]] + sub)[:40]
+
+
+def search_remote(text: str, accounts: list[str], folder: str = "INBOX", everywhere: bool = False, per_folder: int = 100, cap: int = 300) -> set[str]:
+    """Cherche sur les serveurs des boîtes (en plus de la copie locale) et copie ici les mails trouvés qu'on n'avait pas, sans leur texte :
+    il est chargé à l'ouverture, comme pour tout mail synchronisé sans contenu. Retourne les identifiants de tous les mails trouvés.
+    Sans réseau ou en cas d'erreur d'un serveur, on garde simplement la recherche locale."""
+    text = clean_query(text)
+    ids: set[str] = set()
+    if len(text) < 3:
+        return ids
+    for key in accounts:
+        cfg = ACCOUNTS.get(key)
+        if not cfg or not cfg.password:
+            continue
+        try:
+            prov = provider(key)
+            if not hasattr(prov, "search"):
+                continue
+            found = prov.search(text, search_scope(key, folder, everywhere), per_folder)
+        except Exception as e:
+            log_failure(f"recherche sur le serveur ({key})", e)
+            continue
+        found = sorted(found, key=lambda fm: fm[1].date, reverse=True)[:cap]
+        known: dict[str, dict] = {}
+        added: set[str] = set()
+        for fkey, m in found:
+            if fkey not in known:
+                known[fkey] = db.known(key, fkey)
+            if m.uid not in known[fkey]:  # déjà là : surtout ne pas l'écraser par une version sans texte
+                db.upsert(key, fkey, m)
+                added.add(fkey)
+            ids.add(db.msg_id(key, fkey, m.uid))
+        for fkey in added:
+            _backfill_threads(key, fkey)
+    return ids
+
+
 def _notify_if_urgent(mid: str, d: dict) -> None:
     """Notification pour un mail urgent tout juste arrivé (pas pour l'arriéré analysé au premier lancement, ni pour un mail suspect)."""
     try:

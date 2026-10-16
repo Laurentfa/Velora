@@ -106,7 +106,7 @@ def wrap(module, attr: str, label: str | None = None) -> None:
 def install() -> None:
     """Instrumente les opérations qui comptent : synchronisation, liste, ouverture d'un mail, analyse IA."""
     from . import ai, queries, sync
-    for mod, attr in ((sync, "run_cycle"), (sync, "ensure_details"), (sync, "perform_many"), (sync, "refresh_folders"),
+    for mod, attr in ((sync, "run_cycle"), (sync, "ensure_details"), (sync, "perform_many"), (sync, "refresh_folders"), (sync, "search_remote"),
                       (queries, "list_messages"), (queries, "get_message"), (ai, "analyze_and_store")):
         try:
             wrap(mod, attr)

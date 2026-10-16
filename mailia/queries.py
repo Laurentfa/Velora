@@ -17,7 +17,8 @@ def enabled_sql(col: str = "account") -> str:
 
 
 def list_messages(account: str = "", q: str = "", unread: bool = False, view: str = "",
-                  limit: int = 80, offset: int = 0, folder: str = "", group: bool = True, pins_top: bool = True, read: bool = False, oldest_first: bool = False) -> list[dict]:
+                  limit: int = 80, offset: int = 0, folder: str = "", group: bool = True, pins_top: bool = True, read: bool = False, oldest_first: bool = False,
+                  extra_ids: set[str] | None = None) -> list[dict]:
     """Sans `folder`, on ne parle que des boîtes de réception ; avec `folder`, d'un dossier précis.
     Par défaut les mails d'un même fil sont regroupés (le plus récent représente la conversation) ;
     une recherche textuelle reste, elle, mail par mail. Les conversations épinglées passent en tête de la boîte de réception."""
@@ -27,8 +28,9 @@ def list_messages(account: str = "", q: str = "", unread: bool = False, view: st
     q = adv["text"] if adv["advanced"] else q
     where: list[str] = [enabled_sql()]
     args: list = []
+    scope: list[tuple[str, list]] = []  # dossier + texte : ce qui décide « ce mail correspond à la recherche »
     if not adv["all_folders"]:
-        where.append("folder=?"); args.append(folder or "INBOX")
+        scope.append(("folder=?", [folder or "INBOX"]))
     where += adv["where"]; args += adv["args"]
     if view == "todo":
         where.append(TODO_SQL)
@@ -44,9 +46,16 @@ def list_messages(account: str = "", q: str = "", unread: bool = False, view: st
         where.append("NOT EXISTS (SELECT 1 FROM messages m2 WHERE m2.ckey=messages.ckey AND m2.folder=messages.folder AND m2.is_read=0)")
     if q.strip():
         terms = " ".join(f'"{t}"*' for t in q.replace('"', " ").split())
-        where.append("id IN (SELECT id FROM fts WHERE fts MATCH ?)"); args.append(terms)
+        scope.append(("id IN (SELECT id FROM fts WHERE fts MATCH ?)", [terms]))
     if not folder and not adv["all_folders"]:  # boîte de réception : les conversations reportées sont masquées jusqu'à l'heure dite
         where.append("ckey NOT IN (SELECT ckey FROM snoozes WHERE status='wait')")
+    if scope:
+        group_sql, group_args = " AND ".join(c for c, _ in scope), [a for _, aa in scope for a in aa]
+        if extra_ids:  # mails trouvés par le serveur : ils comptent même si le texte local ou le dossier ne les retrouve pas (les autres filtres s'appliquent)
+            ids = sorted(extra_ids)[:900]
+            group_sql = f"(({group_sql}) OR id IN ({','.join('?' * len(ids))}))"
+            group_args += ids
+        where.append(group_sql); args += group_args
     woke = db.snooze_keys("woke") if (not folder and not searching and pins_top) else set()
     pins = (db.pin_keys() | woke) if (not folder and not searching and pins_top) else set()
 

@@ -124,6 +124,9 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self.counts: dict = queries.counts()
         self.ver = queries.version()
         self._build_cost, self._last_bg, self._full_at = 0.0, 0.0, 0.0
+        self.remote_ids: set[str] | None = None  # mails trouvés par les serveurs pour la recherche en cours
+        self.remote_for, self.remote_busy = "", False
+        self._remote_cache: dict = {}
         self._row_els: dict[str, ui.element] = {}  # id du mail -> élément de sa ligne dans la liste (pour ne redessiner que les lignes modifiées)
         self.rows_sig = None
         self.busy = False
@@ -356,7 +359,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             name = f"{label_of(self.account)} · {fo['path'] if fo else 'Dossier'}"
         else:
             name = label_of(self.account) if self.account and self.view == "inbox" else VIEWS[self.view][1]
-        self.title.set_text(name + {"unread": " · non lus", "read": " · lus"}.get(self.read_filter, ""))
+        self.title.set_text(name + {"unread": " · non lus", "read": " · lus"}.get(self.read_filter, "") + (" · recherche sur le serveur…" if self.remote_busy else ""))
         self.search_row.set_visibility(self.view not in NOLIST_VIEWS)
 
     async def restore_open(self) -> None:
@@ -1142,7 +1145,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             self.rows = queries.list_messages(self.account, self.q, self.view == "unread" or self.read_filter == "unread",
                                               self.view if self.view in ("todo", "noise", "newsletter", "notification") else "", self.limit,
                                               folder=self.folder if self.view == "folder" else "", read=self.read_filter == "read",
-                                              oldest_first=self.oldest_first)
+                                              oldest_first=self.oldest_first,
+                                              extra_ids=self.remote_ids if self.remote_for == self.q else None)
             # tout ce qui change l'aspect de la liste est dans la signature : ainsi un rechargement « forcé » (ouvrir un mail, cocher…) ne redessine
             # que les lignes touchées, au lieu des 80
             look = (self.view, self.account, self.folder, self.q, self.read_filter, self.oldest_first, self.limit, tuple(sorted(self.picked)), self.select_mode,
@@ -1482,7 +1486,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             ui.select(others, label="Le bouton « Archiver » déplace le mail vers…", clearable=True,
                       with_input=True).bind_value(arch, "v").props("outlined dense").classes("w-full q-mt-sm")
             ui.select({100: "100 derniers mails", 150: "150 derniers mails", 300: "300 derniers mails",
-                       500: "500 derniers mails", 1000: "1 000 derniers mails"},
+                       500: "500 derniers mails", 1000: "1 000 derniers mails", 2000: "2 000 derniers mails", 5000: "5 000 derniers mails"},
                       label="Mails gardés par dossier (les plus récents)").bind_value(limit, "v").props("outlined dense").classes("w-full q-mt-sm")
             ui.label("Un gros dossier (ex. Archive) se charge en une minute environ la première fois. Plus on garde de mails, plus c'est long.").classes("text-caption text-grey")
 
