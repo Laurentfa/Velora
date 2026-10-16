@@ -88,13 +88,21 @@ class MailToolsMixin:
 
     def unsub_banner(self, m: dict) -> None:
         info = json.loads(m.get("unsub") or "{}") if (m.get("unsub") or "").startswith("{") else {}
-        if not info or m["folder"] != "INBOX":
+        role = sync.folder_role(m["account"], m["folder"])
+        if not info or role in ("sent", "drafts"):  # dans tous les dossiers sauf ses propres messages (la boîte de réception, mais aussi les sous-dossiers, l'archive, les indésirables)
             return
         if security.assess(m)["level"]:
             return  # on ne « se désabonne » jamais d'un message suspect : cela confirmerait l'adresse à un escroc
+        if role == "junk":  # un indésirable : seulement si le serveur a vérifié l'expéditeur (SPF/DKIM/DMARC) ou si on le connaît déjà ; sinon c'est sans doute du vrai spam
+            try:
+                auth = json.loads(m.get("auth") or "{}")
+            except ValueError:
+                auth = {}
+            if not (authcheck.verified(auth) or security.is_known(m["sender"])):
+                return
         with ui.row().classes("items-center gap-2 no-wrap q-px-sm").style("width:100%"):
             ui.icon("unsubscribe", size="18px").style("color:var(--muted)")
-            ui.label("Message envoyé à une liste de diffusion.").classes("rmeta col")
+            ui.label("Message envoyé à une liste de diffusion." + (" Il est classé en indésirable : se désabonner arrête ces envois." if role == "junk" else "")).classes("rmeta col")
             ui.button("Se désabonner", on_click=lambda: self.unsubscribe(m, info)).props("outline dense no-caps size=sm color=primary")
 
     async def unsubscribe(self, m: dict, info: dict) -> None:

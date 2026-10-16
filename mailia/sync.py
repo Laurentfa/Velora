@@ -170,6 +170,10 @@ def sync_account(key: str) -> int:
 DRAFT_FORGET_AFTER = 180  # secondes : une copie absente du serveur 3 minutes après la dernière synchro est considérée comme supprimée ailleurs
 
 
+def folder_role(account: str, key: str) -> str:
+    return next((f["role"] or "" for f in db.folders(account) if f["key"] == key), "")
+
+
 def drafts_folder(account: str) -> str:
     return next((f["key"] for f in db.folders(account) if f["role"] == "drafts"), "")
 
