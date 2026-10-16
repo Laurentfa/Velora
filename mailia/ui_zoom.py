@@ -12,7 +12,7 @@ KEYS_JS = """if (!window.__zoomKeys) {
   window.__zoomKeys = true;
   document.addEventListener('keydown', e => {
     if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
-    const d = (e.key === '+' || e.key === '=') ? 1 : (e.key === '-' || e.key === '_') ? -1 : e.key === '0' ? 0 : null;
+    const d = (e.key === '+' || e.key === '=') ? 1 : (e.key === '-' || e.key === '_') ? -1 : (e.code === 'Digit0' || e.code === 'Numpad0') ? 0 : null;  // le 0 par sa touche : sur un clavier français, e.key y donne « à »
     if (d === null) return;
     e.preventDefault(); e.stopPropagation();
     emitEvent('uizoom', {d: d});

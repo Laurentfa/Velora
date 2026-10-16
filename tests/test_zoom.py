@@ -30,7 +30,7 @@ def test_odd_values_snap_to_the_nearest_step():
 
 def test_keyboard_shortcuts_need_cmd_or_ctrl_and_cover_plus_minus_zero():
     js = ui_zoom.KEYS_JS
-    assert "e.metaKey || e.ctrlKey" in js and "e.altKey" in js and "'+'" in js and "'='" in js and "'-'" in js and "'0'" in js
+    assert "e.metaKey || e.ctrlKey" in js and "e.altKey" in js and "'+'" in js and "'='" in js and "'-'" in js and "Digit0" in js and "Numpad0" in js  # le 0 est reconnu par sa touche (clavier français : e.key vaut « à »)
     assert "preventDefault" in js and "uizoom" in js and "__zoomKeys" in js  # un seul écouteur, même si la page est reconstruite
 
 
