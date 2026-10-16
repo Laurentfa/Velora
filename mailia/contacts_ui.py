@@ -72,7 +72,7 @@ def recipients_field(label: str, d: dict, key: str, options: dict[str, str]) -> 
           <q-item-section side>
             <q-btn flat dense round size="sm" :icon="String(props.opt.label).startsWith('⭐') ? 'star' : 'star_border'"
                    :color="String(props.opt.label).startsWith('⭐') ? 'amber-8' : 'grey-6'"
-                   @click.stop.prevent="() => { let p = $parent; for (let i = 0; p && i < 8; i++, p = p.$parent) p.$emit('fav', props.opt.value) }">
+                   @click.stop.prevent="() => { const nonce = Math.random(); let p = $parent; for (let i = 0; p && i < 8; i++, p = p.$parent) p.$emit('fav', [props.opt.value, nonce]) }">
               <q-tooltip>{{ String(props.opt.label).startsWith('⭐') ? 'Retirer des favoris' : 'Ajouter aux favoris' }}</q-tooltip>
             </q-btn>
           </q-item-section>
@@ -109,9 +109,16 @@ def recipients_field(label: str, d: dict, key: str, options: dict[str, str]) -> 
         finally:
             state["busy"] = False
 
+    seen = {"nonce": None}
+
     def toggle_favorite(e) -> None:
+        args = e.args if isinstance(e.args, list) and len(e.args) == 2 else [e.args, None]
+        if args[1] is not None and args[1] == seen["nonce"]:
+            return  # le clic remonte par plusieurs niveaux du composant : un seul compte
+        seen["nonce"] = args[1]
         values = list(getattr(sel, "_values", []))  # NiceGUI numérote les options : l'étoile envoie le rang de la ligne
-        ref = values[e.args] if isinstance(e.args, int) and 0 <= e.args < len(values) else (e.args if isinstance(e.args, str) else "")
+        rank = args[0]
+        ref = values[rank] if isinstance(rank, int) and 0 <= rank < len(values) else (rank if isinstance(rank, str) else "")
         if ref.startswith("group:"):
             gid = int(ref.split(":", 1)[1])
             g = next((g for g in db.groups_list() if g["id"] == gid), None)
@@ -121,7 +128,14 @@ def recipients_field(label: str, d: dict, key: str, options: dict[str, str]) -> 
             c = next((c for c in db.contacts_list(ref) if c["email"] == ref.lower()), None)
             if c:
                 db.contact_favorite(ref, not c["favorite"])
-        refresh_options()
+        fresh = recipient_options()  # l'étoile change tout de suite, mais les lignes ne bougent pas pendant que la liste est ouverte (le rang d'une ligne doit rester juste)
+        for k in list(opts):
+            opts[k] = fresh.get(k, opts[k])
+        state["busy"] = True
+        try:
+            sel.set_options(opts, value=split_addrs(d[key]))
+        finally:
+            state["busy"] = False
 
     sel.on("fav", toggle_favorite)
     sel.on("popup-show", refresh_options)
