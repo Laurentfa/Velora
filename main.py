@@ -337,7 +337,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             if use_ai:
                 item("todo", "", "⚑", "À traiter", c["todo"], True, total=c["tot_todo"])
             item("unread", "", "●", "Non lus", c["unread"])
-            item("drafts", "", "✎", "Brouillons", c.get("drafts", 0))
+            if c.get("drafts") or self.view == "drafts":  # seulement les brouillons pas encore copiés sur le serveur (hors ligne, assistants) : les autres sont dans le dossier Brouillons de leur boîte
+                item("drafts", "", "✎", "Brouillons à synchroniser", c.get("drafts", 0))
             if c.get("outbox") or self.view == "outbox":
                 item("outbox", "", "⏰", "En attente d'envoi", c.get("outbox", 0), bool(c.get("outbox")))
             item("tasks", "", "☑", "Tâches", c.get("tasks", 0))
@@ -647,7 +648,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                 ui.button("Compris", on_click=self.dismiss_send_alert).props("flat dense no-caps size=sm color=negative")
         if self.view == "drafts":
             if not self.drafts:
-                ui.label("Aucun brouillon. Vos messages en cours sont enregistrés automatiquement ici.").classes("empty")
+                ui.label("Aucun brouillon en attente. Vos brouillons sont dans le dossier Brouillons de chaque boîte ; seuls ceux qui n'y sont pas encore (hors ligne) ou que vos assistants ont préparés apparaissent ici.").classes("empty")
             for dr in self.drafts:
                 self.draft_row(dr)
             return
@@ -1215,7 +1216,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             self.brief = queries.brief()
             sig = ("b", self.account, self.brief["headline"], *[(x["id"], x["is_read"]) for k in ("todo", "info", "noise") for x in self.brief[k]])
         elif self.view == "drafts":
-            self.drafts = db.drafts_list()
+            self.drafts = db.drafts_list(local_only=True)
             sig = ("d", *[(x["id"], x["updated"]) for x in self.drafts])
         elif self.view == "outbox":
             self.outbox = db.outbox_list()
@@ -1333,6 +1334,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         m = queries.get_message(mid)
         if not m:
             return ui.notify("Message introuvable", type="negative")
+        if m["folder"] and m["folder"] == sync.drafts_folder(m["account"]):  # un message du dossier Brouillons s'ouvre dans l'éditeur, pas en lecture
+            return await self.open_server_draft(m)
         self.new, self.compose, self.rep_folder = False, False, m["folder"]
         db.kv_set("ui_open", json.dumps({"id": mid, "t": time.time()}))  # pour rouvrir ce message si la fenêtre se recharge toute seule
         if m["ckey"] in db.snooze_keys("woke"):  # on l'a revu : il n'a plus à rester en tête
@@ -1858,6 +1861,8 @@ async def outbox_loop() -> None:
                     log.exception("sauvegarde de la base")
             if ticks % 15 == 0:  # toutes les 30 s : reports arrivés à échéance, relances sans réponse
                 await run.io_bound(sync.reminders_upkeep)
+            if ticks % 15 == 7:  # toutes les 30 s : copie des brouillons modifiés dans le dossier Brouillons du serveur (et suppression des copies périmées)
+                await run.io_bound(sync.mirror_drafts)
         except Exception:
             log.exception("file d'envoi")
         ticks += 1

@@ -166,6 +166,109 @@ def sync_account(key: str) -> int:
     return changed
 
 
+# ---------- brouillons : copie dans le dossier Brouillons du serveur ----------
+DRAFT_FORGET_AFTER = 180  # secondes : une copie absente du serveur 3 minutes après la dernière synchro est considérée comme supprimée ailleurs
+
+
+def drafts_folder(account: str) -> str:
+    return next((f["key"] for f in db.folders(account) if f["role"] == "drafts"), "")
+
+
+def _draft_has_content(d: dict) -> bool:
+    top, _ = compose.split_user_part(d.get("html") or "")
+    return bool(html_to_text(top).strip() or "<img" in top or (d.get("subject") or "").strip() or (d.get("to_addrs") or "").strip())
+
+
+def _follow_drafts_folder(account: str, folder: str) -> None:
+    """Une fois par boîte : le dossier Brouillons devient un dossier suivi, pour qu'on y retrouve ses brouillons (on peut ensuite le décocher)."""
+    if db.kv_get(f"drafts_auto:{account}"):
+        return
+    db.set_folder_sync(account, {f["key"] for f in db.folders(account) if f["sync"]} | {folder})
+    db.kv_set(f"drafts_auto:{account}", "1")
+
+
+def mirror_drafts(max_items: int = 5) -> int:
+    """Copie sur le serveur (dossier Brouillons de la boîte) les brouillons modifiés, et supprime les copies des brouillons envoyés ou supprimés.
+    Sans réseau, rien ne se perd : tout reste en local et sera repris au passage suivant. Retourne le nombre de copies faites."""
+    done = 0
+    for g in db.drafts_gone():
+        cfg = ACCOUNTS.get(g["account"])
+        if not cfg or not cfg.password:
+            db.draft_gone_done(g["id"])  # boîte retirée : plus rien à supprimer
+            continue
+        try:
+            provider(g["account"]).delete_draft(g["ref"], g["folder"])
+        except Exception as e:
+            log_failure(f"suppression de la copie d'un brouillon ({g['account']})", e)
+            continue
+        db.draft_gone_done(g["id"])
+    for d in db.drafts_to_push(max_items):
+        cfg = ACCOUNTS.get(d["account"])
+        if not cfg or not cfg.password or not _draft_has_content(d):
+            continue
+        folder = drafts_folder(d["account"])
+        if not folder:
+            continue  # liste des dossiers pas encore lue : au prochain passage
+        _follow_drafts_folder(d["account"], folder)
+        row, files = db.draft_load(d["id"])
+        if not row:
+            continue
+        try:
+            ref = provider(d["account"]).save_draft({"to": row["to_addrs"], "cc": row["cc"], "bcc": row.get("bcc") or "", "subject": row["subject"], "html": row["html"]},
+                                                    files, d.get("server_ref") or None, folder)
+        except Exception as e:
+            log_failure(f"copie d'un brouillon ({d['account']})", e)
+            continue
+        if db.draft_load(d["id"])[0]:  # (le brouillon a pu être supprimé ou envoyé pendant la copie : alors cette copie devient orpheline)
+            db.draft_set_server(d["id"], ref, d["updated"], folder)
+            done += 1
+        else:
+            db.draft_gone_add(d["account"], ref, folder)
+    forget_vanished_drafts()
+    return done
+
+
+def forget_vanished_drafts() -> int:
+    """Un brouillon dont la copie a disparu du serveur (supprimée dans Outlook, ou dans la liste du dossier) n'a plus de raison de rester ici.
+    Prudent : seulement si le dossier est suivi, sans modification locale depuis la copie, et si la synchro est passée depuis assez longtemps."""
+    from datetime import timedelta
+    last = db.kv_get("last_sync")
+    if not last:
+        return 0
+    n = 0
+    for d in db.drafts_in_sync():
+        folder = next((f for f in db.folders(d["account"]) if f["key"] == d["server_folder"]), None)
+        if not folder or not folder["sync"]:
+            continue
+        try:
+            if datetime.fromisoformat(last) < datetime.fromisoformat(d["server_at"]) + timedelta(seconds=DRAFT_FORGET_AFTER):
+                continue
+        except ValueError:
+            continue
+        with db.conn() as c:
+            there = c.execute("SELECT 1 FROM messages WHERE account=? AND folder=? AND uid=?", (d["account"], d["server_folder"], d["server_ref"])).fetchone()
+        if not there:
+            db.draft_delete(d["id"], keep_server=True)
+            n += 1
+    return n
+
+
+def load_server_draft(m: dict) -> str:
+    """Un brouillon du dossier Brouillons qu'on n'a pas écrit ici (ex : commencé dans Outlook) : on le relit et on le range parmi les brouillons locaux
+    pour pouvoir le modifier. Retourne l'identifiant du brouillon local (celui qui existait déjà, le cas échéant)."""
+    import uuid
+    known = db.draft_by_ref(m["account"], m["uid"])
+    if known:
+        return known["id"]
+    data = provider(m["account"]).load_draft(m["uid"], m["folder"])
+    did = uuid.uuid4().hex
+    db.draft_save({"id": did, "account": m["account"], "is_new": True, "reply_to": None, "to": data["to"], "cc": data["cc"], "bcc": data["bcc"],
+                   "subject": data["subject"], "html": data["html"]}, data["files"])
+    row, _ = db.draft_load(did)
+    db.draft_set_server(did, m["uid"], row["updated"], m["folder"])  # la copie du serveur est déjà à jour : pas de recopie tant qu'on ne modifie rien
+    return did
+
+
 # ---------- recherche sur le serveur ----------
 def server_search_on() -> bool:
     return db.kv_get("server_search") != "0"

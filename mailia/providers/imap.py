@@ -1,5 +1,6 @@
 """Boîte IMAP/SMTP classique (IONOS) : synchro par UID, actions et notifications IDLE."""
 import hashlib
+import html as html_mod
 import logging
 import re
 import smtplib
@@ -7,7 +8,7 @@ from datetime import timezone
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
 
-from imap_tools import AND, MailBox, MailBoxStartTls, MailMessageFlags
+from imap_tools import AND, H, MailBox, MailBoxStartTls, MailMessageFlags
 
 from .. import oauth, sendstats, tlsutil
 from ..config import AccountCfg
@@ -288,6 +289,32 @@ class ImapProvider:
         except Exception:
             log.warning("copie dans « Envoyés » impossible (le message est bien parti)", exc_info=True)
             sendstats.record("nocopy", subject)
+
+    # ---------- brouillons (copie dans le dossier Brouillons du serveur) ----------
+    def save_draft(self, d: dict, files: list, ref: str | None, folder_key: str) -> str:
+        """Ajoute le brouillon au dossier Brouillons (drapeau « brouillon », jamais envoyé) et retire la version précédente. Retourne son UID."""
+        html = d.get("html") or ""
+        msg = self.build(d.get("to") or "", d.get("subject") or "", html_to_text(html), d.get("cc") or "", files, html or None, None, d.get("bcc") or "")
+        mid = msg["Message-ID"]
+        with self._box(folder_key) as mb:
+            mb.append(msg.as_bytes(), folder_key, flag_set=[MailMessageFlags.DRAFT, MailMessageFlags.SEEN])
+            found = mb.uids(AND(header=H("Message-ID", mid)))  # l'UID n'est pas renvoyé par tous les serveurs : on le retrouve par l'identifiant du message
+            if not found:
+                raise RuntimeError("Brouillon ajouté mais introuvable sur le serveur")
+            if ref:
+                mb.delete(ref)
+        return str(found[-1])
+
+    def load_draft(self, ref: str, folder_key: str) -> dict:
+        m = self._full(folder_key, ref)
+        html = (m.html or "") or "<p>" + "<br>".join(html_mod.escape(m.text or "").splitlines()) + "</p>"
+        files = [(a.filename or "piece-jointe", a.payload, a.content_type or "application/octet-stream")
+                 for a in m.attachments if a.content_disposition != "inline"]
+        return {"to": ", ".join(m.to), "cc": ", ".join(m.cc), "bcc": " ".join(m.headers.get("bcc", ())), "subject": m.subject or "", "html": html, "files": files}
+
+    def delete_draft(self, ref: str, folder_key: str) -> None:
+        with self._box(folder_key) as mb:
+            mb.delete(ref)
 
     # ---------- notifications en direct (IMAP IDLE sur la boîte de réception) ----------
     def wait_for_changes(self, keys: list[str], timeout: int) -> bool:

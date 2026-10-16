@@ -1,10 +1,11 @@
 """Exchange hébergé (EWS, NTLM) via exchangelib : synchro incrémentale, actions et notifications en direct."""
+import html as _html_mod
 import json
 import logging
 from datetime import datetime, timezone
 
 from exchangelib import Account, Configuration, Credentials, DELEGATE, FileAttachment, HTMLBody, Mailbox, Message
-from exchangelib.errors import ErrorInvalidSyncStateData
+from exchangelib.errors import ErrorInvalidIdMalformed, ErrorInvalidSyncStateData, ErrorItemNotFound
 from exchangelib.extended_properties import ExtendedProperty
 from exchangelib.items import CalendarItem, MeetingCancellation, MeetingRequest, MeetingResponse
 from exchangelib.folders.collections import FolderCollection
@@ -60,6 +61,10 @@ Message.register("followup_icon", _FollowupIcon)
 FIELDS = ["subject", "sender", "to_recipients", "cc_recipients", "datetime_received", "is_read", "body", "has_attachments", "attachments", "conversation_id", "flag_status", "last_verb",
           "start", "end", "location"]  # les trois derniers : invitations à une réunion
 EVENTS = ["NewMailEvent", "CreatedEvent", "DeletedEvent", "ModifiedEvent", "MovedEvent"]
+
+
+def _html_escape(text: str) -> str:
+    return _html_mod.escape(text)
 
 
 def _utc_iso(dt) -> str:
@@ -498,6 +503,34 @@ class EwsProvider:
         except Exception as e:
             raise _AlreadySent(str(e)) from e  # on ne sait pas si c'est parti : surtout ne pas renvoyer un second message
         return True
+
+    # ---------- brouillons (copie dans le dossier Brouillons du serveur) ----------
+    def save_draft(self, d: dict, files: list, ref: str | None, folder_key: str = "") -> str:
+        """Enregistre le brouillon dans le dossier Brouillons (sans jamais l'envoyer) et retire la version précédente. Retourne l'identifiant de la nouvelle."""
+        box = lambda s: [Mailbox(email_address=a.strip()) for a in (s or "").replace(";", ",").split(",") if a.strip()] or None
+        m = Message(account=self.account, folder=self.account.drafts, subject=d.get("subject") or "", body=HTMLBody(d.get("html") or ""),
+                    to_recipients=box(d.get("to")), cc_recipients=box(d.get("cc")), bcc_recipients=box(d.get("bcc")))
+        for name, data, ctype in files or []:
+            m.attach(FileAttachment(name=name, content=data, content_type=ctype or "application/octet-stream"))
+        m.save()  # le dossier Brouillons est celui du message : enregistré, jamais envoyé
+        new = m.id
+        if ref:
+            self.delete_draft(ref, folder_key)  # la nouvelle existe : on peut retirer l'ancienne
+        return new
+
+    def load_draft(self, ref: str, folder_key: str = "") -> dict:
+        i = self._item(ref)
+        body = i.body
+        html = str(body) if isinstance(body, HTMLBody) else "<p>" + "<br>".join(_html_escape(str(body or "")).splitlines()) + "</p>"
+        files = [(a.name or "piece-jointe", bytes(a.content), getattr(a, "content_type", "") or "application/octet-stream")
+                 for a in (i.attachments or []) if hasattr(a, "content") and not getattr(a, "is_inline", False)]
+        return {"to": _addrs(i.to_recipients), "cc": _addrs(i.cc_recipients), "bcc": _addrs(i.bcc_recipients), "subject": i.subject or "", "html": html, "files": files}
+
+    def delete_draft(self, ref: str, folder_key: str = "") -> None:
+        try:
+            self._item(ref).delete()  # définitif : une ancienne version de brouillon n'a rien à faire dans la corbeille
+        except (RuntimeError, ErrorItemNotFound, ErrorInvalidIdMalformed):
+            pass  # déjà supprimé (ailleurs) : rien à faire
 
     _cleaned = False
 

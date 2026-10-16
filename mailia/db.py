@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS rules (   -- règles de tri écrites en langage natur
   id INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT, spec TEXT, active INTEGER DEFAULT 1, hits INTEGER DEFAULT 0, created TEXT
 );
 CREATE TABLE IF NOT EXISTS draft_files (draft_id TEXT, name TEXT, mime TEXT, data BLOB);
+CREATE TABLE IF NOT EXISTS draft_gone (id INTEGER PRIMARY KEY AUTOINCREMENT, account TEXT, ref TEXT, folder TEXT DEFAULT '');  -- copies de brouillons à supprimer sur le serveur
 CREATE TABLE IF NOT EXISTS folders (
   account TEXT NOT NULL, key TEXT NOT NULL, name TEXT, path TEXT, role TEXT DEFAULT '',
   sync INTEGER DEFAULT 0,        -- 1 = dossier synchronisé
@@ -195,7 +196,7 @@ def init() -> None:
             have = {r["name"] for r in c.execute(f"PRAGMA table_info({tbl})")}
             if "bcc" not in have:
                 c.execute(f"ALTER TABLE {tbl} ADD COLUMN bcc TEXT DEFAULT ''")
-            for col in ("source", "api_key") + (("api_note",) if tbl == "drafts" else ()):  # origine : « api » quand un programme ou un assistant l'a créé
+            for col in ("source", "api_key") + (("api_note", "server_ref", "server_at", "server_folder") if tbl == "drafts" else ()):  # origine : « api » quand un programme ou un assistant l'a créé ; copie sur le serveur
                 if col not in have:
                     c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} TEXT DEFAULT ''")
         if "verb" not in cols:
@@ -522,14 +523,60 @@ def draft_mark_api(did: str, key_id: str, note: str = "") -> None:
         c.execute("UPDATE drafts SET source='api', api_key=?, api_note=? WHERE id=?", (key_id, note, did))
 
 
-def drafts_list() -> list[dict]:
+# un brouillon est « sur le serveur » quand sa copie existe dans le dossier Brouillons de la boîte ET que ce dossier est suivi (donc visible)
+_ON_SERVER = ("server_ref IS NOT NULL AND server_ref<>'' AND EXISTS (SELECT 1 FROM folders f WHERE f.account=drafts.account AND f.key=drafts.server_folder AND f.sync=1)")
+
+
+def drafts_list(local_only: bool = False) -> list[dict]:
+    """Tous les brouillons ; `local_only` : seulement ceux qu'on ne voit pas ailleurs (pas encore copiés sur le serveur, ou créés par l'API)."""
     with conn() as c:
-        return [dict(r) for r in c.execute("SELECT * FROM drafts ORDER BY updated DESC")]
+        where = f" WHERE NOT ({_ON_SERVER})" if local_only else ""
+        return [dict(r) for r in c.execute(f"SELECT * FROM drafts{where} ORDER BY updated DESC")]
 
 
 def drafts_count() -> int:
+    """Brouillons qu'on ne trouve que dans la vue « Brouillons » (les autres sont dans le dossier Brouillons de leur boîte)."""
     with conn() as c:
-        return c.execute("SELECT COUNT(*) FROM drafts").fetchone()[0]
+        return c.execute(f"SELECT COUNT(*) FROM drafts WHERE NOT ({_ON_SERVER})").fetchone()[0]
+
+
+def drafts_to_push(limit: int = 5) -> list[dict]:
+    """Brouillons à copier (ou recopier) sur le serveur : modifiés depuis la dernière copie ; ceux des assistants (API) restent locaux."""
+    with conn() as c:
+        return [dict(r) for r in c.execute(
+            "SELECT * FROM drafts WHERE COALESCE(source,'')<>'api' AND (server_at IS NULL OR server_at='' OR updated>server_at) ORDER BY updated LIMIT ?", (limit,))]
+
+
+def draft_set_server(did: str, ref: str, at: str, folder: str) -> None:
+    with conn() as c:
+        c.execute("UPDATE drafts SET server_ref=?, server_at=?, server_folder=? WHERE id=?", (ref, at, folder, did))
+
+
+def draft_by_ref(account: str, ref: str) -> dict | None:
+    with conn() as c:
+        r = c.execute("SELECT * FROM drafts WHERE account=? AND server_ref=?", (account, ref)).fetchone()
+    return dict(r) if r else None
+
+
+def draft_gone_add(account: str, ref: str, folder: str) -> None:
+    with conn() as c:
+        c.execute("INSERT INTO draft_gone(account, ref, folder) VALUES(?,?,?)", (account, ref, folder))
+
+
+def drafts_gone() -> list[dict]:
+    with conn() as c:
+        return [dict(r) for r in c.execute("SELECT * FROM draft_gone ORDER BY id")]
+
+
+def draft_gone_done(gid: int) -> None:
+    with conn() as c:
+        c.execute("DELETE FROM draft_gone WHERE id=?", (gid,))
+
+
+def drafts_in_sync() -> list[dict]:
+    """Brouillons dont la copie serveur est à jour (aucune modification depuis) : candidats au nettoyage si la copie a disparu du serveur."""
+    with conn() as c:
+        return [dict(r) for r in c.execute("SELECT * FROM drafts WHERE server_ref<>'' AND server_ref IS NOT NULL AND updated=server_at")]
 
 
 def draft_load(did: str) -> tuple[dict | None, list]:
@@ -539,8 +586,12 @@ def draft_load(did: str) -> tuple[dict | None, list]:
     return (dict(r) if r else None), files
 
 
-def draft_delete(did: str) -> None:
+def draft_delete(did: str, keep_server: bool = False) -> None:
+    """Supprime le brouillon ; sa copie sur le serveur est mise en file pour être supprimée aussi (au prochain passage, même sans réseau maintenant)."""
     with conn() as c:
+        r = c.execute("SELECT account, server_ref, server_folder FROM drafts WHERE id=?", (did,)).fetchone()
+        if r and r["server_ref"] and not keep_server:
+            c.execute("INSERT INTO draft_gone(account, ref, folder) VALUES(?,?,?)", (r["account"], r["server_ref"], r["server_folder"] or ""))
         c.execute("DELETE FROM drafts WHERE id=?", (did,))
         c.execute("DELETE FROM draft_files WHERE draft_id=?", (did,))
 

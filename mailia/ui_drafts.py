@@ -4,7 +4,7 @@ import re
 import uuid
 from datetime import datetime
 
-from nicegui import run, ui
+from nicegui import background_tasks, run, ui
 
 from mailia import ai, compose, config, contacts_ui, db, htmlmail, queries, sync
 from mailia.textutil import html_to_text
@@ -252,12 +252,16 @@ class DraftsMixin:
         top, _ = compose.split_user_part(d["html"] or "")
         return bool(html_to_text(top).strip() or "<img" in top or d["subject"].strip() or d["to"].strip() or d["files"])
 
+    def _draft_sigs(self) -> tuple:
+        d = self.draft
+        return ((d["account"] if self.new else (self.cur or {}).get("account", "")), d["to"], d["cc"], d.get("bcc", ""), d["subject"], d["html"]), \
+            tuple((f[0], len(f[1])) for f in d["files"])
+
     async def _save_draft_now(self) -> bool:
         d = self.draft
         if not (self.compose or self.new) or not d.get("id") or not self._has_content():
             return False
-        sig = (d["account"] if self.new else (self.cur or {}).get("account", ""), d["to"], d["cc"], d.get("bcc", ""), d["subject"], d["html"])
-        files_sig = tuple((f[0], len(f[1])) for f in d["files"])
+        sig, files_sig = self._draft_sigs()
         if sig == self._saved_sig and files_sig == self._files_sig:
             return False
         account = d["account"] if self.new else (self.cur or {}).get("account", "")
@@ -283,7 +287,7 @@ class DraftsMixin:
         if self._has_content():
             with self.host, ui.dialog() as dlg, ui.card().classes("w-[460px] max-w-full"):
                 ui.label("Que faire de ce message ?").classes("text-h6")
-                ui.label("Vous pouvez le garder dans « Brouillons » pour le reprendre plus tard.").classes("text-body2")
+                ui.label("Vous pouvez le garder dans le dossier Brouillons de la boîte pour le reprendre plus tard (même depuis un autre appareil).").classes("text-body2")
                 with ui.row().classes("justify-end w-full"):
                     ui.button("Continuer à écrire", on_click=lambda: dlg.submit("stay")).props("flat no-caps")
                     ui.button("Supprimer", on_click=lambda: dlg.submit("delete")).props("flat no-caps color=negative")
@@ -294,12 +298,21 @@ class DraftsMixin:
             if choice == "keep":
                 await self._save_draft_now()
                 ui.notify("Brouillon conservé", type="positive")
+                background_tasks.create(run.io_bound(sync.mirror_drafts))  # sans attendre le passage suivant : il apparaît dans le dossier Brouillons
             else:
                 db.draft_delete(self.draft["id"])
         elif self.draft.get("id"):
             db.draft_delete(self.draft["id"])
         self.close_compose()
         await self.reload(force=True)
+
+    async def open_server_draft(self, m: dict) -> None:
+        """Clic sur un brouillon du dossier Brouillons : il s'ouvre dans l'éditeur (celui écrit ici, avec sa réponse et ses pièces jointes, ou relu du serveur)."""
+        try:
+            did = await run.io_bound(sync.load_server_draft, m)
+        except Exception as e:
+            return ui.notify(f"Brouillon illisible : {e}", type="negative", multi_line=True)
+        await self.resume_draft(did)
 
     async def resume_draft(self, did: str) -> None:
         row, files = db.draft_load(did)
@@ -315,6 +328,9 @@ class DraftsMixin:
         if row["account"] in sync.ACCOUNTS and self.new:
             self.draft["account"] = row["account"]
         self._saved_sig = self._files_sig = None
+        if row.get("server_ref") and row.get("updated") == row.get("server_at"):
+            # la copie du serveur est déjà à jour (ex : brouillon commencé dans Outlook) : tant qu'on n'y touche pas, rien n'est réenregistré, ni recopié
+            self._saved_sig, self._files_sig = self._draft_sigs()
         self.root.classes(add="reading")
         self.reader.refresh()
 
