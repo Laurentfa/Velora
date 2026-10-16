@@ -140,7 +140,7 @@ def print_native(path: str) -> None:
         op.runOperation()
 
 
-def watch_print(stop: threading.Event | None = None, every: float = 0.3) -> None:
+def watch_print(stop: threading.Event | None = None, every: float = 0.3, call_on_main=None) -> None:
     """Le programme principal demande une impression en écrivant « print_request » ; on l'exécute ici (fenêtre native) et on répond dans
     « print_status » : « <id>:ok » ou « <id>:échec … » (alors le programme ouvre le fichier dans Aperçu comme avant)."""
     def current() -> dict:
@@ -151,13 +151,15 @@ def watch_print(stop: threading.Event | None = None, every: float = 0.3) -> None
         except ValueError:
             return {}
 
+    if call_on_main is None:  # exécution sur le fil principal de la fenêtre (macOS) ; injectable pour les tests
+        from PyObjCTools import AppHelper
+        call_on_main = AppHelper.callAfter
     done = current().get("id")  # une demande restée d'un lancement précédent ne doit pas être rejouée
     while not (stop and stop.is_set()):
         try:
             req = current()
             if req.get("id") and req["id"] != done:
                 done = req["id"]
-                from PyObjCTools import AppHelper
 
                 def run(req=req) -> None:
                     try:
@@ -166,7 +168,7 @@ def watch_print(stop: threading.Event | None = None, every: float = 0.3) -> None
                     except Exception as e:
                         log.warning("impression : %s", e)
                         db.kv_set("print_status", f"{req['id']}:échec {type(e).__name__} {str(e)[:100]}")
-                AppHelper.callAfter(run)
+                call_on_main(run)
         except Exception as e:
             log.warning("surveillance de l'impression : %s", e)
         time.sleep(every)

@@ -97,13 +97,11 @@ def test_window_process_runs_the_print_request_and_ignores_an_old_one(monkeypatc
     import threading
     import time
     from mailia import db, native_menu
-    from PyObjCTools import AppHelper
     printed = []
     monkeypatch.setattr(native_menu, "print_native", lambda path: printed.append(path))
-    monkeypatch.setattr(AppHelper, "callAfter", lambda fn, *a: fn(*a))
     db.kv_set("print_request", json.dumps({"id": "ancien", "path": "/tmp/ancien.pdf"}))  # resté d'un lancement précédent
     stop = threading.Event()
-    t = threading.Thread(target=native_menu.watch_print, args=(stop, 0.02), daemon=True)
+    t = threading.Thread(target=native_menu.watch_print, args=(stop, 0.02, lambda fn: fn()), daemon=True)  # sans PyObjC : le test tourne aussi sous Windows
     t.start()
     time.sleep(0.2)
     assert printed == []  # rejouer une vieille demande ouvrirait une boîte d'impression inattendue
