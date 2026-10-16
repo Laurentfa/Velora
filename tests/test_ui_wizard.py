@@ -120,4 +120,4 @@ def test_wizard_pure_helpers():
     assert wizard.ai_env(st) == {"AI_ENABLED": "1", "ANTHROPIC_API_KEY": "sk-1", "AI_PROVIDER": "anthropic"}
     assert wizard.ai_env({**st, "ai": False}) == {"AI_ENABLED": "0"}
     assert wizard.account_cfg(st).host == "imap.x"
-    assert "ajoutez votre clé" in wizard.recap_text({**st, "api_key": ""}, True) and "paramètres" in wizard.recap_text(st, False)
+    assert "masquées tant qu'aucune clé" in wizard.recap_text({**st, "api_key": ""}, True) and "paramètres" in wizard.recap_text(st, False)

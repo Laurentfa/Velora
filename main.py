@@ -202,6 +202,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         with ui.footer().classes("lt-md bg-transparent q-pa-none").props("elevated=false"):
             with ui.row().classes("w-full justify-around items-center").style("background:var(--surface);border-top:1px solid var(--line)"):
                 for v, txt in (("brief", "Brief"), ("inbox", "Boîte"), ("todo", "À traiter")):
+                    if v != "inbox" and not config.ai_enabled():  # le brief et « À traiter » viennent de l'IA : masqués sans clé
+                        continue
                     ui.button(txt, icon=None, on_click=lambda v=v: self.go(v, "")).props("flat no-caps dense")
                 ui.button("↻", on_click=self.do_sync).props("flat dense")
         self.refresh_title()

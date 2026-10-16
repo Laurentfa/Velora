@@ -164,6 +164,9 @@ def _tab_ia(f) -> None:
     """Onglet « Intelligence artificielle »."""
     ui.label("Intelligence artificielle").classes("text-h6").style("font-weight:700")
     ui.switch("Activer les fonctions IA (résumés, tri, brouillons, brief)").bind_value(f, "AI_ENABLED")
+    if not config.ai_has_key():
+        ui.label("Aucune clé d'API n'est enregistrée : les fonctions IA restent masquées. Elles apparaissent dès que vous ajoutez une clé ci-dessous "
+                 "(Claude ou 1min.AI), puis « Enregistrer ».").classes("text-caption text-negative")
     ui.label("Désactivées : plus aucun envoi à un fournisseur d\'IA, et les éléments IA disparaissent de l'écran.").classes("text-caption text-grey")
     with ui.row().classes("w-full items-center no-wrap gap-2"):
         ui.switch("Notification pour les mails urgents, les messages à revoir et les relances", value=notify.enabled(),
@@ -226,6 +229,9 @@ def _tab_ia(f) -> None:
 def _tab_prm(f, host) -> None:
     """Onglet « Consignes de l'IA »."""
     ui.label("Consignes de l'IA").classes("text-h6").style("font-weight:700")
+    if not config.ai_enabled():
+        return ui.label("Ces consignes règlent le travail de l'IA. Elles apparaissent dès que les fonctions IA sont actives : ajoutez une clé d'API dans "
+                        "l'onglet « Intelligence artificielle ».").classes("text-caption text-grey")
     with ui.column().classes("w-full gap-1"):
         ui.label("Vous décidez des critères. Le format des réponses de l'IA est géré par l'application, pour que rien ne casse.").classes("text-caption text-grey")
         boxes: dict = {}
@@ -327,46 +333,50 @@ def _tab_rules(cfgs, host) -> None:
                         "flat dense round color=negative").tooltip("Supprimer la règle")
 
     rules_list()
-    ui.label("Nouvelle règle").classes("text-subtitle2 q-mt-md")
-    rule_text = ui.textarea(placeholder="ex : Les newsletters de BUT, je les marque comme lues et je les range dans Archive").props(
-        "outlined autogrow stack-label").classes("w-full")
-    proposal = ui.column().classes("w-full gap-1")
+    if not config.ai_enabled():
+        ui.label("Créer une règle passe par l'IA, qui traduit votre phrase en règle précise. Ajoutez une clé d'API dans l'onglet « Intelligence artificielle » "
+                 "pour l'activer.").classes("text-caption text-grey q-mt-md")
+    else:
+        ui.label("Nouvelle règle").classes("text-subtitle2 q-mt-md")
+        rule_text = ui.textarea(placeholder="ex : Les newsletters de BUT, je les marque comme lues et je les range dans Archive").props(
+            "outlined autogrow stack-label").classes("w-full")
+        proposal = ui.column().classes("w-full gap-1")
 
-    async def rule_interpret() -> None:
-        if not config.ai_enabled():
-            return ui.notify("Activez d'abord les fonctions IA.", type="warning")
-        if not (rule_text.value or "").strip():
-            return
-        proposal.clear()
-        with proposal:
-            ui.spinner(size="20px")
-        try:
-            spec = await run.io_bound(rules_mod.interpret, rule_text.value)
-        except ai.AIError as e:
+        async def rule_interpret() -> None:
+            if not config.ai_enabled():
+                return ui.notify("Activez d'abord les fonctions IA.", type="warning")
+            if not (rule_text.value or "").strip():
+                return
             proposal.clear()
             with proposal:
-                ui.label(str(e)).classes("text-negative")
-            return
-        n = await run.io_bound(rules_mod.preview_count, spec)
-        proposal.clear()
-        with proposal:
-            with ui.element("div").classes("aicard"):
-                ui.label("✦ Voici comment j'ai compris la règle").classes("tag")
-                ui.label(rules_mod.describe(spec)).classes("q-mt-xs").style("font-weight:600")
-                if spec["note"]:
-                    ui.label("Remarque : " + spec["note"]).classes("sub")
-                ui.label(f"Parmi vos mails récents, {n} auraient été concernés.").classes("sub")
-                with ui.row().classes("gap-2 q-mt-sm"):
-                    def keep() -> None:
-                        rules_mod.save(rule_text.value, spec)
-                        rule_text.set_value("")
-                        proposal.clear()
-                        rules_list.refresh()
-                        ui.notify("Règle enregistrée : elle s'applique aux nouveaux mails.", type="positive")
-                    ui.button("Enregistrer cette règle", icon="check", on_click=keep).props("unelevated no-caps dense color=primary")
-                    ui.button("Annuler", on_click=proposal.clear).props("flat no-caps dense")
+                ui.spinner(size="20px")
+            try:
+                spec = await run.io_bound(rules_mod.interpret, rule_text.value)
+            except ai.AIError as e:
+                proposal.clear()
+                with proposal:
+                    ui.label(str(e)).classes("text-negative")
+                return
+            n = await run.io_bound(rules_mod.preview_count, spec)
+            proposal.clear()
+            with proposal:
+                with ui.element("div").classes("aicard"):
+                    ui.label("✦ Voici comment j'ai compris la règle").classes("tag")
+                    ui.label(rules_mod.describe(spec)).classes("q-mt-xs").style("font-weight:600")
+                    if spec["note"]:
+                        ui.label("Remarque : " + spec["note"]).classes("sub")
+                    ui.label(f"Parmi vos mails récents, {n} auraient été concernés.").classes("sub")
+                    with ui.row().classes("gap-2 q-mt-sm"):
+                        def keep() -> None:
+                            rules_mod.save(rule_text.value, spec)
+                            rule_text.set_value("")
+                            proposal.clear()
+                            rules_list.refresh()
+                            ui.notify("Règle enregistrée : elle s'applique aux nouveaux mails.", type="positive")
+                        ui.button("Enregistrer cette règle", icon="check", on_click=keep).props("unelevated no-caps dense color=primary")
+                        ui.button("Annuler", on_click=proposal.clear).props("flat no-caps dense")
 
-    ui.button("✦ Interpréter la règle", on_click=rule_interpret).props("outline no-caps color=primary")
+        ui.button("✦ Interpréter la règle", on_click=rule_interpret).props("outline no-caps color=primary")
 
     ews_rules = {k: c.label for k, c in cfgs.items() if c.kind == "ews" and c.password}
     if ews_rules:
@@ -671,7 +681,7 @@ def _tab_use(host) -> None:
 def open_settings(host, on_folders) -> None:
     """Dossiers, IA (interrupteur, modèles, limites), clé API et mots de passe : écrits dans le .env de l'utilisateur."""
     cfgs = sync.ACCOUNTS
-    f = {"ANTHROPIC_API_KEY": "", "ONEMIN_API_KEY": "", "AI_ENABLED": config.ai_enabled(),
+    f = {"ANTHROPIC_API_KEY": "", "ONEMIN_API_KEY": "", "AI_ENABLED": config.ai_switch(),
          "AI_PROVIDER": config.ai_provider(), "AI_FALLBACK": (db.kv_get("ai_fallback") or "1") == "1",
          **{f"MODEL_{t}": config.model(t, "anthropic") for t in config.TASKS},
          **{f"MODEL1_{t}": config.model(t, "onemin")[len(config.ONEMIN_PREFIX):] for t in config.TASKS},

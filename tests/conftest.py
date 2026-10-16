@@ -16,6 +16,7 @@ os.environ["PW_TESTBOX"] = "motdepasse-de-test"
     {"key": "noai", "label": "Sans IA", "kind": "imap", "email": "prive@example.org", "login": "", "host": "imap.invalid", "port": 993,
      "tls": "ssl", "smtp_host": "smtp.invalid", "smtp_port": 587, "ai": False, "enabled": True}]))
 os.environ["PW_NOAI"] = "x"
+os.environ["ANTHROPIC_API_KEY"] = "sk-ant-cle-factice-pour-les-tests"  # sans clé, les fonctions IA sont masquées : les tests de l'interface les supposent présentes
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest  # noqa: E402

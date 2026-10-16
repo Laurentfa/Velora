@@ -100,7 +100,8 @@ def open_account(host, key: str | None = None) -> None:
                      "votre mot de passe. À réserver à un serveur que vous administrez.").classes("text-caption text-grey")
 
         ui.switch("Boîte activée (synchronisée et affichée)").bind_value(a, "enabled")
-        ui.switch("Analyse IA sur cette boîte (boîte de réception)").bind_value(a, "ai")
+        if config.ai_enabled():  # sans clé d'IA, ce réglage n'aurait aucun effet : on ne le montre pas
+            ui.switch("Analyse IA sur cette boîte (boîte de réception)").bind_value(a, "ai")
         sig = {"custom": bool(key and (db.kv_get(f"signature_html:{key}") or "").strip()),
                "html": (db.kv_get(f"signature_html:{key}") if key else "") or compose.signature_html()}
         if key:

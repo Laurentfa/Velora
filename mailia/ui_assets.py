@@ -172,6 +172,8 @@ body.compact .swrap:hover .rowact{opacity:1}
 .btext{min-width:0;font-size:14px;line-height:1.45}
 .bmeta{font-size:12px;color:var(--muted);margin-top:1px}
 .brief-info{font-size:13px;color:var(--muted);margin-top:14px;padding-top:12px;border-top:1px solid var(--line);line-height:1.5}
+.pvframe{width:100%;height:100%;border:0;min-height:600px;background:#fff;color-scheme:light}
+body.body--dark .pvframe{filter:invert(1) hue-rotate(180deg);background:#dae0e9}  /* comme les mails : le document (build_doc) prévoit cette inversion en thème sombre */
 .mailedit{border:1px solid var(--line);border-radius:12px;overflow:hidden;flex-shrink:0}
 .mailedit .q-editor__toolbars-container{background:var(--surface2)}
 .mailedit .q-editor__toolbar{border-bottom:1px solid var(--line);flex-wrap:wrap}

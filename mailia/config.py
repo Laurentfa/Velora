@@ -198,9 +198,20 @@ def conversations_enabled() -> bool:
     return env("CONVERSATIONS", "1") == "1"
 
 
-def ai_enabled() -> bool:
-    """Interrupteur général : désactivé, plus aucun appel à l'API Claude et aucune fonction IA affichée."""
+def ai_switch() -> bool:
+    """L'interrupteur général tel que l'utilisateur l'a réglé (activé par défaut)."""
     return env("AI_ENABLED", "1") == "1"
+
+
+def ai_has_key() -> bool:
+    """Au moins un fournisseur d'IA a une clé : sans clé, aucune fonction IA ne peut marcher."""
+    return any(provider_ready(p) for p in PROVIDERS)
+
+
+def ai_enabled() -> bool:
+    """Les fonctions IA sont utilisables : interrupteur général activé ET une clé enregistrée. Sinon plus aucun appel à l'API et aucune fonction IA
+    affichée (résumés, brief, brouillons, boutons) : l'appli est alors un client mail ordinaire, qui change d'aspect dès qu'une clé est ajoutée."""
+    return ai_switch() and ai_has_key()
 
 
 def ai_unread_only() -> bool:

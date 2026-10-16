@@ -44,7 +44,7 @@ def ai_env(st: dict) -> dict:
 
 def recap_text(st: dict, need_ai_step: bool) -> str:
     ai_text = ("L'IA est activée." if (st["ai"] and st["api_key"]) else
-               "L'IA est activée : ajoutez votre clé dans Paramètres › Intelligence artificielle." if st["ai"] else
+               "Les fonctions IA sont prévues, mais masquées tant qu'aucune clé n'est enregistrée : ajoutez-la dans Paramètres › Intelligence artificielle." if st["ai"] else
                "L'IA est désactivée : l'appli fonctionne comme un client mail ordinaire.") if need_ai_step else "Vous pourrez régler l'IA dans les paramètres."
     return f"La boîte « {st['label']} » ({st['email']}) sera ajoutée et synchronisée. {ai_text}"
 

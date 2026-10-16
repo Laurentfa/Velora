@@ -234,7 +234,7 @@ class FilesMixin:
                     ui.label(rich_error).style("padding:24px;color:var(--muted)")
                 elif rich and rich["type"] == "html":
                     clean = htmlmail.sanitize(rich["html"], preview.MAX_HTML)
-                    frame = target = ui.element("iframe").style("width:100%;height:100%;border:0;min-height:600px;background:#fff")
+                    frame = target = ui.element("iframe").classes("pvframe")  # suit le thème de l'appli (voir le CSS)
                     target_kind = "frame"
                     frame._props.update({"sandbox": "", "srcdoc": htmlmail.build_doc(clean, False)})  # sandbox vide : aucun script
                 elif kind == "image" or (rich and rich["type"] == "image"):

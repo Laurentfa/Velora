@@ -120,7 +120,11 @@ def test_native_error_in_body_and_text_only_models_use_openai(env):
 
 
 def test_key_missing_and_rate_errors(env):
-    with pytest.raises(ai.AIError) as e:
+    with pytest.raises(ai.AIError) as e:  # aucune clé nulle part : les fonctions IA sont inactives, sans repli possible
+        ai._ask("s", "u", model="1min:gpt-x", feature="ask")
+    assert not e.value.fallback and "désactivées" in str(e.value)
+    env.setenv("ANTHROPIC_API_KEY", "a")
+    with pytest.raises(ai.AIError) as e:  # clé Claude seulement : l'appel 1min.AI échoue faute de clé, et on peut se replier sur Claude
         ai._ask("s", "u", model="1min:gpt-x", feature="ask")
     assert e.value.fallback
     env.setenv("ONEMIN_API_KEY", "k")

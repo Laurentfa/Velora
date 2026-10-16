@@ -78,15 +78,17 @@ def privacy_panel(extra=None) -> None:
     """Confidentialité : ce que l'IA voit, qui en est exclu. `extra` : fonction qui ajoute d'autres sections (chiffrement, verrouillage)."""
     ui.label("Confidentialité et sécurité").classes("text-h6").style("font-weight:700")
     ai_on = config.ai_enabled()
+    no_key = config.ai_switch() and not config.ai_has_key()
     with ui.element("div").classes("q-pa-md").style("background:var(--ai-soft);border-radius:12px;border:1px solid var(--line)"):
-        ui.label("IA : " + ("activée" if ai_on else "désactivée — aucun contenu n'est envoyé à un fournisseur d'IA")).style("font-weight:700")
+        ui.label("IA : " + ("activée" if ai_on else "inactive — aucune clé d'API enregistrée, rien n'est envoyé" if no_key
+                            else "désactivée — aucun contenu n'est envoyé à un fournisseur d'IA")).style("font-weight:700")
         if ai_on:
             ui.label("Ce qui part chez votre fournisseur d'IA (" + " / ".join(v for k, v in config.PROVIDERS.items() if config.provider_ready(k)) + "), uniquement si la fonction est active : le texte des mails à analyser (tri et résumé), "
                      "ce que vous demandez à l'IA de rédiger ou de traduire, et — seulement quand vous cliquez sur « Résumer » — le contenu d'une pièce jointe. "
                      "Jamais vos mots de passe, ni les mails des boîtes ou expéditeurs exclus ci-dessous.").classes("text-caption")
         else:
-            ui.label("L'interrupteur général se trouve dans l'onglet « Intelligence artificielle ». Désactivé, plus rien n'est envoyé et les "
-                     "éléments IA disparaissent de l'écran.").classes("text-caption")
+            ui.label("L'interrupteur général et les clés se trouvent dans l'onglet « Intelligence artificielle ». Sans clé, ou désactivé, plus rien "
+                     "n'est envoyé et les éléments IA disparaissent de l'écran.").classes("text-caption")
 
     ui.label("Boîtes concernées").classes("text-subtitle2 q-mt-md")
     accounts = config.load_accounts(enabled_only=False)
