@@ -4,6 +4,7 @@ from nicegui.testing import User
 
 from mailia import config, db
 from mailia.ui_settings import open_settings
+from mailia.version import APP_VERSION
 
 SECTIONS = ("Boîtes mail", "Affichage et signature", "Dossiers", "Intelligence artificielle", "Consignes de l'IA", "Règles de tri automatiques",
             "Réponse automatique d'absence", "Agenda", "Automatismes", "Confidentialité et sécurité", "API et assistants", "Utilisation et données")
@@ -24,7 +25,7 @@ async def test_every_section_is_rendered(user: User) -> None:
     for heading in ("Boîtes mail", "Affichage et signature", "Règles de tri automatiques", "Réponse automatique d'absence", "Agenda"):
         await user.should_see(heading)
     for body in ("Ajouter une boîte mail", "Langue de l'interface", "Fournisseur d'IA", "Nouvelle règle", "Mots de passe des boîtes",
-                 "Exporter mes données", "Choisissez les dossiers affichés"):
+                 "Exporter mes données", "Choisissez les dossiers affichés", "À propos de Velora", "Laurent Fauvel", APP_VERSION):
         await user.should_see(body)  # le contenu de chaque onglet est bien construit, pas seulement son titre
 
 

@@ -28,6 +28,25 @@ def _tab_api(host) -> None:
     api_ui.api_panel(host, lambda url: ui.navigate.to(url, new_tab=True))
 
 
+def _tab_about() -> None:
+    """Onglet « À propos » : nom, version et auteur."""
+    from .version import APP_VERSION, UPDATE_REPO
+    ui.label("À propos de Velora").classes("text-h6").style("font-weight:700")
+    with ui.column().classes("gap-1 q-mt-sm"):
+        ui.label("Velora").classes("text-h5").style("font-weight:700;color:var(--accent)")
+        ui.label("Messagerie personnelle avec assistant IA intégré").classes("text-body2").style("color:var(--muted)")
+    with ui.column().classes("gap-2 q-mt-md"):
+        for k, v in (("Version", APP_VERSION), ("Auteur", "Laurent Fauvel")):
+            with ui.row().classes("items-baseline gap-3 no-wrap"):
+                ui.label(k).classes("rmeta").style("width:70px;font-weight:600")
+                ui.label(v).classes("text-body1").mark(f"about-{k.lower()}")
+        if UPDATE_REPO:
+            with ui.row().classes("items-baseline gap-3 no-wrap"):
+                ui.label("Projet").classes("rmeta").style("width:70px;font-weight:600")
+                ui.link(f"github.com/{UPDATE_REPO}", f"https://github.com/{UPDATE_REPO}", new_tab=True)
+    ui.label("© Laurent Fauvel. Logiciel gratuit.").classes("rmeta q-mt-lg")
+
+
 def _tab_auto() -> None:
     """Onglet « Automatismes »."""
     settings_ui.automations_panel()
@@ -716,8 +735,11 @@ def open_settings(host, on_folders) -> None:
                 ui.tab("priv", label="Confidentialité et sécurité", icon="lock")
                 ui.tab("api", label="API et assistants", icon="hub")
                 ui.tab("use", label="Utilisation et données", icon="insights")
+                ui.tab("about", label="À propos", icon="info")
             with ui.tab_panels(tabs, value="boites").props("vertical").classes("col").style("min-width:0;height:100%;background:transparent"):
-                sec = {k: ui.tab_panel(k).classes("q-pa-lg").style("overflow-y:auto") for k in ("boites", "aff", "dos", "ia", "prm", "rules", "abs", "cal", "auto", "priv", "api", "use")}
+                sec = {k: ui.tab_panel(k).classes("q-pa-lg").style("overflow-y:auto") for k in ("boites", "aff", "dos", "ia", "prm", "rules", "abs", "cal", "auto", "priv", "api", "use", "about")}
+        with sec["about"], ui.column().classes("w-full gap-1").style("max-width:700px"):
+            _tab_about()
         with sec["api"], ui.column().classes("w-full gap-1").style("max-width:760px"):
             _tab_api(host)
 
