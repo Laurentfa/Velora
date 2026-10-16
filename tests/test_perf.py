@@ -97,3 +97,16 @@ def test_window_marks_appear_in_the_report_of_the_same_launch_only(monkeypatch):
     assert text.index("modules chargés") < text.index("moteur d'affichage")  # triés par heure
     db.kv_set("perf:window", json.dumps({"t0": perf.T0 + 1, "marks": [["fenêtre native : ancien lancement", 9.0]]}))
     assert "ancien lancement" not in perf.report()
+
+
+def test_windows_window_uses_a_permanent_profile_in_the_data_folder(monkeypatch):
+    import sys
+    import main
+    monkeypatch.setattr(sys, "platform", "win32")
+    args = main._webview_args()
+    assert args["private_mode"] is False and args["storage_path"] == str(config.DATA_DIR / "webview")
+    monkeypatch.setenv("VELORA_WEBVIEW_PRIVATE", "1")  # échappatoire si un profil permanent posait problème
+    assert main._webview_args() == {}
+    monkeypatch.delenv("VELORA_WEBVIEW_PRIVATE")
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert main._webview_args() == {}  # Mac : inchangé

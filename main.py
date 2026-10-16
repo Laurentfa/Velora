@@ -1779,6 +1779,16 @@ def _cleanup_stale() -> None:
                 pass
 
 
+def _webview_args() -> dict:
+    """Windows : par défaut la fenêtre (WebView2) recrée un profil de navigateur tout neuf dans un dossier temporaire à chaque lancement, l'efface
+    à la fermeture, et supprime les cookies au démarrage : ~2,5 s de démarrage perdues. Un profil permanent, rangé dans le dossier de données
+    (donc dans ce que l'antivirus peut exclure), est réutilisé d'un lancement à l'autre : le démarrage est plus rapide et les fichiers de la page
+    restent en cache. Sur Mac, la fenêtre n'a pas ce coût : rien ne change."""
+    if not sys.platform.startswith("win") or os.environ.get("VELORA_WEBVIEW_PRIVATE") == "1":
+        return {}
+    return {"private_mode": False, "storage_path": str(config.DATA_DIR / "webview")}
+
+
 DB_ERROR = ""
 DB_NOTICE = ""  # base abîmée puis réparée au démarrage : dit à l'utilisateur ce qui s'est passé (affiché une fois)
 try:
@@ -1824,6 +1834,7 @@ if __name__ in {"__main__", "__mp_main__"}:
         _cleanup_stale()
     logs.setup()
     app.native.start_args["func"] = _native_context_menu  # s'exécute dans le processus de la fenêtre native
+    app.native.start_args.update(_webview_args())
     _conn = {}  # moment de la dernière déconnexion de la fenêtre : de quoi expliquer un rechargement dans le journal
 
     def _client_connected(client) -> None:
