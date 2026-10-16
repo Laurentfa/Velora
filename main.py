@@ -60,7 +60,7 @@ os.environ.setdefault("NICEGUI_STORAGE_PATH", str(_config.DATA_DIR / ".nicegui")
 
 from nicegui import app, background_tasks, native, run, ui
 
-from mailia import ai, aipolicy, apiserver, compose, config, db, folder_order, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, vault, wizard
+from mailia import ai, aipolicy, apiserver, compose, config, db, folder_order, folder_tree, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, vault, wizard
 from mailia.textutil import for_ai
 from mailia.ui_account import friendly_error
 from mailia.ui_assets import CSS, SWIPE_JS
@@ -220,8 +220,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
     def folder_dropped(self, args: dict | None, acct: str, target: str) -> None:
         """Un dossier a été déposé avant ou après `target` (même niveau) : l'ordre est mémorisé pour cette boîte."""
         d = (args or {}).get("detail") or {}
-        rows = [f for f in db.folders(acct) if f["sync"] and f["key"] != "INBOX"]
-        new = folder_order.move(rows, folder_order.load(acct), d.get("from", ""), target, bool(d.get("after")))
+        new = folder_order.move(db.folders(acct), folder_order.load(acct), d.get("from", ""), target, bool(d.get("after")))
         if new is None:
             return
         folder_order.save(acct, new)
@@ -251,24 +250,22 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
     def side(self) -> None:
         c = self.counts
         use_ai = config.ai_enabled()
-        subs: dict[str, list] = {}
-        for f in db.folders():
-            if f["sync"] and f["key"] != "INBOX":
-                subs.setdefault(f["account"], []).append(f)
-        for acct, lst in subs.items():
-            subs[acct] = folder_order.sort_folders(lst, folder_order.load(acct))  # ordre choisi par glisser-déposer, sinon alphabétique
-
         def item(view: str, acc: str, icon: str, label: str, cnt: int | str = 0, hot: bool = False,
                  folder: str = "", depth: int = 0, manage: bool = False, drop: str = "", total: int | None = None, fold: bool | None = None,
-                 fpath: str | None = None, ffold: bool | None = None) -> None:
+                 fparent: str | None = None, ffold: bool | None = None, fkey: str = "", tip: str = "", extra: int = 0) -> None:
             on = self.view == view and self.account == acc and self.folder == folder
-            el = ui.element("div").classes("nav" + (" on" if on else "") + (" sub" if depth else "")).on(
-                "click", lambda _, v=view, a=acc, f=folder: self.go(v, a, f))
+            el = ui.element("div").classes("nav" + (" on" if on else "") + (" sub" if depth else "") + (" ghost" if view == "ghost" else ""))
+            if view == "header":  # en-tête d'une boîte qui a des sous-dossiers : replie ou déplie (la boîte de réception est sa première ligne)
+                el.on("click", lambda _, a=acc: self.toggle_fold(a))
+            elif view == "ghost":  # dossier parent non suivi, montré pour garder la hiérarchie : il ne s'ouvre pas
+                el.on("click", lambda _, a=acc, k=fkey: self.toggle_folder_fold(a, k))
+            else:
+                el.on("click", lambda _, v=view, a=acc, f=folder: self.go(v, a, f))
             if depth > 1:  # sous-dossier (ex : les années dans Archive) : décalé d'un cran par niveau, sous son parent ; les dossiers de premier niveau restent alignés
                 el.style(f"padding-left:{10 + 18 * (depth - 1)}px")
-            if fpath is not None:  # un dossier : on peut le glisser avant ou après un autre dossier du même niveau
+            if fparent is not None:  # un dossier : on peut le glisser avant ou après un autre dossier du même niveau
                 el.classes("navfolder")
-                el._props.update({"draggable": "true", "data-acct": acc, "data-fkey": folder, "data-parent": folder_order.parent_of(fpath)})
+                el._props.update({"draggable": "true", "data-acct": acc, "data-fkey": folder, "data-parent": fparent})
                 el.on("folderdrop", lambda e, a=acc, k=folder: self.folder_dropped(e.args, a, k), args=["detail"])
             if drop:  # cette ligne accepte un mail déposé : il est déplacé dans ce dossier
                 el.classes("droptarget")
@@ -282,8 +279,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                     ui.html(logo_img(20), sanitize=False).classes("ic").style("display:flex;justify-content:center")
                 elif ffold is not None:  # dossier qui a des sous-dossiers : la flèche les replie ou les déplie (à la place du petit triangle)
                     ui.icon("expand_more" if ffold else "chevron_right", size="18px").classes("ic").style("color:var(--muted);cursor:pointer").on(
-                        "click.stop", lambda _, a=acc, k=folder: self.toggle_folder_fold(a, k)).tooltip(
-                        "Replier les sous-dossiers" if ffold else "Déplier les sous-dossiers").mark(f"ffold-{acc}-{folder}")
+                        "click.stop", lambda _, a=acc, k=(fkey or folder): self.toggle_folder_fold(a, k)).tooltip(
+                        "Replier les sous-dossiers" if ffold else "Déplier les sous-dossiers").mark(f"ffold-{acc}-{fkey or folder}")
                 else:
                     ui.label(icon).classes("ic")
                 ui.label(label).classes("lbl")
@@ -291,10 +288,14 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                     ui.button(icon="create_new_folder").props("flat dense round size=xs").tooltip(
                         "Choisir les dossiers affichés").on("click.stop", lambda _, a=acc: self.folders_dialog(a))
                 if total is not None:  # « non lus / total » : le total est celui de la liste affichée
-                    if total:
-                        ui.label(f"{cnt or 0} / {total}").classes("cnt" + (" hot" if hot and cnt else "") + ("" if cnt else " zero"))
+                    if total or cnt:
+                        ui.label(f"{cnt or 0} / {total}" if total else str(cnt)).classes("cnt" + (" hot" if hot and cnt else "") + ("" if cnt else " zero"))
+                    if extra:  # non lus cachés dans les sous-dossiers d'un dossier replié : « +12 », à côté du décompte du dossier lui-même
+                        ui.label(f"+{extra}").classes("cnt hot").style("margin-left:4px").tooltip(tip)
                 elif cnt:
-                    ui.label(str(cnt)).classes("cnt" + (" hot" if hot else ""))
+                    lbl = ui.label(str(cnt)).classes("cnt" + (" hot" if hot else ""))
+                    if tip:
+                        lbl.tooltip(tip)
 
         with ui.element("div").classes("sidetop"):  # en-tête fixe
             with ui.element("div").classes("sidehead"):
@@ -310,22 +311,28 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             ui.label("Boîtes").classes("grp")
             item("inbox", "", "✉", "Toutes les boîtes", c["unread"], True, total=c["tot_all"])
             folded = self.folded()
+            ffolded = self.folders_folded()
             for key, cfg in sync.ACCOUNTS.items():
-                item("inbox", key, "logo", cfg.label, c["accounts"].get(key, 0), manage=True, drop="INBOX", total=c["tot_accounts"].get(key, 0),
-                     fold=(key not in folded) if subs.get(key) else None)
-                ffolded = self.folders_folded()
-                paths = {f["key"]: f["path"] for f in subs.get(key, [])}
-                collapsed = [paths[k.split("|", 1)[1]] + "/" for k in ffolded if k.startswith(key + "|") and k.split("|", 1)[1] in paths]
-                for f in ([] if key in folded else subs.get(key, [])):
-                    selected = self.view == "folder" and self.account == key and self.folder == f["key"]
-                    if not selected and any(f["path"].startswith(p) for p in collapsed):  # sous un dossier replié : masqué (sauf celui qu'on regarde)
-                        continue
-                    has_kids = any(g["path"].startswith(f["path"] + "/") for g in subs[key])
-                    same = sum(1 for g in subs[key] if g["name"] == f["name"]) > 1
-                    shown = f["path"].rsplit("/", 2)[-2] + " › " + f["name"] if same and "/" in f["path"] else f["name"]
-                    item("folder", key, "▸", shown, c["folders"].get(f"{key}|{f['key']}", 0), folder=f["key"],
-                         depth=1 + f["path"].count("/"), drop=f["key"], total=c["tot_folders"].get(f"{key}|{f['key']}", 0), fpath=f["path"],
-                         ffold=(f"{key}|{f['key']}" not in ffolded) if has_kids else None)
+                selected = self.folder if (self.view == "folder" and self.account == key) else ""
+                nodes = folder_tree.build(db.folders(key), folder_order.load(key), ffolded, selected, key)
+                if not any(n["key"] != "INBOX" for n in nodes):  # une boîte sans sous-dossiers : la ligne de la boîte est sa boîte de réception
+                    item("inbox", key, "logo", cfg.label, c["accounts"].get(key, 0), manage=True, drop="INBOX", total=c["tot_accounts"].get(key, 0))
+                    continue
+                item("header", key, "logo", cfg.label, manage=True, fold=key not in folded)  # en-tête de la boîte : la boîte de réception est la ligne suivante
+                if key in folded:
+                    continue
+                for n in nodes:
+                    ffold = n["open"] if n["kids"] else None
+                    hidden = sum(c["folders"].get(f"{key}|{k}", 0) for k in n["below"]) if (n["kids"] and not n["open"]) else 0  # non lus des sous-dossiers repliés
+                    tip = f"{hidden} non lu(s) dans les sous-dossiers" if hidden else ""
+                    if n["ghost"]:
+                        item("ghost", key, "▸", n["name"], depth=n["depth"] + 1, ffold=ffold, fkey=n["key"], tip=tip, extra=hidden)
+                    elif n["key"] == "INBOX":
+                        item("inbox", key, "✉", n["name"], c["accounts"].get(key, 0), True, drop="INBOX", depth=n["depth"] + 1, ffold=ffold,
+                             total=c["tot_accounts"].get(key, 0), tip=tip, fkey="INBOX", extra=hidden)
+                    else:
+                        item("folder", key, "▸", n["name"], c["folders"].get(f"{key}|{n['key']}", 0), folder=n["key"], depth=n["depth"] + 1, drop=n["key"],
+                             total=c["tot_folders"].get(f"{key}|{n['key']}", 0), fparent=n["parent"], ffold=ffold, tip=tip, extra=hidden)
             ui.label("Vues").classes("grp")
             if use_ai:
                 item("todo", "", "⚑", "À traiter", c["todo"], True, total=c["tot_todo"])

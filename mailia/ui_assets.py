@@ -80,6 +80,7 @@ body.resizing iframe{pointer-events:none}
 .nav .lbl{flex:1}.nav .cnt{font-size:12px;color:var(--muted)}
 .nav .cnt.hot{background:var(--accent);color:#fff;border-radius:999px;padding:0 7px;font-weight:600}
 .nav.sub{padding:6px 10px;font-size:14px}
+.nav.ghost{color:var(--muted)}.nav.ghost .lbl{opacity:.8}
 .grp{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);padding:16px 10px 4px}
 .listcol{background:var(--surface);border-right:1px solid var(--line);height:100vh;min-width:0;flex-wrap:nowrap}
 .lhead{box-sizing:border-box;height:120px;padding:14px 14px 0;border-bottom:1px solid var(--line);width:100%}
