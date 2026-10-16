@@ -106,6 +106,25 @@ def list_messages(account: str = "", q: str = "", unread: bool = False, view: st
         return top + fetch(c, f"ckey NOT IN ({marks})", list(pins), limit, offset)
 
 
+def add_snippets(rows: list[dict], terms: list[str]) -> None:
+    """Pour une recherche : ajoute à chaque ligne `snip`, l'extrait du texte autour du mot trouvé (comme Apple Mail), quand il n'est ni dans l'objet ni
+    chez l'expéditeur. Le texte des mails n'est lu que pour les lignes affichées."""
+    for r in rows:
+        r["snip"] = ""
+    if not terms or not rows:
+        return
+    by_id = {r["id"]: r for r in rows}
+    ids = list(by_id)
+    with db.conn() as c:
+        for n in range(0, len(ids), 400):
+            part = ids[n:n + 400]
+            for x in c.execute(f"SELECT id, body FROM messages WHERE id IN ({','.join('?' * len(part))})", part):
+                r = by_id[x["id"]]
+                head = f"{r['subject'] or ''} {r['sender_name'] or ''} {r['sender'] or ''}"
+                if not search._spans(head, terms):  # le mot est déjà visible (et surligné) dans l'objet ou l'expéditeur : pas d'extrait
+                    r["snip"] = search.snippet(x["body"] or "", terms)
+
+
 def thread(ckey: str) -> list[dict]:
     return db.thread_rows(ckey)
 

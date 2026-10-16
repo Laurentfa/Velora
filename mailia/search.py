@@ -23,6 +23,62 @@ def _norm(s: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", s.lower()) if unicodedata.category(c) != "Mn")
 
 
+def _fold(s: str) -> str:
+    """Minuscules sans accents, EN GARDANT la même longueur que le texte d'origine (pour reporter les positions sur l'original)."""
+    return "".join(unicodedata.normalize("NFD", c)[0].lower() for c in s)
+
+
+def highlight_terms(q: str) -> list[str]:
+    """Mots à surligner dans les résultats : le texte libre de la recherche et les valeurs de « de: » et « objet: » (pas les filtres exclus)."""
+    adv = parse(q or "")
+    words = (adv["text"] if adv["advanced"] else q or "").replace('"', " ").replace("*", " ").split()
+    for m in _TOKEN.finditer(q or ""):
+        if m.group(1) != "-" and _norm(m.group(2)) in ("de", "from", "exp", "objet", "subject", "sujet"):
+            words += (m.group(4) if m.group(4) is not None else m.group(3)).replace('"', " ").split()
+    seen, out = set(), []
+    for w in words:
+        w = _fold(w)
+        if len(w) >= 2 and w not in seen:
+            seen.add(w)
+            out.append(w)
+    return out
+
+
+def _spans(text: str, terms: list[str]) -> list[tuple[int, int]]:
+    """Positions des mots cherchés dans le texte, sans tenir compte de la casse ni des accents ; comme la recherche, un mot peut être
+    tapé en partie (« lemas » trouve « Lemasson »)."""
+    if not terms:
+        return []
+    folded = _fold(text)
+    rx = re.compile(r"(?<!\w)(?:" + "|".join(re.escape(t) for t in sorted(terms, key=len, reverse=True)) + ")")
+    return [m.span() for m in rx.finditer(folded)]
+
+
+def highlight_html(text: str, terms: list[str]) -> str:
+    """Le texte échappé (jamais de HTML venu du mail), avec <mark> autour des mots cherchés."""
+    import html as _html
+    out, pos = [], 0
+    for a, b in _spans(text or "", terms):
+        out += [_html.escape(text[pos:a]), "<mark>", _html.escape(text[a:b]), "</mark>"]
+        pos = b
+    out.append(_html.escape((text or "")[pos:]))
+    return "".join(out)
+
+
+def snippet(body: str, terms: list[str], before: int = 40, after: int = 110) -> str:
+    """Extrait du texte autour du premier mot cherché (« …le patient sous VNI… »), ou « » s'il n'y en a pas."""
+    body = " ".join((body or "").split())
+    spans = _spans(body, terms)
+    if not spans:
+        return ""
+    a = spans[0][0]
+    start = max(0, a - before)
+    if start:
+        start = body.rfind(" ", 0, start + 1) + 1 or start  # ne pas couper un mot
+    end = min(len(body), a + after)
+    return ("…" if start else "") + body[start:end].strip() + ("…" if end < len(body) else "")
+
+
 def _yes(v: str) -> bool:
     return _norm(v) in ("", "oui", "o", "yes", "y", "true", "1", "vrai")
 

@@ -101,6 +101,8 @@ body.resizing iframe{pointer-events:none}
 .mrow.read .subj{color:var(--muted)}
 .mrow .sum{color:var(--muted);font-size:13px;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .mrow .sum::before{content:"✦ ";color:var(--ai)}
+.mrow .sum.snip::before{content:none}
+.mrow mark{background:#ffe566;color:#1d1d1f;border-radius:3px;padding:0 1px}
 .badges{display:flex;gap:5px;margin-top:5px;flex-wrap:wrap}
 .badge{font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;background:var(--surface2);color:var(--muted)}
 .badge.p3{background:var(--hi-soft);color:var(--hi)}.badge.rep{background:var(--accent-soft);color:var(--accent)}

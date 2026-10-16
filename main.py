@@ -60,7 +60,7 @@ os.environ.setdefault("NICEGUI_STORAGE_PATH", str(_config.DATA_DIR / ".nicegui")
 
 from nicegui import app, background_tasks, native, run, ui
 
-from mailia import ai, aipolicy, apiserver, compose, config, db, htmlmail, i18n, logs, notify, queries, security, settings_ui, sync, vault, wizard
+from mailia import ai, aipolicy, apiserver, compose, config, db, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, vault, wizard
 from mailia.textutil import for_ai
 from mailia.ui_account import friendly_error
 from mailia.ui_assets import CSS, SWIPE_JS
@@ -127,6 +127,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self.remote_ids: set[str] | None = None  # mails trouvés par les serveurs pour la recherche en cours
         self.remote_for, self.remote_busy = "", False
         self._remote_cache: dict = {}
+        self.hl: list[str] = []
         self._folder_paths: dict[tuple, str] = {}
         self._row_els: dict[str, ui.element] = {}  # id du mail -> élément de sa ligne dans la liste (pour ne redessiner que les lignes modifiées)
         self.rows_sig = None
@@ -429,7 +430,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                 ui.element("div").classes("dot")
                 with ui.element("div").classes("rb"):
                     with ui.element("div").classes("top"):
-                        ui.label(("★ " if aipolicy.is_vip(m["sender"]) else "") + (m["sender_name"] or m["sender"])).classes("from")
+                        self.marked(("★ " if aipolicy.is_vip(m["sender"]) else "") + (m["sender_name"] or m["sender"]), "from")
                         with ui.element("div").classes("right"):
                             if n > 1:
                                 ui.label(str(n)).classes("convn").tooltip(f"{n} messages dans la conversation")
@@ -441,10 +442,12 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                                 ui.icon("forward" if m["verb"] == 2 else "reply", size="14px").style("color:var(--muted)").tooltip(
                                     "Vous avez transféré ce message" if m["verb"] == 2 else "Vous avez répondu à ce message")
                             ui.label(("📎 " if m["has_att"] else "") + ago(m["date"])).classes("date")
-                    ui.label(m["subject"]).classes("subj")
+                    self.marked(m["subject"], "subj")
                     use_ai = config.ai_enabled()
-                    if m["summary"] and use_ai:
-                        ui.label(m["summary"]).classes("sum")
+                    if self.hl and m.get("snip"):  # recherche : l'extrait du texte où figure le mot (au lieu du résumé de l'IA)
+                        self.marked(m["snip"], "sum snip")
+                    elif m["summary"] and use_ai:
+                        self.marked(m["summary"], "sum")
                     with ui.element("div").classes("badges"):
                         if use_ai and m["priority"] == 3:
                             ui.label("Urgent").classes("badge p3")
@@ -469,6 +472,13 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                             ui.button(icon="delete").props("flat round dense size=sm").on("click.stop", lambda m=m: self.swipe_act(m, "delete")).tooltip(
                                 "Mettre la conversation à la corbeille" if n > 1 else "Mettre à la corbeille")
             self.row_menu(m, unread)
+
+    def marked(self, text: str, classes: str) -> None:
+        """Texte d'une ligne de la liste ; pendant une recherche, les mots cherchés sont surlignés en jaune."""
+        if self.hl and search._spans(text, self.hl):
+            ui.html(search.highlight_html(text, self.hl), sanitize=False).classes(classes)
+        else:
+            ui.label(text).classes(classes)
 
     async def row_preview(self, m: dict) -> None:
         """Aperçu d'une pièce jointe depuis la liste : on cherche, dans la conversation, les pièces jointes qu'on sait afficher."""
@@ -1128,6 +1138,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         await self.reload(force=True)
 
     async def reload(self, force: bool = False) -> None:
+        self.hl = []  # remis plus bas par la liste de mails quand une recherche est en cours
         self.counts = queries.counts()
         if self.view == "brief":
             self.brief = queries.brief()
@@ -1153,6 +1164,9 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                                               folder=self.folder if self.view == "folder" else "", read=self.read_filter == "read",
                                               oldest_first=self.oldest_first, everywhere=self.search_everywhere(),
                                               extra_ids=self.remote_ids if self.remote_for == self.q else None)
+            self.hl = search.highlight_terms(self.q) if self.q.strip() else []  # mots à surligner dans la liste
+            if self.hl:
+                queries.add_snippets(self.rows, self.hl)
             # tout ce qui change l'aspect de la liste est dans la signature : ainsi un rechargement « forcé » (ouvrir un mail, cocher…) ne redessine
             # que les lignes touchées, au lieu des 80
             look = (self.view, self.account, self.folder, self.q, self.read_filter, self.oldest_first, self.limit, tuple(sorted(self.picked)), self.select_mode,
