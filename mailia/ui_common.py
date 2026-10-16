@@ -151,6 +151,26 @@ def human_size(n: int) -> str:
         n /= 1024
 
 
+_real_notify = ui.notify
+
+
+def safe_notify(*args, **kwargs):
+    """Message à l'utilisateur, même si l'élément d'où part l'action a disparu entre-temps : un clic sur l'icône « archiver » d'une ligne, par exemple,
+    peut arriver après que la synchro a redessiné cette ligne ; sans cela, la confirmation (et ce qui suit : rafraîchir, passer au message suivant)
+    plantait avec « The parent element this slot belongs to has been deleted »."""
+    try:
+        return _real_notify(*args, **kwargs)
+    except RuntimeError:
+        from nicegui import Client
+        for client in list(Client.instances.values()):
+            if client.has_socket_connection:
+                with client.layout:
+                    return _real_notify(*args, **kwargs)
+
+
+ui.notify = safe_notify  # tous les ui.notify de l'appli passent par là
+
+
 def reveal(path: Path) -> None:
     """Montre le fichier dans le Finder / l'Explorateur, sans jamais l'ouvrir (une pièce jointe peut être dangereuse)."""
     try:
