@@ -751,17 +751,19 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         with ui.column().classes("rhead gap-1"):
             ui.button("‹ Retour", on_click=self.back).props("flat dense no-caps").classes("lt-md self-start")
             ui.label(m["subject"]).classes("text-h6").style("line-height:1.3;font-weight:700")
-            if m.get("importance") in (0, 2):
-                with ui.row().classes("items-center gap-1 no-wrap"):
-                    ui.icon("priority_high" if m["importance"] == 2 else "arrow_downward", size="16px").style(f"color:{'#d92d3a' if m['importance'] == 2 else 'var(--muted)'}")
-                    ui.label("Importance haute" if m["importance"] == 2 else "Importance basse").classes("rmeta").style(
-                        "font-weight:600;" + ("color:#d92d3a" if m["importance"] == 2 else ""))
             with ui.row().classes("items-center gap-3 no-wrap"):
                 ui.avatar(initials(m["sender_name"] or m["sender"]), color="blue-1", text_color="blue-9", size="34px")
                 when = full_date(m["date"])
                 with ui.column().classes("gap-0"):
                     ui.label(f"{m['sender_name'] or m['sender']} <{m['sender']}>").classes("rmeta").style("color:var(--text);font-weight:600")
-                    ui.label(f"{when} · {label_of(m['account'])}").classes("rmeta")
+                    with ui.row().classes("items-center gap-2 no-wrap"):
+                        ui.label(f"{when} · {label_of(m['account'])}").classes("rmeta")
+                        if m.get("importance") in (0, 2):
+                            high = m["importance"] == 2
+                            with ui.row().classes("items-center gap-0 no-wrap").style(
+                                    "padding:1px 8px 1px 4px;border-radius:10px;" + ("background:rgba(217,45,58,.12);color:#d92d3a" if high else "background:var(--hover);color:var(--muted)")):
+                                ui.icon("priority_high" if high else "arrow_downward", size="14px")
+                                ui.label("Importance haute" if high else "Importance basse").style("font-size:12px;font-weight:600")
             if m["to_addrs"]:
                 ui.label(f"À : {m['to_addrs']}").classes("rmeta").style("word-break:break-word")
             if m["cc_addrs"]:
