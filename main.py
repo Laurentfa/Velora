@@ -60,7 +60,7 @@ os.environ.setdefault("NICEGUI_STORAGE_PATH", str(_config.DATA_DIR / ".nicegui")
 
 from nicegui import app, background_tasks, native, run, ui
 
-from mailia import ai, aipolicy, apiserver, compose, config, db, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, vault, wizard
+from mailia import ai, aipolicy, apiserver, compose, config, db, folder_order, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, vault, wizard
 from mailia.textutil import for_ai
 from mailia.ui_account import friendly_error
 from mailia.ui_assets import CSS, SWIPE_JS
@@ -217,6 +217,16 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         except ValueError:
             return set()
 
+    def folder_dropped(self, args: dict | None, acct: str, target: str) -> None:
+        """Un dossier a été déposé avant ou après `target` (même niveau) : l'ordre est mémorisé pour cette boîte."""
+        d = (args or {}).get("detail") or {}
+        rows = [f for f in db.folders(acct) if f["sync"] and f["key"] != "INBOX"]
+        new = folder_order.move(rows, folder_order.load(acct), d.get("from", ""), target, bool(d.get("after")))
+        if new is None:
+            return
+        folder_order.save(acct, new)
+        self.side.refresh()
+
     def toggle_fold(self, acct: str) -> None:
         cur = self.folded()
         cur.symmetric_difference_update({acct})
@@ -232,14 +242,19 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         for f in db.folders():
             if f["sync"] and f["key"] != "INBOX":
                 subs.setdefault(f["account"], []).append(f)
-        for lst in subs.values():
-            lst.sort(key=lambda f: f["path"].lower())
+        for acct, lst in subs.items():
+            subs[acct] = folder_order.sort_folders(lst, folder_order.load(acct))  # ordre choisi par glisser-déposer, sinon alphabétique
 
         def item(view: str, acc: str, icon: str, label: str, cnt: int | str = 0, hot: bool = False,
-                 folder: str = "", depth: int = 0, manage: bool = False, drop: str = "", total: int | None = None, fold: bool | None = None) -> None:
+                 folder: str = "", depth: int = 0, manage: bool = False, drop: str = "", total: int | None = None, fold: bool | None = None,
+                 fpath: str | None = None) -> None:
             on = self.view == view and self.account == acc and self.folder == folder
             el = ui.element("div").classes("nav" + (" on" if on else "") + (" sub" if depth else "")).on(
                 "click", lambda _, v=view, a=acc, f=folder: self.go(v, a, f))
+            if fpath is not None:  # un dossier : on peut le glisser avant ou après un autre dossier du même niveau
+                el.classes("navfolder")
+                el._props.update({"draggable": "true", "data-acct": acc, "data-fkey": folder, "data-parent": folder_order.parent_of(fpath)})
+                el.on("folderdrop", lambda e, a=acc, k=folder: self.folder_dropped(e.args, a, k), args=["detail"])
             if drop:  # cette ligne accepte un mail déposé : il est déplacé dans ce dossier
                 el.classes("droptarget")
                 el._props.update({"data-acct": acc, "data-folder": drop})
@@ -283,7 +298,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                     same = sum(1 for g in subs[key] if g["name"] == f["name"]) > 1
                     shown = f["path"].rsplit("/", 2)[-2] + " › " + f["name"] if same and "/" in f["path"] else f["name"]
                     item("folder", key, "▸", shown, c["folders"].get(f"{key}|{f['key']}", 0), folder=f["key"],
-                         depth=1 + f["path"].count("/"), drop=f["key"], total=c["tot_folders"].get(f"{key}|{f['key']}", 0))
+                         depth=1 + f["path"].count("/"), drop=f["key"], total=c["tot_folders"].get(f"{key}|{f['key']}", 0), fpath=f["path"])
             ui.label("Vues").classes("grp")
             if use_ai:
                 item("todo", "", "⚑", "À traiter", c["todo"], True, total=c["tot_todo"])

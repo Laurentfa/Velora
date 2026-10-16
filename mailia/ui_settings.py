@@ -8,7 +8,7 @@ from pathlib import Path
 
 from nicegui import run, ui
 
-from mailia import ai, api_ui, gcal, onemin, outgoing, compose, config, db, htmlmail, i18n, logs, notify, perf, queries, settings_ui, sync, wizard
+from mailia import ai, api_ui, folder_order, gcal, onemin, outgoing, compose, config, db, htmlmail, i18n, logs, notify, perf, queries, settings_ui, sync, wizard
 from mailia.textutil import html_to_text
 
 from mailia.ui_account import delete_account_dialog, friendly_error, open_account
@@ -153,6 +153,13 @@ def _tab_dos(cfgs, dlg, on_folders) -> None:
     with ui.row().classes("gap-2"):
         for k, c in cfgs.items():
             ui.button(f"Dossiers de {c.label}…", icon="folder_open", on_click=lambda _, a=k: open_folders(a)).props("outline no-caps dense")
+    def reset_order() -> None:
+        folder_order.reset_all()
+        ui.notify("Dossiers remis dans l'ordre alphabétique.", type="positive")
+        ui.navigate.reload()
+
+    ui.button("Remettre les dossiers dans l'ordre alphabétique", icon="sort_by_alpha", on_click=reset_order).props("outline no-caps dense").classes("q-mt-sm").mark("folder-order-reset")
+    ui.label("Dans la colonne de gauche, glissez un dossier avant ou après un autre dossier du même niveau pour le ranger comme vous voulez.").classes("text-caption text-grey")
     ui.switch("Chercher aussi sur le serveur de messagerie", value=sync.server_search_on(),
               on_change=lambda e: db.kv_set("server_search", "1" if e.value else "0")).props("dense").classes("q-mt-md").mark("server-search")
     ui.label("Une recherche regarde d'abord les mails copiés dans l'application, puis interroge aussi votre messagerie (Exchange, IMAP) pour retrouver des "

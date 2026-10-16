@@ -188,6 +188,8 @@ body.body--dark .mailframe{background:#dae0e9}
 .mailedit .q-btn{color:var(--text)}
 .swrap.dragging{opacity:.45}
 body.dragging-mail .droptarget:not(.valid){opacity:.38}
+.navfolder.dragging-f{opacity:.4}
+.navfolder.ins-before{box-shadow:0 -2px 0 0 var(--accent)}.navfolder.ins-after{box-shadow:0 2px 0 0 var(--accent)}
 .droptarget.valid{outline:1.5px dashed var(--accent);outline-offset:-2px}
 .droptarget.over{background:var(--sel)!important;outline-style:solid}
 .droppanel{display:none;position:absolute;left:10px;right:10px;bottom:62px;z-index:5;background:var(--surface);border:1px solid var(--line);
@@ -955,6 +957,37 @@ SWIPE_JS = """<script>
     if (drag) drag.el.classList.remove('dragging');
     drag = null; document.body.classList.remove('dragging-mail');
     document.querySelectorAll('.droptarget').forEach(t => t.classList.remove('valid', 'over'));
+  });
+  // réorganisation des dossiers de la barre latérale (au même niveau seulement) : une ligne se dépose avant ou après une autre
+  let dragF = null;
+  const fclear = () => document.querySelectorAll('.ins-before, .ins-after').forEach(x => x.classList.remove('ins-before', 'ins-after'));
+  const ftarget = e => e.target.closest && e.target.closest('.navfolder.fvalid');
+  const fafter = (e, t) => { const r = t.getBoundingClientRect(); return e.clientY > r.top + r.height / 2; };
+  document.addEventListener('dragstart', e => {
+    const n = e.target.closest && e.target.closest('.navfolder');
+    if (!n || !n.dataset.fkey) return;
+    dragF = {el: n, acct: n.dataset.acct, key: n.dataset.fkey, parent: n.dataset.parent};
+    e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', 'dossier');
+    n.classList.add('dragging-f');
+    document.querySelectorAll('.navfolder').forEach(x => x.classList.toggle('fvalid', x !== n && x.dataset.acct === dragF.acct && x.dataset.parent === dragF.parent));
+  });
+  document.addEventListener('dragover', e => {
+    const t = dragF && ftarget(e);
+    if (!t) return;
+    e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+    fclear(); t.classList.add(fafter(e, t) ? 'ins-after' : 'ins-before');
+  });
+  document.addEventListener('drop', e => {
+    const t = dragF && ftarget(e);
+    if (!t) return;
+    e.preventDefault();
+    t.dispatchEvent(new CustomEvent('folderdrop', {detail: {from: dragF.key, after: fafter(e, t)}}));
+    fclear();
+  });
+  document.addEventListener('dragend', () => {
+    if (dragF) dragF.el.classList.remove('dragging-f');
+    dragF = null; fclear();
+    document.querySelectorAll('.fvalid').forEach(x => x.classList.remove('fvalid'));
   });
   // trackpad Mac : balayage horizontal à deux doigts sur une ligne
   document.addEventListener('wheel', e => {
