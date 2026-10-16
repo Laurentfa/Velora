@@ -112,20 +112,19 @@ async def test_settings_offer_zoom_and_density(user: User) -> None:
     assert ui_zoom.compact()
 
 
-async def test_filter_menu_has_the_density_choice(user: User) -> None:
+async def test_display_menu_has_the_density_toggle(user: User) -> None:
     from datetime import datetime
     ui.page("/")(main.index_page)
     db.kv_set("brief_day", datetime.now().strftime("%Y-%m-%d"))
     await user.open("/")
-    await user.should_see(marker="density-normal")
-    (compact,) = user.find(marker="density-compact").elements
-    compact.parent_slot.parent  # l'entrée est bien dans le menu de la liste
+    await user.should_see(marker="display-compact")
+    (compact,) = user.find(marker="display-compact").elements
     with user.client:
         for listener in compact._event_listeners.values():
             if listener.type == "click":
                 from nicegui import events
                 events.handle_event(listener.handler, events.ClickEventArguments(sender=compact, client=user.client))
-    assert ui_zoom.compact()  # un clic sur « Compacte » mémorise la densité
+    assert ui_zoom.compact()  # un clic sur « Liste compacte » mémorise la densité
 
 
 def test_settings_tab_list_scrolls_natively_without_quasar_arrows():

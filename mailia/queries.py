@@ -10,6 +10,32 @@ TODO_SQL = "(needs_reply=1 OR category='action' OR priority=3) AND category NOT 
 LIST_COLS = "id,account,folder,ckey,subject,sender,sender_name,date,is_read,has_att,summary,category,priority,needs_reply,suggested,verb"
 
 
+SORT_SQL = {"date": "date", "sender": "lower(COALESCE(NULLIF(sender_name,''), sender))", "subject": "lower(subject)"}
+
+
+def _flag_conditions(flags, where: list, args: list) -> tuple[list, list]:
+    """Filtres de la liste (cumulables) : épinglés, pièce jointe, aujourd'hui, 7 jours, réponse attendue et urgent (ces deux-là viennent de l'IA)."""
+    from datetime import datetime, timedelta, timezone
+    where, args = list(where), list(args)
+    if "pinned" in flags:
+        pins = sorted(db.pin_keys())
+        where.append(f"ckey IN ({','.join('?' * len(pins))})" if pins else "0")
+        args += pins
+    if "att" in flags:
+        where.append("has_att=1")
+    if "today" in flags:
+        start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        where.append("date>=?"); args.append(start.astimezone(timezone.utc).isoformat())
+    elif "week" in flags:
+        where.append("date>=?"); args.append((datetime.now(timezone.utc) - timedelta(days=7)).isoformat())
+    if config.ai_enabled():
+        if "reply" in flags:
+            where.append("needs_reply=1")
+        if "urgent" in flags:
+            where.append("priority=3")
+    return where, args
+
+
 def enabled_sql(col: str = "account") -> str:
     """Condition SQL « boîte active » : les mails d'une boîte désactivée sont conservés mais invisibles partout."""
     keys = [k.replace("'", "''") for k in config.enabled_keys()]
@@ -18,12 +44,13 @@ def enabled_sql(col: str = "account") -> str:
 
 def list_messages(account: str = "", q: str = "", unread: bool = False, view: str = "",
                   limit: int = 80, offset: int = 0, folder: str = "", group: bool = True, pins_top: bool = True, read: bool = False, oldest_first: bool = False,
-                  extra_ids: set[str] | None = None, everywhere: bool = False) -> list[dict]:
+                  extra_ids: set[str] | None = None, everywhere: bool = False, flags: frozenset | set = frozenset(), sort_by: str = "date") -> list[dict]:
     """Sans `folder`, on ne parle que des boîtes de réception ; avec `folder`, d'un dossier précis.
     Par défaut les mails d'un même fil sont regroupés (le plus récent représente la conversation) ;
     une recherche textuelle reste, elle, mail par mail. Les conversations épinglées passent en tête de la boîte de réception."""
     searching = bool(q.strip())  # une recherche (texte ou filtres) reste mail par mail, sans épingles ni reports
-    grouped = group and config.conversations_enabled() and not searching
+    sort_by = sort_by if sort_by in SORT_SQL else "date"
+    grouped = group and config.conversations_enabled() and not searching and sort_by == "date"  # trié par expéditeur ou objet : mail par mail
     adv = search.parse(q) if q.strip() else {"text": "", "where": [], "args": [], "all_folders": False, "advanced": False}
     q = adv["text"] if adv["advanced"] else q
     where: list[str] = [enabled_sql()]
@@ -46,6 +73,7 @@ def list_messages(account: str = "", q: str = "", unread: bool = False, view: st
         where.append("account=?"); args.append(account)
     if unread:
         where.append("is_read=0")
+    where, args = _flag_conditions(flags, where, args)
     if read:  # conversations entièrement lues
         where.append("NOT EXISTS (SELECT 1 FROM messages m2 WHERE m2.ckey=messages.ckey AND m2.folder=messages.folder AND m2.is_read=0)")
     if q.strip():
@@ -69,7 +97,7 @@ def list_messages(account: str = "", q: str = "", unread: bool = False, view: st
         if oldest_first and grouped:  # un fil est représenté par son message le plus récent, quel que soit le sens du tri
             conds.append("date=(SELECT MAX(m3.date) FROM messages m3 WHERE m3.ckey=messages.ckey AND m3.folder=messages.folder)")
         sql = f"SELECT {LIST_COLS} FROM messages WHERE " + " AND ".join(conds)
-        sql += f" ORDER BY date {'ASC' if oldest_first else 'DESC'} LIMIT ? OFFSET ?"
+        sql += f" ORDER BY {SORT_SQL[sort_by]} {'ASC' if oldest_first else 'DESC'}, date DESC LIMIT ? OFFSET ?"
         rows = [dict(r) for r in c.execute(sql, (*args, *extra_args, fetch_limit, off))]
         if not grouped:
             for r in rows:

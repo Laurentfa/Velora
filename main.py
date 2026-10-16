@@ -158,8 +158,9 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self.picked: dict[str, dict] = {}  # sélection multiple : id -> ligne
         self.pick_anchor: str | None = None
         self.select_mode = False  # mode « sélection » : un clic sur un message le coche au lieu de l'ouvrir
-        self.read_filter = ""  # "" | "unread" | "read" : filtre lus / non lus de la liste
-        self.oldest_first = db.kv_get("list_sort") == "oldest"  # tri de la liste : récents d'abord (défaut) ou anciens d'abord
+        self.filters: set[str] = set()  # filtres cumulables de la liste (voir ui_bulk.FILTERS) ; remis à zéro quand on change de dossier
+        self.oldest_first = db.kv_get("list_sort") == "oldest"  # ordre du tri : récents d'abord (défaut) ou anciens d'abord (A → Z pour un tri par nom)
+        self.sort_by = db.kv_get("list_sort_by") if db.kv_get("list_sort_by") in ("sender", "subject") else "date"
         self.suggestions: dict = {}  # message -> réponses suggérées par l'IA (à la demande) ou "loading"
         self._saved_sig = None  # empreinte du dernier brouillon enregistré (évite de réécrire sans changement)
         self._files_sig = None
@@ -416,7 +417,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             name = f"{label_of(self.account)} · {fo['path'] if fo else 'Dossier'}"
         else:
             name = label_of(self.account) if self.account and self.view == "inbox" else VIEWS[self.view][1]
-        self.title.set_text(name + {"unread": " · non lus", "read": " · lus"}.get(self.read_filter, "") + (" · tous les dossiers" if self.search_everywhere() else "")
+        self.title.set_text(name + (" · tous les dossiers" if self.search_everywhere() else "")
                             + (" · recherche sur le serveur…" if self.remote_busy else ""))
         self.search_row.set_visibility(self.view not in NOLIST_VIEWS)
 
@@ -639,6 +640,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self._pins = db.pin_keys()
         if (self.picked or self.select_mode) and self.view not in NOLIST_VIEWS - {"brief"}:
             self.bulk_bar()
+        if self.view not in NOLIST_VIEWS:
+            self.filter_bar()  # pastilles : ce qui filtre ou trie la liste, à retirer d'un clic
         alert = settings_ui.send_alert()
         if alert:  # rattachement manqué ou envoi incertain : visible tant qu'on ne l'a pas lu
             with ui.row().classes("items-center no-wrap gap-2 w-full").style(
@@ -1164,7 +1167,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
     async def go(self, view: str, acc: str, folder: str = "") -> None:
         self.view, self.account, self.folder, self.q, self.limit = view, acc, folder, "", 80
         self.picked.clear()
-        self.select_mode, self.read_filter = False, ""
+        self.select_mode = False
+        self.filters.clear()
         self.list_tools.refresh()
         self.search.set_value("")
         db.kv_set("ui_open", "")  # on change de vue volontairement : rien à rouvrir
@@ -1231,9 +1235,10 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             self.tasks = db.tasks_list(self.show_done)
             sig = ("t", self.show_done, *[(x["id"], x["done"], x["text"], x["due"]) for x in self.tasks])
         else:
-            self.rows = queries.list_messages(self.account, self.q, self.view == "unread" or self.read_filter == "unread",
+            self.rows = queries.list_messages(self.account, self.q, self.view == "unread" or "unread" in self.filters,
                                               self.view if self.view in ("todo", "noise", "newsletter", "notification") else "", self.limit,
-                                              folder=self.folder if self.view == "folder" else "", read=self.read_filter == "read",
+                                              folder=self.folder if self.view == "folder" else "",
+                                              flags=frozenset(self.active_filters()), sort_by=self.sort_by,
                                               oldest_first=self.oldest_first, everywhere=self.search_everywhere(),
                                               extra_ids=self.remote_ids if self.remote_for == self.q else None)
             self.hl = search.highlight_terms(self.q) if self.q.strip() else []  # mots à surligner dans la liste
@@ -1241,7 +1246,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                 queries.add_snippets(self.rows, self.hl)
             # tout ce qui change l'aspect de la liste est dans la signature : ainsi un rechargement « forcé » (ouvrir un mail, cocher…) ne redessine
             # que les lignes touchées, au lieu des 80
-            look = (self.view, self.account, self.folder, self.q, self.read_filter, self.oldest_first, self.limit, tuple(sorted(self.picked)), self.select_mode,
+            look = (self.view, self.account, self.folder, self.q, tuple(self.active_filters()) + (self.sort_by,), self.oldest_first, self.limit, tuple(sorted(self.picked)), self.select_mode,
                     db.kv_get("pins_folded"), repr(settings_ui.send_alert()), config.ai_enabled(), tuple(label_of(a) for a in sync.ACCOUNTS))
             cur_key = self.cur.get("ckey") if self.cur else None
             sig = ("l", look, tuple((x["id"], x["is_read"], x["summary"], x.get("conv_n"), x.get("conv_unread"), x.get("pinned"), x.get("woke"),
