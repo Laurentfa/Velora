@@ -18,7 +18,7 @@ def enabled_sql(col: str = "account") -> str:
 
 def list_messages(account: str = "", q: str = "", unread: bool = False, view: str = "",
                   limit: int = 80, offset: int = 0, folder: str = "", group: bool = True, pins_top: bool = True, read: bool = False, oldest_first: bool = False,
-                  extra_ids: set[str] | None = None) -> list[dict]:
+                  extra_ids: set[str] | None = None, everywhere: bool = False) -> list[dict]:
     """Sans `folder`, on ne parle que des boîtes de réception ; avec `folder`, d'un dossier précis.
     Par défaut les mails d'un même fil sont regroupés (le plus récent représente la conversation) ;
     une recherche textuelle reste, elle, mail par mail. Les conversations épinglées passent en tête de la boîte de réception."""
@@ -29,6 +29,10 @@ def list_messages(account: str = "", q: str = "", unread: bool = False, view: st
     where: list[str] = [enabled_sql()]
     args: list = []
     scope: list[tuple[str, list]] = []  # dossier + texte : ce qui décide « ce mail correspond à la recherche »
+    if everywhere and searching and not folder and not view and not adv["all_folders"]:
+        # recherche depuis la boîte de réception : tous les dossiers de la boîte, sauf corbeille, indésirables et brouillons
+        adv["all_folders"] = True
+        where.append("folder NOT IN (SELECT key FROM folders WHERE account=messages.account AND role IN ('trash','junk','drafts'))")
     if not adv["all_folders"]:
         scope.append(("folder=?", [folder or "INBOX"]))
     where += adv["where"]; args += adv["args"]

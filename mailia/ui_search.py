@@ -47,9 +47,14 @@ class SearchMixin:
         db.kv_set("saved_searches", json.dumps([s for s in self.saved_searches() if s["q"] != q], ensure_ascii=False))
         self.side.refresh()
 
+    def search_everywhere(self) -> bool:
+        """Depuis la boîte de réception (ou « Non lus »), une recherche porte sur tous les dossiers ; depuis un dossier précis, sur ce dossier."""
+        return bool(self.q.strip()) and self.view in ("inbox", "unread")
+
     async def set_query(self, q: str) -> None:
         if q != self.q:
             self.q = q
+            self.refresh_title()
             await self.reload(force=True)
             if q.strip():
                 background_tasks.create(self.remote_search(q))
@@ -63,7 +68,8 @@ class SearchMixin:
             return
         folder = self.folder if self.view == "folder" else "INBOX"
         accounts = [self.account] if self.account else list(sync.ACCOUNTS)
-        key = (sync.clean_query(text), tuple(accounts), folder, adv["all_folders"])
+        everywhere = adv["all_folders"] or self.search_everywhere()
+        key = (sync.clean_query(text), tuple(accounts), folder, everywhere)
         cached = self._remote_cache.get(key)
         if cached and time.time() - cached[0] < REMOTE_TTL:
             ids = cached[1]
@@ -74,7 +80,7 @@ class SearchMixin:
             self.remote_busy = True
             self.refresh_title()
             try:
-                ids = await run.io_bound(sync.search_remote, text, accounts, folder, adv["all_folders"])
+                ids = await run.io_bound(sync.search_remote, text, accounts, folder, everywhere)
             except Exception:
                 log.exception("recherche sur le serveur")
                 ids = set()

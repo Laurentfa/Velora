@@ -60,6 +60,17 @@ def test_extra_ids_still_obey_the_other_filters():
     assert got == ["testbox|Archive|8"]  # « non lus » reste appliqué aux mails venus du serveur
 
 
+def test_search_from_the_inbox_covers_all_folders_but_trash_junk_and_drafts():
+    folders(("INBOX", "Boîte de réception", "inbox"), ("Archive", "Archive", "archive"), ("T", "Corbeille", "trash"), ("J", "Spam", "junk"), ("D", "Brouillons", "drafts"))
+    for k in ("INBOX", "Archive", "T", "J", "D"):
+        add_message(mid=f"testbox|{k}|1", subject=f"Rapport Lemasson {k}", folder=k)
+    got = lambda **kw: sorted(r["folder"] for r in queries.list_messages("", "lemasson", group=False, **kw))  # noqa: E731
+    assert got() == ["INBOX"]  # sans demande : le dossier courant seulement (comportement de l'API inchangé)
+    assert got(everywhere=True) == ["Archive", "INBOX"]
+    assert got(folder="Archive", everywhere=True) == ["Archive"]  # dans un dossier précis, on reste dans ce dossier
+    assert got(view="todo", everywhere=True) == []  # les vues « À traiter », « Newsletters »… restent dans la boîte de réception
+
+
 # ---------- import ----------
 def test_search_remote_imports_only_unknown_mails_and_keeps_known_ones(fake):
     add_message(mid="testbox|INBOX|1", body="texte complet déjà chargé", flagged=1)
@@ -136,7 +147,7 @@ async def test_typing_a_search_adds_the_server_results_to_the_list(user: User, m
     await user.should_not_see("Rapport ancien Lemasson")  # la recherche locale vient d'abord, sans attendre le serveur
     await asyncio.sleep(1.3)
     await user.should_see("Rapport ancien Lemasson")  # puis la liste est complétée par le serveur
-    assert calls and calls[0][0] == "lemasson" and calls[0][2] == "INBOX" and calls[0][3] is False
+    assert calls and calls[0][0] == "lemasson" and calls[0][2] == "INBOX" and calls[0][3] is True  # depuis la boîte de réception : tous les dossiers
     await box.set_query("lemasson")  # même recherche : pas de deuxième requête (mémoire de 10 minutes)
     await box.set_query("")
     await box.set_query("lemasson")
@@ -170,3 +181,28 @@ async def test_a_changed_search_does_not_show_old_server_results(user: User, mai
     await box.set_query("autre chose")  # l'utilisateur a changé de recherche pendant l'attente du serveur
     await asyncio.sleep(2.2)
     await user.should_not_see("Résultat de la première recherche")
+
+
+async def test_search_inside_a_folder_stays_in_that_folder_and_the_server_gets_only_it(user: User, mailbox, monkeypatch) -> None:
+    folders(("INBOX", "Boîte de réception", "inbox"), ("Archive", "Archive", "archive"))
+    calls = []
+    monkeypatch.setattr(sync, "search_remote", lambda *a: calls.append(a) or set())
+    await user.open("/")
+    box = mailbox[-1]
+    box.view, box.account, box.folder = "folder", "testbox", "Archive"
+    await box.set_query("lemasson")
+    await asyncio.sleep(1.3)
+    assert calls and calls[0][2] == "Archive" and calls[0][3] is False
+    assert not box.search_everywhere()
+
+
+async def test_results_from_other_folders_show_their_folder(user: User, mailbox, monkeypatch) -> None:
+    folders(("INBOX", "Boîte de réception", "inbox"), ("Archive", "Archive", "archive"), ("a25", "Archive/2025", ""))
+    add_message(mid="testbox|a25|7", subject="Rapport Lemasson ancien", folder="a25", date="2025-02-01T10:00:00+00:00")
+    monkeypatch.setattr(sync, "search_remote", lambda *a: set())
+    await user.open("/")
+    box = mailbox[-1]
+    await box.set_query("lemasson")
+    await user.should_see("Rapport Lemasson ancien")
+    await user.should_see("2025")  # le dossier d'origine est indiqué sur la ligne
+    assert "tous les dossiers" in box.title.text

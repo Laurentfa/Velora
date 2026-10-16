@@ -127,6 +127,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self.remote_ids: set[str] | None = None  # mails trouvés par les serveurs pour la recherche en cours
         self.remote_for, self.remote_busy = "", False
         self._remote_cache: dict = {}
+        self._folder_paths: dict[tuple, str] = {}
         self._row_els: dict[str, ui.element] = {}  # id du mail -> élément de sa ligne dans la liste (pour ne redessiner que les lignes modifiées)
         self.rows_sig = None
         self.busy = False
@@ -359,7 +360,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             name = f"{label_of(self.account)} · {fo['path'] if fo else 'Dossier'}"
         else:
             name = label_of(self.account) if self.account and self.view == "inbox" else VIEWS[self.view][1]
-        self.title.set_text(name + {"unread": " · non lus", "read": " · lus"}.get(self.read_filter, "") + (" · recherche sur le serveur…" if self.remote_busy else ""))
+        self.title.set_text(name + {"unread": " · non lus", "read": " · lus"}.get(self.read_filter, "") + (" · tous les dossiers" if self.search_everywhere() else "")
+                            + (" · recherche sur le serveur…" if self.remote_busy else ""))
         self.search_row.set_visibility(self.view not in NOLIST_VIEWS)
 
     async def restore_open(self) -> None:
@@ -451,6 +453,9 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                         if use_ai and m["category"]:
                             ui.label(CAT.get(m["category"], m["category"])).classes("badge")
                         ui.label(label_of(m["account"])).classes("badge acc")
+                        if self.q.strip() and m["folder"] != (self.folder if self.view == "folder" else "INBOX"):  # résultat venu d'un autre dossier : on dit lequel
+                            path = self._folder_paths.get((m["account"], m["folder"]), "")
+                            ui.label(path.rsplit("/", 1)[-1] or m["folder"]).classes("badge").tooltip(path or m["folder"])
                         if m["folder"] == "INBOX" and security.quick_row(m):
                             ui.label("⚠ Suspect").classes("badge p3").tooltip("Ce message ressemble à une tentative d'hameçonnage")
                         with ui.element("div").classes("rowact"):  # à droite de la ligne des badges ; « click.stop » : ne pas ouvrir le message
@@ -565,6 +570,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
 
     def _rows_view_body(self) -> None:
         self._row_els = {}
+        self._folder_paths = {(f["account"], f["key"]): f["path"] for a in sync.ACCOUNTS for f in db.folders(a)}
         self._pins = db.pin_keys()
         if (self.picked or self.select_mode) and self.view not in NOLIST_VIEWS - {"brief"}:
             self.bulk_bar()
@@ -1145,7 +1151,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             self.rows = queries.list_messages(self.account, self.q, self.view == "unread" or self.read_filter == "unread",
                                               self.view if self.view in ("todo", "noise", "newsletter", "notification") else "", self.limit,
                                               folder=self.folder if self.view == "folder" else "", read=self.read_filter == "read",
-                                              oldest_first=self.oldest_first,
+                                              oldest_first=self.oldest_first, everywhere=self.search_everywhere(),
                                               extra_ids=self.remote_ids if self.remote_for == self.q else None)
             # tout ce qui change l'aspect de la liste est dans la signature : ainsi un rechargement « forcé » (ouvrir un mail, cocher…) ne redessine
             # que les lignes touchées, au lieu des 80
@@ -1189,6 +1195,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             return False
         t = time.perf_counter()
         self._pins = db.pin_keys()
+        self._folder_paths = {(f["account"], f["key"]): f["path"] for a in sync.ACCOUNTS for f in db.folders(a)}
         for m in changed:
             former = self._row_els[m["id"]]
             parent = former.parent_slot.parent
