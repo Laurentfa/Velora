@@ -3,18 +3,46 @@
     python main.py            fenêtre native
     python main.py --server   serveur réseau (pour l'ouvrir depuis le téléphone), protégé par jeton
 """
+import multiprocessing
+import os
+import sys
+import threading
+import time
+
+_IS_CHILD = multiprocessing.current_process().name != "MainProcess" or any(
+    a.startswith("--multiprocessing-fork") for a in sys.argv)  # dans l'appli empaquetée, le fils ne se connaît pas encore au chargement
+if _IS_CHILD and not sys.platform.startswith("win"):
+    # Processus fils (fenêtre native, ouvriers) : ils se terminent seuls si l'appli principale disparaît, même tuée
+    # de force (leur parent devient alors le processus 1). Sans cela, la fenêtre resterait ouverte, orpheline.
+    _ppid = os.getppid()
+
+    def _watch_parent() -> None:
+        while True:
+            time.sleep(1.5)
+            if os.getppid() != _ppid:
+                os._exit(0)
+
+    threading.Thread(target=_watch_parent, daemon=True).start()
+
+
+def _native_context_menu() -> None:
+    """Exécuté dans le processus de la fenêtre native (macOS : menu clic droit et barre de menus ; partout : jalon de démarrage)."""
+    from mailia import native_menu
+    native_menu.setup()
+
+
+if __name__ == "__main__":
+    # Appli empaquetée : la fenêtre native est un second lancement de ce même programme. Il doit prendre la main ICI, avant les imports
+    # lourds (exchangelib, IA…) qu'il n'utilise pas : sinon la fenêtre attend ~2 s de plus, et ce processus ouvre la base et lance des synchros en double.
+    multiprocessing.freeze_support()
+
 import asyncio
 import atexit
 import json
 import logging
-import multiprocessing
-import os
 import re
 import signal
 import subprocess
-import sys
-import threading
-import time
 import webbrowser
 from urllib.parse import unquote, urlparse
 from datetime import datetime
@@ -56,20 +84,7 @@ perf.mark("modules chargés")
 perf.install()
 
 
-_IS_CHILD = multiprocessing.current_process().name != "MainProcess" or any(
-    a.startswith("--multiprocessing-fork") for a in sys.argv)  # dans l'appli empaquetée, le fils ne se connaît pas encore au chargement
-if _IS_CHILD and not sys.platform.startswith("win"):
-    # Processus fils (fenêtre native, ouvriers) : ils se terminent seuls si l'appli principale disparaît, même tuée
-    # de force (leur parent devient alors le processus 1). Sans cela, la fenêtre resterait ouverte, orpheline.
-    _ppid = os.getppid()
 
-    def _watch_parent() -> None:
-        while True:
-            time.sleep(1.5)
-            if os.getppid() != _ppid:
-                os._exit(0)
-
-    threading.Thread(target=_watch_parent, daemon=True).start()
 
 
 
@@ -1762,76 +1777,6 @@ def _cleanup_stale() -> None:
                 os.kill(int(parts[0]), signal.SIGTERM)
             except OSError:
                 pass
-
-
-def _tidy_mac_menus(cocoa) -> None:
-    """Barre de menus macOS réduite à l'essentiel : le menu de l'appli et « Édition » (nécessaire : c'est lui qui fait fonctionner ⌘C, ⌘V, ⌘X et ⌘A dans
-    les champs de saisie). Le menu « Présentation » est retiré, ainsi que les entrées ajoutées par le système (remplissage automatique, dictée, émojis).
-    Les libellés suivent la langue de l'appli."""
-    try:
-        from AppKit import NSUserDefaults
-        from PyObjCTools import AppHelper
-        ud = NSUserDefaults.standardUserDefaults()
-        ud.setBool_forKey_(True, "NSDisabledDictationMenuItem")
-        ud.setBool_forKey_(True, "NSDisabledCharacterPaletteMenuItem")
-        ud.setBool_forKey_(False, "NSAutoFillHeuristicControllerEnabled")
-        cocoa.BrowserView._add_view_menu = lambda self, main_menu: None
-        fr = {"cocoa.menu.about": "À propos de", "cocoa.menu.services": "Services", "cocoa.menu.edit": "Édition", "cocoa.menu.hide": "Masquer",
-              "cocoa.menu.hideOthers": "Masquer les autres", "cocoa.menu.showAll": "Tout afficher", "cocoa.menu.quit": "Quitter",
-              "cocoa.menu.cut": "Couper", "cocoa.menu.copy": "Copier", "cocoa.menu.paste": "Coller", "cocoa.menu.selectAll": "Tout sélectionner"}
-
-        def rebuild() -> None:
-            inst = next(iter(cocoa.BrowserView.instances.values()))
-            if i18n.language() == "fr":
-                inst.localization.update(fr)
-            main_menu = inst._recreate_menus(inst.menu)
-            cocoa.BrowserView.app.setMainMenu_(main_menu)
-            keep = {fr.get(k, v) for k, v in (("cocoa.menu.cut", "Cut"), ("cocoa.menu.copy", "Copy"), ("cocoa.menu.paste", "Paste"),
-                                              ("cocoa.menu.selectAll", "Select All"))}
-            keep |= {"Cut", "Copy", "Paste", "Select All"}
-            edit = main_menu.itemAtIndex_(1).submenu() if main_menu.numberOfItems() > 1 else None
-
-            def clean(*_args) -> None:  # le système ajoute lui-même des entrées au menu Édition (remplissage automatique…) : on ne garde que les quatre utiles
-                for item in list(edit.itemArray()):
-                    if str(item.title()) not in keep and not item.isSeparatorItem():
-                        edit.removeItem_(item)
-
-            if edit is not None:
-                from AppKit import NSMenuDidAddItemNotification, NSNotificationCenter
-                clean()
-                NSNotificationCenter.defaultCenter().addObserverForName_object_queue_usingBlock_(NSMenuDidAddItemNotification, edit, None, clean)
-
-        AppHelper.callAfter(rebuild)
-    except Exception:
-        log.warning("barre de menus non simplifiée", exc_info=True)
-
-
-def _native_context_menu() -> None:
-    """Fenêtre native (macOS) : la bibliothèque de fenêtre supprime tout menu clic droit hors mode débogage.
-    On rétablit le menu standard (couper, copier, coller, orthographe…) sans les entrées qui feraient quitter l'appli."""
-    perf.mark("moteur d'affichage démarré")
-    perf.save_window_marks()
-    if sys.platform != "darwin":
-        return
-    try:
-        from webview.platforms import cocoa
-
-        def will_open_menu(self, menu, event):
-            for item in list(menu.itemArray()):
-                ident = str(item.identifier() or "")
-                if any(k in ident for k in ("Reload", "Inspect", "GoBack", "GoForward", "OpenLink", "OpenImage", "OpenFrame",
-                                            "DownloadLinkedFile", "DownloadImage", "OpenMedia", "Download",
-                                            # entrées du système qui n'ont rien à faire dans un champ de saisie de l'appli
-                                            "LookUp", "Translate", "SearchWeb", "Share", "AutoFill", "Substitutions", "Transformations",
-                                            "Speech", "WritingDirection", "Font", "TextDirection")):
-                    menu.removeItem_(item)
-
-        cocoa.BrowserView.WebKitHost.willOpenMenu_withEvent_ = will_open_menu
-        # le clic qui active une fenêtre inactive doit aussi agir sur ce qu'il touche (sinon il faut cliquer deux fois)
-        cocoa.BrowserView.WebKitHost.acceptsFirstMouse_ = lambda self, event: True
-        _tidy_mac_menus(cocoa)
-    except Exception:
-        logging.getLogger("mailia").exception("menu clic droit")
 
 
 DB_ERROR = ""
