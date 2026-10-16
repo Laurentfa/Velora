@@ -2,7 +2,7 @@
 sur toutes les conversations choisies."""
 from nicegui import run, ui
 
-from mailia import db, sync
+from mailia import db, sync, ui_zoom
 
 
 def range_ids(ids: list[str], anchor: str | None, target: str) -> list[str]:
@@ -95,6 +95,11 @@ class BulkMixin:
                 for oldest, label in ((False, "Plus récents d'abord"), (True, "Plus anciens d'abord")):
                     ui.menu_item(("✓  " if self.oldest_first == oldest else "     ") + label, on_click=lambda _, o=oldest: self.set_sort(o))
                 ui.separator()
+                ui.label("Densité").classes("rmeta q-px-md q-pt-sm").style("text-transform:uppercase;letter-spacing:.06em;font-size:11px")
+                for compact, label in ((False, "Normale"), (True, "Compacte (plus de mails à l'écran)")):
+                    ui.menu_item(("✓  " if ui_zoom.compact() == compact else "     ") + label, on_click=lambda _, c=compact: self.set_density(c)).mark(
+                        "density-compact" if compact else "density-normal")
+                ui.separator()
                 ui.label("Sélection").classes("rmeta q-px-md q-pt-sm").style("text-transform:uppercase;letter-spacing:.06em;font-size:11px")
                 ui.menu_item("Terminer la sélection" if self.select_mode else "Sélectionner des messages", on_click=self.toggle_select_mode)
                 ui.menu_item("Tout sélectionner", on_click=self.pick_all)
@@ -102,6 +107,10 @@ class BulkMixin:
                 ui.menu_item("Sélectionner les lus", on_click=lambda: self.pick_where(False))
                 if self.picked:
                     ui.menu_item("Tout désélectionner", on_click=self.pick_clear)
+
+    def set_density(self, compact: bool) -> None:
+        ui_zoom.set_compact(compact)
+        self.list_tools.refresh()  # les coches du menu
 
     async def row_click(self, m: dict, args: dict | None) -> None:
         a = args or {}

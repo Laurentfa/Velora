@@ -1,4 +1,5 @@
 """Fenêtre des paramètres (onglets : boîtes, affichage, dossiers, IA, consignes, règles, absence, automatismes, confidentialité, API, utilisation)."""
+import asyncio
 import html
 import json
 import re
@@ -14,6 +15,7 @@ from mailia.ui_account import delete_account_dialog, friendly_error, open_accoun
 from mailia.ui_common import CAT, SERVER_MODE, default_account, make_editor, open_folder, reveal
 from mailia.ui_lock import lock_screen_now
 from mailia.ui_update import panel as update_panel
+from mailia import ui_zoom
 
 
 def state(ok: bool) -> str:
@@ -112,6 +114,19 @@ def _tab_aff(f) -> None:
 
     ui.select({"auto": "Automatique (suit le système)", "light": "Clair", "dark": "Sombre"}, value=db.kv_get("theme") or "auto",
               label="Thème", on_change=change_theme).props("outlined dense stack-label").classes("w-full q-mt-sm")
+    status = ui.label(ui_zoom.status()).classes("text-caption text-grey")
+
+    async def change_zoom(e) -> None:
+        ui_zoom.set_zoom(e.value)
+        await asyncio.sleep(1.2)  # la fenêtre applique le réglage dans la seconde ; on affiche ce qu'elle a répondu
+        status.set_text(ui_zoom.status())
+
+    ui.select({z: ui_zoom.label(z) for z in ui_zoom.ZOOMS}, value=ui_zoom.zoom(), label="Zoom de l'interface",
+              on_change=change_zoom).props("outlined dense stack-label").classes("w-full q-mt-sm").mark("ui-zoom")
+    ui.label("Réduire le zoom affiche plus de choses à l'écran. Raccourcis : ⌘ + et ⌘ − (Ctrl sous Windows), ⌘ 0 pour revenir à 100 %.").classes("text-caption text-grey")
+    ui.switch("Liste de mails compacte (plus de mails à l'écran)", value=ui_zoom.compact(),
+              on_change=lambda e: ui_zoom.set_compact(bool(e.value))).props("dense").classes("q-mt-sm").mark("density-switch")
+    ui.label("Une ligne par mail : expéditeur, objet et date, sans résumé de l'IA ni pastilles (sauf « Urgent »). Les actions apparaissent au survol.").classes("text-caption text-grey")
     ui.switch("Regrouper les mails en conversations").bind_value(f, "CONVERSATIONS")
     ui.label("Un seul élément par échange (avec le nombre de messages), les messages envoyés inclus.").classes("text-caption text-grey")
 

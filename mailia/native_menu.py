@@ -2,8 +2,12 @@
 Ce code est dans un module à part pour que ce processus n'ait pas à recharger tout le programme (plus de 2 s au démarrage sous Windows)."""
 import logging
 import sys
+import threading
+import time
 
-from . import i18n, perf
+from . import db, i18n, perf
+
+log = logging.getLogger("mailia")
 
 
 def _tidy_mac_menus(cocoa) -> None:
@@ -48,11 +52,63 @@ def _tidy_mac_menus(cocoa) -> None:
         logging.getLogger("mailia").warning("barre de menus non simplifiée", exc_info=True)
 
 
+def apply_zoom(factor: float) -> None:
+    """Zoom de la fenêtre elle-même (comme celui d'un navigateur), sur le fil de l'interface de chaque système."""
+    if sys.platform == "darwin":
+        from PyObjCTools import AppHelper
+        from webview.platforms import cocoa
+        view = next(iter(cocoa.BrowserView.instances.values())).webview
+        AppHelper.callAfter(lambda: view.setPageZoom_(factor))
+    elif sys.platform.startswith("win"):
+        import webview
+        from System import Action
+        form = webview.windows[0].native
+        form.Invoke(Action(lambda: setattr(form.webview, "ZoomFactor", float(factor))))
+    else:
+        raise RuntimeError("zoom non pris en charge sur ce système")
+
+
+def _wanted_zoom() -> float:
+    with db.conn() as c:  # lecture directe : le réglage est écrit par l'autre processus (le cache de kv_get ne le verrait pas tout de suite)
+        row = c.execute("SELECT v FROM kv WHERE k='ui_zoom'").fetchone()
+    try:
+        return float(row["v"]) if row else 1.0
+    except ValueError:
+        return 1.0
+
+
+def watch_zoom(stop: threading.Event | None = None, every: float = 0.4) -> None:
+    """Applique à la fenêtre le zoom choisi dans l'appli (réglage ou raccourci), dès qu'il change. Un échec est noté, puis réessayé : la fenêtre
+    peut ne pas être prête (premières secondes), et rien ne doit jamais empêcher l'appli de fonctionner."""
+    done = None
+    failures = 0
+    while not (stop and stop.is_set()):
+        try:
+            z = _wanted_zoom()
+            if z != done and not (done is None and z == 1.0):  # rien à faire tant que le zoom reste à 100 % depuis le lancement
+                apply_zoom(z)
+                done = z
+                db.kv_set("ui_zoom_status", f"ok : {round(z * 100)} %")
+            elif done is None:
+                done = 1.0
+            failures = 0
+        except Exception as e:
+            failures += 1
+            if failures in (1, 10):
+                log.warning("zoom de la fenêtre : %s", e)
+                try:
+                    db.kv_set("ui_zoom_status", f"échec : {type(e).__name__} {str(e)[:120]}")
+                except Exception:
+                    pass
+        time.sleep(every if not failures else min(3.0, every * (1 + failures)))
+
+
 def setup() -> None:
     """Fenêtre native (macOS) : la bibliothèque de fenêtre supprime tout menu clic droit hors mode débogage.
     On rétablit le menu standard (couper, copier, coller, orthographe…) sans les entrées qui feraient quitter l'appli."""
     perf.mark("moteur d'affichage démarré")
     perf.save_window_marks()
+    threading.Thread(target=watch_zoom, daemon=True, name="zoom").start()
     if sys.platform != "darwin":
         return
     try:

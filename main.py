@@ -79,6 +79,7 @@ from mailia.ui_search import SearchMixin
 from mailia.ui_settings import open_settings
 from mailia.ui_tasks import TasksMixin
 from mailia.ui_update import auto_check
+from mailia import ui_zoom
 
 perf.mark("modules chargés")
 perf.install()
@@ -1673,6 +1674,8 @@ async def index_page() -> None:
         ui.add_head_html(script)  # interface dans une autre langue que le français
     ui.dark_mode({"light": False, "dark": True}.get(db.kv_get("theme") or ""))  # clair / sombre, sinon suit le système
     ui.add_css(CSS)
+    if ui_zoom.compact():  # liste compacte : une classe sur la page, que le CSS exploite
+        ui.query("body").classes(add="compact")
     if SERVER_MODE and not app.storage.user.get("ok"):
         with ui.card().classes("absolute-center"):
             ui.label("Velora").classes("text-h5")
@@ -1719,6 +1722,7 @@ async def index_page() -> None:
           for (const e of ['mousemove', 'keydown', 'mousedown', 'touchstart', 'wheel']) document.addEventListener(e, () => { t = Date.now(); }, true);
           if (window.__idleT) clearInterval(window.__idleT);
           window.__idleT = setInterval(() => { if (Date.now() - t > lim) { clearInterval(window.__idleT); emitEvent('idlelock', {}); } }, 15000); })()""" % vault.idle_minutes(db))
+    ui_zoom.install_keys()
     ui.on("uiready", lambda e: perf.browser_marks(e.args))
     ui.run_javascript("""requestAnimationFrame(() => requestAnimationFrame(() => { const n = performance.getEntriesByType('navigation')[0] || {};
       emitEvent('uiready', {origin: performance.timeOrigin, dcl: n.domContentLoadedEventEnd || 0, load: n.loadEventEnd || 0, now: performance.now()}); }))""")

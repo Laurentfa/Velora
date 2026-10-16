@@ -102,6 +102,15 @@ body.resizing iframe{pointer-events:none}
 .mrow .sum{color:var(--muted);font-size:13px;margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .mrow .sum::before{content:"✦ ";color:var(--ai)}
 .mrow .sum.snip::before{content:none}
+/* liste compacte : une ligne par mail (expéditeur, date, objet) ; le résumé et les pastilles disparaissent, les actions apparaissent au survol */
+body.compact .mrow{padding:5px 12px 5px 10px;gap:8px}
+body.compact .mrow .dot{margin-top:5px}
+body.compact .mrow .sum:not(.snip){display:none}
+body.compact .badges{margin-top:0}
+body.compact .badges .badge:not(.p3){display:none}
+body.compact .badges:not(:has(.p3)){display:block;margin:0}
+body.compact .mrow .rowact{position:absolute;right:8px;bottom:2px;opacity:0;background:var(--surface2);border-radius:8px}
+body.compact .swrap:hover .rowact{opacity:1}
 .mrow mark{background:#ffe566;color:#1d1d1f;border-radius:3px;padding:0 1px}
 .badges{display:flex;gap:5px;margin-top:5px;flex-wrap:wrap}
 .badge{font-size:11px;font-weight:600;padding:1px 7px;border-radius:999px;background:var(--surface2);color:var(--muted)}
