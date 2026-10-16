@@ -1,9 +1,11 @@
 """Fenêtre native : réglages propres à la fenêtre (menu clic droit, barre de menus macOS), exécutés dans SON processus.
 Ce code est dans un module à part pour que ce processus n'ait pas à recharger tout le programme (plus de 2 s au démarrage sous Windows)."""
+import json
 import logging
 import sys
 import threading
 import time
+from pathlib import Path
 
 from . import db, i18n, perf
 
@@ -103,12 +105,81 @@ def watch_zoom(stop: threading.Event | None = None, every: float = 0.4) -> None:
         time.sleep(every if not failures else min(3.0, every * (1 + failures)))
 
 
+def print_native(path: str) -> None:
+    """macOS : ouvre la boîte d'impression du système sur un PDF ou une image, dans la fenêtre de Velora (sans passer par Aperçu).
+    À exécuter sur le fil principal de la fenêtre."""
+    from AppKit import NSApp, NSImage, NSImageView, NSPrintInfo, NSPrintOperation
+    from Foundation import NSMakeRect, NSURL
+    from Quartz import PDFDocument, kPDFPrintPageScaleDownToFit
+    info = NSPrintInfo.sharedPrintInfo()
+    if Path(path).suffix.lower() == ".pdf":
+        doc = PDFDocument.alloc().initWithURL_(NSURL.fileURLWithPath_(path))
+        if doc is None:
+            raise RuntimeError("PDF illisible")
+        op = doc.printOperationForPrintInfo_scalingMode_autoRotate_(info, kPDFPrintPageScaleDownToFit, True)
+    else:
+        img = NSImage.alloc().initWithContentsOfFile_(path)
+        if img is None:
+            raise RuntimeError("image illisible")
+        info = info.copy()  # réglages propres à cette image : la mise en page des autres impressions n'est pas touchée
+        info.setHorizontalPagination_(1)  # NSFitPagination : tout sur UNE page (sinon l'image, un peu plus grande que la zone imprimable, en prend deux)
+        info.setVerticalPagination_(1)
+        info.setHorizontallyCentered_(True)
+        info.setVerticallyCentered_(True)
+        paper, left, right, top, bottom = info.paperSize(), info.leftMargin(), info.rightMargin(), info.topMargin(), info.bottomMargin()
+        view = NSImageView.alloc().initWithFrame_(NSMakeRect(0, 0, paper.width - left - right - 2, paper.height - top - bottom - 2))
+        view.setImage_(img)
+        view.setImageScaling_(3)  # NSImageScaleProportionallyUpOrDown : l'image tient dans la page
+        op = NSPrintOperation.printOperationWithView_printInfo_(view, info)
+    op.setJobTitle_(Path(path).name)
+    op.setShowsPrintPanel_(True)
+    window = NSApp.keyWindow() or NSApp.mainWindow()
+    if window is not None:
+        op.runOperationModalForWindow_delegate_didRunSelector_contextInfo_(window, None, None, None)  # la boîte s'ouvre en feuille sur la fenêtre
+    else:
+        op.runOperation()
+
+
+def watch_print(stop: threading.Event | None = None, every: float = 0.3) -> None:
+    """Le programme principal demande une impression en écrivant « print_request » ; on l'exécute ici (fenêtre native) et on répond dans
+    « print_status » : « <id>:ok » ou « <id>:échec … » (alors le programme ouvre le fichier dans Aperçu comme avant)."""
+    def current() -> dict:
+        with db.conn() as c:
+            row = c.execute("SELECT v FROM kv WHERE k='print_request'").fetchone()
+        try:
+            return json.loads(row["v"]) if row else {}
+        except ValueError:
+            return {}
+
+    done = current().get("id")  # une demande restée d'un lancement précédent ne doit pas être rejouée
+    while not (stop and stop.is_set()):
+        try:
+            req = current()
+            if req.get("id") and req["id"] != done:
+                done = req["id"]
+                from PyObjCTools import AppHelper
+
+                def run(req=req) -> None:
+                    try:
+                        db.kv_set("print_status", f"{req['id']}:ok")  # écrit avant d'ouvrir : la boîte garde la main tant qu'elle est affichée
+                        print_native(req["path"])
+                    except Exception as e:
+                        log.warning("impression : %s", e)
+                        db.kv_set("print_status", f"{req['id']}:échec {type(e).__name__} {str(e)[:100]}")
+                AppHelper.callAfter(run)
+        except Exception as e:
+            log.warning("surveillance de l'impression : %s", e)
+        time.sleep(every)
+
+
 def setup() -> None:
     """Fenêtre native (macOS) : la bibliothèque de fenêtre supprime tout menu clic droit hors mode débogage.
     On rétablit le menu standard (couper, copier, coller, orthographe…) sans les entrées qui feraient quitter l'appli."""
     perf.mark("moteur d'affichage démarré")
     perf.save_window_marks()
     threading.Thread(target=watch_zoom, daemon=True, name="zoom").start()
+    if sys.platform == "darwin":
+        threading.Thread(target=watch_print, daemon=True, name="impression").start()
     if sys.platform != "darwin":
         return
     try:

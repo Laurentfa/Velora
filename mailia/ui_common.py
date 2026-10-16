@@ -186,9 +186,32 @@ def can_print(name: str) -> bool:
     return (name or "").rsplit(".", 1)[-1].lower() in PRINTABLE and "." in (name or "")
 
 
+NATIVE_PRINT = {"pdf", "png", "jpg", "jpeg", "gif", "bmp", "heic", "heif", "webp"}  # ce que la boîte d'impression du système peut imprimer sans application
+
+
+def native_print(path: Path, timeout: float = 4.0) -> bool:
+    """macOS : demande à la fenêtre native d'ouvrir directement la boîte d'impression du système (PDF, images), sans passer par Aperçu.
+    Retourne False si elle ne répond pas à temps ou échoue : on ouvre alors le fichier dans l'application du système, comme avant."""
+    import json
+    import time
+    import uuid
+    if sys.platform != "darwin" or path.suffix.lower().lstrip(".") not in NATIVE_PRINT:
+        return False
+    rid = uuid.uuid4().hex
+    db.kv_set("print_request", json.dumps({"id": rid, "path": str(path)}))
+    end = time.time() + timeout
+    while time.time() < end:
+        with db.conn() as c:  # lecture directe : la réponse est écrite par l'autre processus (le cache de kv_get ne la verrait pas)
+            row = c.execute("SELECT v FROM kv WHERE k='print_status'").fetchone()
+        if row and row["v"].startswith(rid + ":"):
+            return row["v"] == rid + ":ok"
+        time.sleep(0.1)
+    return False
+
+
 def open_to_print(name: str, data: bytes) -> Path:
-    """Enregistre la pièce jointe dans un dossier temporaire et l'ouvre dans l'application du système (Aperçu, Word…), où l'on imprime avec
-    ⌘P / Ctrl+P. Le fichier est marqué « téléchargé » pour que Word et Excel l'ouvrent en mode protégé. Les dossiers de plus d'un jour sont supprimés."""
+    """Enregistre la pièce jointe dans un dossier temporaire. Sur Mac, un PDF ou une image ouvre directement la boîte d'impression du système (dans la
+    fenêtre de Velora, sans Aperçu). Sinon (Word, Excel, Windows…) le fichier est ouvert dans l'application du système, où l'on imprime avec ⌘P / Ctrl+P. Le fichier est marqué « téléchargé » pour que Word et Excel l'ouvrent en mode protégé. Les dossiers de plus d'un jour sont supprimés."""
     import shutil
     import tempfile
     import time
@@ -212,6 +235,8 @@ def open_to_print(name: str, data: bytes) -> Path:
                 z.write("[ZoneTransfer]\nZoneId=3\n")
     except Exception:
         pass
+    if native_print(path):
+        return path
     if sys.platform == "darwin":
         subprocess.Popen(["open", str(path)])
     elif sys.platform.startswith("win"):
