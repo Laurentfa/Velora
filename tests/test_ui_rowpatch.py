@@ -1,4 +1,5 @@
 """Liste de gauche : seules les lignes modifiées sont reconstruites ; le menu clic droit n'est créé qu'au survol de la ligne."""
+import asyncio
 from datetime import datetime
 
 import pytest
@@ -74,3 +75,42 @@ async def test_context_menu_is_built_on_first_hover(user: User, mailbox) -> None
                 events.handle_event(listener.handler, events.GenericEventArguments(sender=wrap, client=user.client, args=None))
     await user.should_see("Transférer…")
     assert len(user.find("Répondre", kind=main.ui.menu_item).elements) == 1  # seule la ligne survolée a son menu
+
+
+async def test_forced_reload_with_nothing_new_does_not_redraw(user: User, mailbox, box) -> None:
+    await user.open("/")
+    await user.should_see("Devis chaudière")
+    b = box[-1]
+    first, second = row_of(user, "testbox|INBOX|1"), row_of(user, "testbox|INBOX|2")
+    await b.reload(force=True)
+    await asyncio.sleep(0.3)  # un redessin complet, s'il avait lieu, serait lancé en tâche de fond
+    assert row_of(user, "testbox|INBOX|1") is first and row_of(user, "testbox|INBOX|2") is second
+
+
+async def test_forced_reload_redraws_after_a_minute_for_relative_times(user: User, mailbox, box) -> None:
+    await user.open("/")
+    await user.should_see("Devis chaudière")
+    b = box[-1]
+    first = row_of(user, "testbox|INBOX|1")
+    b._full_at -= 61  # la dernière construction complète date de plus d'une minute : les « il y a 5 min » doivent être rafraîchis
+    await b.reload(force=True)
+    await asyncio.sleep(0.3)  # le redessin complet est lancé en tâche de fond
+    assert row_of(user, "testbox|INBOX|1") is not first
+
+
+async def test_opening_a_mail_redraws_only_the_two_rows_concerned(user: User, mailbox, box) -> None:
+    with db.conn() as c:
+        c.execute("UPDATE messages SET is_read=1")  # déjà lus : seule la sélection change
+    await user.open("/")
+    await user.should_see("Devis chaudière")
+    b = box[-1]
+    one, two = row_of(user, "testbox|INBOX|1"), row_of(user, "testbox|INBOX|2")
+    await b.open("testbox|INBOX|1")
+    await asyncio.sleep(0.3)
+    assert "sel" in row_of(user, "testbox|INBOX|1").classes  # la ligne ouverte est en surbrillance
+    assert row_of(user, "testbox|INBOX|2") is two  # l'autre n'a pas été touchée
+    one = row_of(user, "testbox|INBOX|1")
+    await b.open("testbox|INBOX|2")
+    await asyncio.sleep(0.3)
+    assert "sel" in row_of(user, "testbox|INBOX|2").classes and "sel" not in row_of(user, "testbox|INBOX|1").classes
+    assert row_of(user, "testbox|INBOX|1") is not one  # l'ancienne sélection a perdu sa surbrillance : ligne reconstruite

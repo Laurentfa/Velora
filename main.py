@@ -108,7 +108,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self.brief: dict | None = None
         self.counts: dict = queries.counts()
         self.ver = queries.version()
-        self._build_cost, self._last_bg = 0.0, 0.0
+        self._build_cost, self._last_bg, self._full_at = 0.0, 0.0, 0.0
         self._row_els: dict[str, ui.element] = {}  # id du mail -> élément de sa ligne dans la liste (pour ne redessiner que les lignes modifiées)
         self.rows_sig = None
         self.busy = False
@@ -542,7 +542,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             self._rows_view_body()
         finally:
             self._build_cost = time.perf_counter() - t  # sert à espacer les redessins automatiques sur un ordinateur lent
-            perf.record("liste : dessin", self._build_cost)
+            self._full_at = time.monotonic()
+            perf.record("liste : dessin complet", self._build_cost)
 
     def _rows_view_body(self) -> None:
         self._row_els = {}
@@ -1127,7 +1128,13 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                                               self.view if self.view in ("todo", "noise", "newsletter", "notification") else "", self.limit,
                                               folder=self.folder if self.view == "folder" else "", read=self.read_filter == "read",
                                               oldest_first=self.oldest_first)
-            sig = ("l", self.view, self.account, self.folder, self.q, self.read_filter, self.oldest_first, *[(x["id"], x["is_read"], x["summary"], x.get("conv_n"), x.get("conv_unread"), x.get("pinned")) for x in self.rows])
+            # tout ce qui change l'aspect de la liste est dans la signature : ainsi un rechargement « forcé » (ouvrir un mail, cocher…) ne redessine
+            # que les lignes touchées, au lieu des 80
+            look = (self.view, self.account, self.folder, self.q, self.read_filter, self.oldest_first, self.limit, tuple(sorted(self.picked)), self.select_mode,
+                    db.kv_get("pins_folded"), repr(settings_ui.send_alert()), config.ai_enabled(), tuple(label_of(a) for a in sync.ACCOUNTS))
+            cur_key = self.cur.get("ckey") if self.cur else None
+            sig = ("l", look, tuple((x["id"], x["is_read"], x["summary"], x.get("conv_n"), x.get("conv_unread"), x.get("pinned"), x.get("woke"),
+                                     cur_key is not None and cur_key == x.get("ckey")) for x in self.rows))
         # la colonne de gauche n'est redessinée que si ce qu'elle affiche a changé : sinon un clic sur ses icônes pouvait tomber
         # pile pendant un redessin (toutes les 12 s environ, à chaque synchro) et se perdre
         side_sig = (repr(sorted(self.counts.items(), key=lambda kv: kv[0])), vault.lock_enabled(db), self.view, self.account, self.folder, self.busy,
@@ -1137,24 +1144,31 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             self._side_sig = side_sig
             self.side.refresh()
         if force or sig != self.rows_sig:
-            if force or not self._patch_rows(sig):
+            if sig[0] != "l":
+                full = True
+            elif sig == self.rows_sig:  # forcé mais rien de visible n'a changé : on ne redessine que pour rafraîchir les heures relatives (« 5 min »)
+                full = time.monotonic() - self._full_at > 60
+            else:
+                full = not self._patch_rows(sig)
+            if full:
                 self.rows_view.refresh()
             self.rows_sig = sig
 
     def _patch_rows(self, sig: tuple) -> bool:
-        """Quelques lignes ont changé (lu, résumé IA, nombre de messages) alors que la liste est la même : on ne reconstruit que celles-là.
-        Redessiner les 80 lignes coûte plus d'une seconde de fenêtre figée sur un ordinateur lent. False = il faut tout redessiner."""
+        """Quelques lignes ont changé (lu, résumé IA, sélection, nombre de messages) alors que la liste est la même : on ne reconstruit que
+        celles-là. Redessiner les 80 lignes coûte plus d'une seconde de fenêtre figée sur un ordinateur lent. False = il faut tout redessiner."""
         old = self.rows_sig
-        if not (old and old[0] == "l" and sig[0] == "l" and old[:7] == sig[:7] and len(old) == len(sig) and self._row_els and not (self.picked or self.select_mode)):
+        if not (old and old[0] == "l" and sig[0] == "l" and old[1] == sig[1] and len(old[2]) == len(sig[2]) and self._row_els):
             return False
         changed = []
-        for o, n, m in zip(old[7:], sig[7:], self.rows):
+        for o, n, m in zip(old[2], sig[2], self.rows):
             if o != n:
-                if o[0] != n[0] or o[5] != n[5] or m["id"] not in self._row_els:  # autre mail, épinglage changé (sections) ou ligne repliée
+                if o[0] != n[0] or o[5] != n[5] or o[6] != n[6] or m["id"] not in self._row_els:  # autre mail, épinglé/reporté changé (sections) ou ligne repliée
                     return False
                 changed.append(m)
         if len(changed) > 15:
             return False
+        t = time.perf_counter()
         self._pins = db.pin_keys()
         for m in changed:
             former = self._row_els[m["id"]]
@@ -1164,6 +1178,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                 self.row(m)
             self._row_els[m["id"]].move(parent, target_index=index)
             former.delete()
+        perf.record("liste : lignes redessinées", time.perf_counter() - t)
         return True
 
     async def tick(self) -> None:
