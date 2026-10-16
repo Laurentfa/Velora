@@ -63,6 +63,10 @@ class DraftsMixin:
             bcc_field.set_visibility(bool(d.get("bcc")))
             self.rcpt_add.update(cc=add_cc, bcc=add_bcc)
             self.bcc_field = bcc_field
+            self.rcpt_target = "to"  # le raccourci cliqué ira dans le dernier champ où l'on a cliqué (À par défaut)
+            self.rcpt_fields = {"to": to_sel, "cc": cc_field, "bcc": bcc_field}
+            for target, fld in self.rcpt_fields.items():
+                fld.on("focus", lambda _=None, t=target: self.set_rcpt_target(t))
             self.shortcuts_bar()
             self.subject_input = ui.input("Objet").bind_value(d, "subject").props("outlined dense").classes("w-full q-mt-sm")
             with ui.row().classes("gap-1 q-mt-xs"):
@@ -104,22 +108,32 @@ class DraftsMixin:
             self.editor = make_editor(d["html"], lambda e: d.__setitem__("html", e.value or ""))
             self.editor.classes("q-mt-sm")
 
+    RCPT_NAMES = {"to": "À", "cc": "Cc", "bcc": "Cci"}
+
+    def set_rcpt_target(self, target: str) -> None:
+        self.rcpt_target = target
+        hint = getattr(self, "rcpt_hint", None)
+        if hint is not None:
+            try:
+                hint.set_text(f"→ {self.RCPT_NAMES[target]}")
+            except Exception:
+                pass
+
     @ui.refreshable_method
     def shortcuts_bar(self) -> None:
-        """Raccourcis destinataires, entre les champs d'adresses et l'objet : un clic ajoute un groupe (👥) ou un contact favori (⭐) à « À », « Cc » ou « Cci »
-        selon le choix de gauche. Les raccourcis sont les groupes et favoris des Contacts ; le bouton « + » en crée un à partir des destinataires saisis."""
-        mode = {"v": "to"}
+        """Raccourcis destinataires, entre les champs d'adresses et l'objet : un clic ajoute un groupe (👥) ou un contact favori (⭐) au champ où l'on a cliqué en dernier
+        (« À » par défaut ; la petite flèche rappelle lequel). Les raccourcis sont les groupes et favoris des Contacts ; le bouton « + » en crée un à partir des destinataires saisis."""
         favs = contacts_ui.favorites()
 
         def add(kind: str, ref) -> None:
-            if mode["v"] == "bcc":
+            target = self.rcpt_target
+            if target == "bcc":
                 self.bcc_field.set_visibility(True)
-            self.rcpt_add[mode["v"]](contacts_ui.favorite_addresses(kind, ref))
+            self.rcpt_add[target](contacts_ui.favorite_addresses(kind, ref))
 
         with ui.row().classes("w-full items-center gap-1 q-mt-sm").style("flex-wrap:wrap"):
             ui.label("Raccourcis").classes("rmeta").style("font-weight:600")
-            ui.toggle({"to": "À", "cc": "Cc", "bcc": "Cci"}, value="to").bind_value(mode, "v").props(
-                "dense no-caps unelevated size=sm toggle-color=primary").mark("rcpt-mode").tooltip("Où ajouter le raccourci choisi")
+            self.rcpt_hint = ui.label(f"→ {self.RCPT_NAMES[self.rcpt_target]}").classes("rmeta").tooltip("Champ où ira le raccourci : le dernier où vous avez cliqué").mark("rcpt-hint")
             for label, kind, ref in favs[:24]:
                 ui.button(("⭐ " if kind == "contact" else "") + label, on_click=lambda _, k=kind, r=ref: add(k, r)).props(
                     "outline dense no-caps size=sm color=primary").mark(f"shortcut-{kind}-{ref}")

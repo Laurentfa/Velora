@@ -40,6 +40,15 @@ def click(user, marker):
     return el
 
 
+def focus(user, b, target):
+    """Simule un clic dans un champ de destinataires (l'événement « focus » du champ)."""
+    fld = b.rcpt_fields[target]
+    with user.client:
+        for listener in fld._event_listeners.values():
+            if listener.type == "focus":
+                events.handle_event(listener.handler, events.GenericEventArguments(sender=fld, client=user.client, args=None))
+
+
 async def open_composer(user, box):
     await user.open("/")
     b = box[-1]
@@ -63,20 +72,29 @@ async def test_a_click_adds_the_group_to_the_chosen_field(user: User, box) -> No
     click(user, f"shortcut-group-{gid}")  # par défaut : « À »
     await asyncio.sleep(0.2)
     assert set(contacts_ui.split_addrs(b.draft["to"])) == {"alice@exemple.fr", "bob@exemple.fr"} and not b.draft["cc"]
-    (mode,) = user.find(marker="rcpt-mode").elements
-    mode.set_value("cc")
+    focus(user, b, "cc")  # on clique dans le champ Cc : le raccourci suivant ira là
     click(user, "shortcut-contact-claire@exemple.fr")
     await asyncio.sleep(0.2)
     assert contacts_ui.split_addrs(b.draft["cc"]) == ["claire@exemple.fr"]
     assert set(contacts_ui.split_addrs(b.draft["to"])) == {"alice@exemple.fr", "bob@exemple.fr"}  # « À » n'a pas bougé
 
 
+async def test_the_hint_shows_where_the_shortcut_will_go_and_no_selector_is_left(user: User, box) -> None:
+    b = await open_composer(user, box)
+    await user.should_not_see(marker="rcpt-mode")  # plus de sélecteur À / Cc / Cci : le dernier champ cliqué suffit
+    assert b.rcpt_hint.text == "→ À"
+    focus(user, b, "cc")
+    assert b.rcpt_hint.text == "→ Cc" and b.rcpt_target == "cc"
+    focus(user, b, "to")
+    assert b.rcpt_target == "to"
+
+
 async def test_bcc_choice_reveals_the_hidden_field(user: User, box) -> None:
     make_shortcuts()
     b = await open_composer(user, box)
     assert not b.bcc_field.visible
-    (mode,) = user.find(marker="rcpt-mode").elements
-    mode.set_value("bcc")
+    b.bcc_field.set_visibility(True)
+    focus(user, b, "bcc")
     click(user, "shortcut-contact-claire@exemple.fr")
     await asyncio.sleep(0.2)
     assert b.bcc_field.visible and contacts_ui.split_addrs(b.draft["bcc"]) == ["claire@exemple.fr"]
