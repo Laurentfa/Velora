@@ -206,6 +206,9 @@ html.s-hide .sidehot{display:block;position:fixed;left:0;top:0;bottom:0;width:8p
 html:not(.s-hide) .sidepinbtn,html.s-hide:not(.s-peek) .sidepinbtn{display:none}
 html.s-hide .sidehidebtn{display:none}
 .q-editor__content table{max-width:100%}
+/* écran peu haut : la liste des onglets défile comme le reste (molette, pavé tactile, barre fine) au lieu des petites flèches de Quasar */
+.settings-tabs .q-tabs__arrow{display:none!important}
+.settings-tabs .q-tabs__content{overflow-y:auto!important;min-height:0;scrollbar-width:thin;overscroll-behavior:contain}
 .settings-tabs .q-tab{justify-content:flex-start;min-height:48px;padding:0 18px}.settings-tabs .q-tab__label{font-size:14px}
 .mimg-box{position:fixed;display:none;z-index:6900;border:2px solid var(--accent);pointer-events:none;box-sizing:border-box}
 .mimg-h{position:absolute;right:-7px;bottom:-7px;width:12px;height:12px;background:var(--accent);border:2px solid #fff;border-radius:3px;cursor:nwse-resize;pointer-events:auto}

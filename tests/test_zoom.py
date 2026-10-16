@@ -126,3 +126,9 @@ async def test_filter_menu_has_the_density_choice(user: User) -> None:
                 from nicegui import events
                 events.handle_event(listener.handler, events.ClickEventArguments(sender=compact, client=user.client))
     assert ui_zoom.compact()  # un clic sur « Compacte » mémorise la densité
+
+
+def test_settings_tab_list_scrolls_natively_without_quasar_arrows():
+    from mailia.ui_assets import CSS
+    assert ".settings-tabs .q-tabs__arrow{display:none!important}" in CSS  # plus de petites flèches
+    assert ".settings-tabs .q-tabs__content{overflow-y:auto!important" in CSS  # défilement natif : molette, pavé tactile, barre fine
