@@ -1,4 +1,4 @@
-"""Raccourcis destinataires de la rédaction : groupes et favoris en un clic vers À, Cc ou Cci ; création d'un raccourci depuis les destinataires saisis."""
+"""Favoris des destinataires : plus de ligne de raccourcis dans la rédaction ; les favoris se gèrent par l'étoile de la liste qui s'ouvre dans les champs À, Cc, Cci."""
 import asyncio
 from datetime import datetime
 
@@ -21,34 +21,6 @@ def box(monkeypatch):
     return seen
 
 
-def make_shortcuts():
-    gid = db.group_save(None, "Équipe technique")
-    for a in ("alice@exemple.fr", "bob@exemple.fr"):
-        db.group_set_member(gid, a, True)
-    db.group_favorite(gid, True)
-    db.contact_save("claire@exemple.fr", "Claire Martin", "manual")
-    db.contact_favorite("claire@exemple.fr", True)
-    return gid
-
-
-def click(user, marker):
-    (el,) = user.find(marker=marker).elements
-    with user.client:
-        for listener in el._event_listeners.values():
-            if listener.type == "click":
-                events.handle_event(listener.handler, events.ClickEventArguments(sender=el, client=user.client))
-    return el
-
-
-def focus(user, b, target):
-    """Simule un clic dans un champ de destinataires (l'événement « focus » du champ)."""
-    fld = b.rcpt_fields[target]
-    with user.client:
-        for listener in fld._event_listeners.values():
-            if listener.type == "focus":
-                events.handle_event(listener.handler, events.GenericEventArguments(sender=fld, client=user.client, args=None))
-
-
 async def open_composer(user, box):
     await user.open("/")
     b = box[-1]
@@ -57,86 +29,46 @@ async def open_composer(user, box):
     return b
 
 
-async def test_bar_lists_groups_and_favorite_contacts(user: User, box) -> None:
-    gid = make_shortcuts()
+def trigger_fav(user, ref):
+    """Simule le clic sur l'étoile d'une ligne de la liste du champ « À » (événement « fav » du champ)."""
+    (sel,) = [e for e in user.client.elements.values() if isinstance(e, ui.select) and e.props.get("label") == "À"]
+    with user.client:
+        for listener in sel._event_listeners.values():
+            if listener.type == "fav":
+                events.handle_event(listener.handler, events.GenericEventArguments(sender=sel, client=user.client, args=ref))
+    return sel
+
+
+async def test_no_shortcut_line_in_the_composer(user: User, box) -> None:
+    db.contact_save("claire@exemple.fr", "Claire Martin", "manual")
+    db.contact_favorite("claire@exemple.fr", True)
     await open_composer(user, box)
-    await user.should_see("Raccourcis")
-    await user.should_see("Équipe technique")
-    await user.should_see("Claire Martin")
-    assert user.find(marker=f"shortcut-group-{gid}").elements
+    await user.should_not_see("Raccourcis")
+    await user.should_not_see(marker="shortcut-new")
 
 
-async def test_a_click_adds_the_group_to_the_chosen_field(user: User, box) -> None:
-    gid = make_shortcuts()
-    b = await open_composer(user, box)
-    click(user, f"shortcut-group-{gid}")  # par défaut : « À »
-    await asyncio.sleep(0.2)
-    assert set(contacts_ui.split_addrs(b.draft["to"])) == {"alice@exemple.fr", "bob@exemple.fr"} and not b.draft["cc"]
-    focus(user, b, "cc")  # on clique dans le champ Cc : le raccourci suivant ira là
-    click(user, "shortcut-contact-claire@exemple.fr")
-    await asyncio.sleep(0.2)
-    assert contacts_ui.split_addrs(b.draft["cc"]) == ["claire@exemple.fr"]
-    assert set(contacts_ui.split_addrs(b.draft["to"])) == {"alice@exemple.fr", "bob@exemple.fr"}  # « À » n'a pas bougé
-
-
-async def test_the_hint_shows_where_the_shortcut_will_go_and_no_selector_is_left(user: User, box) -> None:
-    b = await open_composer(user, box)
-    await user.should_not_see(marker="rcpt-mode")  # plus de sélecteur À / Cc / Cci : le dernier champ cliqué suffit
-    assert b.rcpt_hint.text == "→ À"
-    focus(user, b, "cc")
-    assert b.rcpt_hint.text == "→ Cc" and b.rcpt_target == "cc"
-    focus(user, b, "to")
-    assert b.rcpt_target == "to"
-
-
-async def test_bcc_choice_reveals_the_hidden_field(user: User, box) -> None:
-    make_shortcuts()
-    b = await open_composer(user, box)
-    assert not b.bcc_field.visible
-    b.bcc_field.set_visibility(True)
-    focus(user, b, "bcc")
-    click(user, "shortcut-contact-claire@exemple.fr")
-    await asyncio.sleep(0.2)
-    assert b.bcc_field.visible and contacts_ui.split_addrs(b.draft["bcc"]) == ["claire@exemple.fr"]
-
-
-async def test_without_shortcuts_the_bar_still_offers_to_create_one(user: User, box) -> None:
+async def test_the_star_adds_and_removes_a_favorite_contact(user: User, box) -> None:
+    db.contact_save("claire@exemple.fr", "Claire Martin", "manual")
     await open_composer(user, box)
-    await user.should_see("Raccourcis")
-    await user.should_see("Aucun pour l'instant")
-    assert user.find(marker="shortcut-new").elements
+    sel = trigger_fav(user, "claire@exemple.fr")
+    assert next(c for c in db.contacts_list() if c["email"] == "claire@exemple.fr")["favorite"]
+    assert str(sel.options["claire@exemple.fr"]).startswith("⭐")
+    trigger_fav(user, "claire@exemple.fr")
+    assert not next(c for c in db.contacts_list() if c["email"] == "claire@exemple.fr")["favorite"]
 
 
-async def test_saving_current_recipients_makes_a_new_shortcut(user: User, box) -> None:
-    b = await open_composer(user, box)
-    b.draft.update(to="marie@exemple.fr; paul@exemple.fr", cc="chef@exemple.fr")
-    task = asyncio.create_task(b.save_shortcut())
-    await asyncio.sleep(0.3)
-    (name,) = user.find(marker="shortcut-name").elements
-    name.set_value("Projet Alpha")
-    click(user, "shortcut-save")
-    await task
-    g = next(g for g in db.groups_list() if g["name"] == "Projet Alpha")
-    assert g["favorite"] and set(g["members"]) == {"marie@exemple.fr", "paul@exemple.fr", "chef@exemple.fr"}
-    await asyncio.sleep(0.2)
-    await user.should_see("Projet Alpha")  # le raccourci apparaît aussitôt dans la barre
+async def test_the_star_works_on_groups(user: User, box) -> None:
+    gid = db.group_save(None, "Équipe technique")
+    db.group_set_member(gid, "alice@exemple.fr", True)
+    await open_composer(user, box)
+    trigger_fav(user, f"group:{gid}")
+    assert contacts_ui.favorites()[0][1] == "group"
 
 
-async def test_saving_under_an_existing_name_completes_that_shortcut(user: User, box) -> None:
-    make_shortcuts()
-    b = await open_composer(user, box)
-    b.draft.update(to="nouveau@exemple.fr", cc="")
-    task = asyncio.create_task(b.save_shortcut())
-    await asyncio.sleep(0.3)
-    (name,) = user.find(marker="shortcut-name").elements
-    name.set_value("équipe TECHNIQUE")  # casse différente : c'est le même raccourci
-    click(user, "shortcut-save")
-    await task
-    teams = [g for g in db.groups_list() if g["name"].lower() == "équipe technique"]
-    assert len(teams) == 1 and set(teams[0]["members"]) == {"alice@exemple.fr", "bob@exemple.fr", "nouveau@exemple.fr"}
-
-
-async def test_nothing_is_saved_without_recipients(user: User, box) -> None:
-    b = await open_composer(user, box)
-    await b.save_shortcut()
-    assert db.groups_list() == []
+async def test_the_star_sends_the_row_rank_as_the_browser_does(user: User, box) -> None:
+    db.contact_save("claire@exemple.fr", "Claire Martin", "manual")
+    await open_composer(user, box)
+    (sel,) = [e for e in user.client.elements.values() if isinstance(e, ui.select) and e.props.get("label") == "À"]
+    rank = sel._values.index("claire@exemple.fr")
+    trigger_fav(user, rank)
+    assert next(c for c in db.contacts_list() if c["email"] == "claire@exemple.fr")["favorite"]

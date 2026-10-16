@@ -63,11 +63,6 @@ class DraftsMixin:
             bcc_field.set_visibility(bool(d.get("bcc")))
             self.rcpt_add.update(cc=add_cc, bcc=add_bcc)
             self.bcc_field = bcc_field
-            self.rcpt_target = "to"  # le raccourci cliqué ira dans le dernier champ où l'on a cliqué (À par défaut)
-            self.rcpt_fields = {"to": to_sel, "cc": cc_field, "bcc": bcc_field}
-            for target, fld in self.rcpt_fields.items():
-                fld.on("focus", lambda _=None, t=target: self.set_rcpt_target(t))
-            self.shortcuts_bar()
             self.subject_input = ui.input("Objet").bind_value(d, "subject").props("outlined dense").classes("w-full q-mt-sm")
             with ui.row().classes("gap-1 q-mt-xs"):
                 ui.button("Cci", icon="visibility_off", on_click=lambda: bcc_field.set_visibility(not bcc_field.visible)).props(
@@ -109,17 +104,6 @@ class DraftsMixin:
             self.editor = make_editor(d["html"], lambda e: d.__setitem__("html", e.value or ""))
             self.editor.classes("q-mt-sm")
 
-    RCPT_NAMES = {"to": "À", "cc": "Cc", "bcc": "Cci"}
-
-    def set_rcpt_target(self, target: str) -> None:
-        self.rcpt_target = target
-        hint = getattr(self, "rcpt_hint", None)
-        if hint is not None:
-            try:
-                hint.set_text(f"→ {self.RCPT_NAMES[target]}")
-            except Exception:
-                pass
-
     def set_importance(self, level: int) -> None:
         self.draft["importance"] = level
         self.importance_tool.refresh()
@@ -136,57 +120,6 @@ class DraftsMixin:
                 for lvl, label in ((1, "Normale"), (2, "Haute (!)"), (0, "Basse")):
                     ui.menu_item(("✓  " if level == lvl else "     ") + label, on_click=lambda _, v=lvl: self.set_importance(v)).mark(f"importance-{lvl}")
 
-    @ui.refreshable_method
-    def shortcuts_bar(self) -> None:
-        """Raccourcis destinataires, entre les champs d'adresses et l'objet : un clic ajoute un groupe (👥) ou un contact favori (⭐) au champ où l'on a cliqué en dernier
-        (« À » par défaut ; la petite flèche rappelle lequel). Les raccourcis sont les groupes et favoris des Contacts ; le bouton « + » en crée un à partir des destinataires saisis."""
-        favs = contacts_ui.favorites()
-
-        def add(kind: str, ref) -> None:
-            target = self.rcpt_target
-            if target == "bcc":
-                self.bcc_field.set_visibility(True)
-            self.rcpt_add[target](contacts_ui.favorite_addresses(kind, ref))
-
-        with ui.row().classes("w-full items-center gap-1 q-mt-sm").style("flex-wrap:wrap"):
-            ui.label("Raccourcis").classes("rmeta").style("font-weight:600")
-            self.rcpt_hint = ui.label(f"→ {self.RCPT_NAMES[self.rcpt_target]}").classes("rmeta").tooltip("Champ où ira le raccourci : le dernier où vous avez cliqué").mark("rcpt-hint")
-            for label, kind, ref in favs[:24]:
-                ui.button(("⭐ " if kind == "contact" else "") + label, on_click=lambda _, k=kind, r=ref: add(k, r)).props(
-                    "outline dense no-caps size=sm color=primary").mark(f"shortcut-{kind}-{ref}")
-            if not favs:
-                ui.label("Aucun pour l'instant").classes("rmeta")
-            ui.button(icon="bookmark_add", on_click=self.save_shortcut).props("flat dense round size=sm color=primary").mark("shortcut-new").tooltip(
-                "Enregistrer les destinataires saisis (À et Cc) comme raccourci")
-            ui.button(icon="tune", on_click=self.open_contacts).props("flat dense round size=sm").tooltip(
-                "Gérer mes raccourcis : groupes et favoris (⭐) dans les Contacts")
-
-    async def save_shortcut(self) -> None:
-        """Crée (ou complète) un groupe favori avec les destinataires déjà saisis : c'est lui qui devient un raccourci."""
-        d = self.draft
-        mine = contacts_ui.my_addresses()
-        addrs = [a for a in dict.fromkeys(contacts_ui.split_addrs(d["to"]) + contacts_ui.split_addrs(d["cc"])) if a not in mine]
-        if not addrs:
-            return ui.notify("Saisissez d'abord des destinataires dans « À » ou « Cc ».", type="warning")
-        with self.host, ui.dialog() as dlg, ui.card().style("width:min(460px,92vw)"):
-            ui.label("Nouveau raccourci").classes("text-h6")
-            ui.label(f"{len(addrs)} destinataire(s) : " + ", ".join(addrs[:6]) + ("…" if len(addrs) > 6 else "")).classes("text-caption text-grey")
-            name = ui.input("Nom du raccourci", placeholder="ex : Équipe technique").props("outlined dense autofocus stack-label").classes("w-full").mark("shortcut-name")
-            with ui.row().classes("justify-end w-full gap-2"):
-                ui.button("Annuler", on_click=lambda: dlg.submit(None)).props("flat no-caps")
-                ui.button("Enregistrer", on_click=lambda: dlg.submit((name.value or "").strip())).props("unelevated no-caps color=primary").mark("shortcut-save")
-            name.on("keydown.enter", lambda: dlg.submit((name.value or "").strip()))
-        chosen = await dlg
-        if not chosen:
-            return
-        existing = next((g for g in db.groups_list() if g["name"].lower() == chosen.lower()), None)
-        gid = existing["id"] if existing else db.group_save(None, chosen)
-        for a in addrs:
-            db.group_set_member(gid, a, True)
-        db.group_favorite(gid, True)
-        self.shortcuts_bar.refresh()
-        ui.notify(f"Raccourci « {chosen} » " + ("complété" if existing else "enregistré") + f" ({len(addrs)} destinataire(s)).", type="positive")
-
     def account_changed(self, account: str) -> None:
         """Nouvelle boîte d'expédition : la signature suit (si elle a la sienne)."""
         d = self.draft
@@ -199,7 +132,7 @@ class DraftsMixin:
         await contacts_ui.contacts_dialog(self.host, self.write_to, self.contacts_closed)
 
     def contacts_closed(self) -> None:
-        """Le carnet a pu changer (groupes, favoris) : l'éditeur ouvert en dessous reprend ses suggestions et sa barre « Favoris »."""
+        """Le carnet a pu changer (groupes, favoris) : l'éditeur ouvert en dessous reprend ses suggestions."""
         if self.new or self.compose:
             self.reader.refresh()
 

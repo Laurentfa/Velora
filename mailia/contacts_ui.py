@@ -65,6 +65,19 @@ def recipients_field(label: str, d: dict, key: str, options: dict[str, str]) -> 
           <q-tooltip>{{ props.opt.value }}</q-tooltip>
         </q-chip>""")
 
+    # dans la liste qui s'ouvre au clic : une étoile sur chaque ligne ajoute ou retire le favori (les favoris passent en tête)
+    sel.add_slot("option", """
+        <q-item v-bind="props.itemProps">
+          <q-item-section><q-item-label>{{ String(props.opt.label).replace('⭐ ', '') }}</q-item-label></q-item-section>
+          <q-item-section side>
+            <q-btn flat dense round size="sm" :icon="String(props.opt.label).startsWith('⭐') ? 'star' : 'star_border'"
+                   :color="String(props.opt.label).startsWith('⭐') ? 'amber-8' : 'grey-6'"
+                   @click.stop.prevent="() => { let p = $parent; for (let i = 0; p && i < 8; i++, p = p.$parent) p.$emit('fav', props.opt.value) }">
+              <q-tooltip>{{ String(props.opt.label).startsWith('⭐') ? 'Retirer des favoris' : 'Ajouter aux favoris' }}</q-tooltip>
+            </q-btn>
+          </q-item-section>
+        </q-item>""")
+
     def apply(values: list[str]) -> None:
         groups = {f"group:{g['id']}": g for g in db.groups_list()}  # relus à chaque fois : un groupe a pu changer depuis l'ouverture
         out: list[str] = []
@@ -96,6 +109,21 @@ def recipients_field(label: str, d: dict, key: str, options: dict[str, str]) -> 
         finally:
             state["busy"] = False
 
+    def toggle_favorite(e) -> None:
+        values = list(getattr(sel, "_values", []))  # NiceGUI numérote les options : l'étoile envoie le rang de la ligne
+        ref = values[e.args] if isinstance(e.args, int) and 0 <= e.args < len(values) else (e.args if isinstance(e.args, str) else "")
+        if ref.startswith("group:"):
+            gid = int(ref.split(":", 1)[1])
+            g = next((g for g in db.groups_list() if g["id"] == gid), None)
+            if g:
+                db.group_favorite(gid, not g["favorite"])
+        elif ref:
+            c = next((c for c in db.contacts_list(ref) if c["email"] == ref.lower()), None)
+            if c:
+                db.contact_favorite(ref, not c["favorite"])
+        refresh_options()
+
+    sel.on("fav", toggle_favorite)
     sel.on("popup-show", refresh_options)
     # une adresse tapée mais non validée (on passe au champ suivant sans Entrée) ne doit pas se perdre
     sel.on("blur", js_handler="""(e) => { const i = e && e.target; if (i && i.tagName === 'INPUT' && i.value && i.value.includes('@'))
