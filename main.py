@@ -227,6 +227,19 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         folder_order.save(acct, new)
         self.side.refresh()
 
+    def folders_folded(self) -> set[str]:
+        """Dossiers dont les sous-dossiers sont repliés (« boîte|clé »)."""
+        try:
+            return set(json.loads(db.kv_get("folder_fold") or "[]"))
+        except ValueError:
+            return set()
+
+    def toggle_folder_fold(self, acct: str, key: str) -> None:
+        cur = self.folders_folded()
+        cur.symmetric_difference_update({f"{acct}|{key}"})
+        db.kv_set("folder_fold", json.dumps(sorted(cur)))
+        self.side.refresh()
+
     def toggle_fold(self, acct: str) -> None:
         cur = self.folded()
         cur.symmetric_difference_update({acct})
@@ -247,7 +260,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
 
         def item(view: str, acc: str, icon: str, label: str, cnt: int | str = 0, hot: bool = False,
                  folder: str = "", depth: int = 0, manage: bool = False, drop: str = "", total: int | None = None, fold: bool | None = None,
-                 fpath: str | None = None) -> None:
+                 fpath: str | None = None, ffold: bool | None = None) -> None:
             on = self.view == view and self.account == acc and self.folder == folder
             el = ui.element("div").classes("nav" + (" on" if on else "") + (" sub" if depth else "")).on(
                 "click", lambda _, v=view, a=acc, f=folder: self.go(v, a, f))
@@ -267,6 +280,10 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                         "click.stop", lambda _, a=acc: self.toggle_fold(a)).tooltip("Replier les dossiers" if fold else "Déplier les dossiers").mark(f"fold-{acc}")
                 if icon == "logo":  # le logo Velora devant chaque boîte
                     ui.html(logo_img(20), sanitize=False).classes("ic").style("display:flex;justify-content:center")
+                elif ffold is not None:  # dossier qui a des sous-dossiers : la flèche les replie ou les déplie (à la place du petit triangle)
+                    ui.icon("expand_more" if ffold else "chevron_right", size="18px").classes("ic").style("color:var(--muted);cursor:pointer").on(
+                        "click.stop", lambda _, a=acc, k=folder: self.toggle_folder_fold(a, k)).tooltip(
+                        "Replier les sous-dossiers" if ffold else "Déplier les sous-dossiers").mark(f"ffold-{acc}-{folder}")
                 else:
                     ui.label(icon).classes("ic")
                 ui.label(label).classes("lbl")
@@ -296,11 +313,19 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             for key, cfg in sync.ACCOUNTS.items():
                 item("inbox", key, "logo", cfg.label, c["accounts"].get(key, 0), manage=True, drop="INBOX", total=c["tot_accounts"].get(key, 0),
                      fold=(key not in folded) if subs.get(key) else None)
+                ffolded = self.folders_folded()
+                paths = {f["key"]: f["path"] for f in subs.get(key, [])}
+                collapsed = [paths[k.split("|", 1)[1]] + "/" for k in ffolded if k.startswith(key + "|") and k.split("|", 1)[1] in paths]
                 for f in ([] if key in folded else subs.get(key, [])):
+                    selected = self.view == "folder" and self.account == key and self.folder == f["key"]
+                    if not selected and any(f["path"].startswith(p) for p in collapsed):  # sous un dossier replié : masqué (sauf celui qu'on regarde)
+                        continue
+                    has_kids = any(g["path"].startswith(f["path"] + "/") for g in subs[key])
                     same = sum(1 for g in subs[key] if g["name"] == f["name"]) > 1
                     shown = f["path"].rsplit("/", 2)[-2] + " › " + f["name"] if same and "/" in f["path"] else f["name"]
                     item("folder", key, "▸", shown, c["folders"].get(f"{key}|{f['key']}", 0), folder=f["key"],
-                         depth=1 + f["path"].count("/"), drop=f["key"], total=c["tot_folders"].get(f"{key}|{f['key']}", 0), fpath=f["path"])
+                         depth=1 + f["path"].count("/"), drop=f["key"], total=c["tot_folders"].get(f"{key}|{f['key']}", 0), fpath=f["path"],
+                         ffold=(f"{key}|{f['key']}" not in ffolded) if has_kids else None)
             ui.label("Vues").classes("grp")
             if use_ai:
                 item("todo", "", "⚑", "À traiter", c["todo"], True, total=c["tot_todo"])

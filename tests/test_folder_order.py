@@ -115,3 +115,44 @@ async def test_subfolders_are_indented_under_their_parent(user: User, box) -> No
     assert padding("a22") == "28px" and padding("a23") == "28px"  # les années, sous Archive
     assert padding("a22x") == "46px"  # et un niveau de plus en dessous
     assert displayed(user).index("arch") + 1 == displayed(user).index("a22")  # juste après leur parent
+
+
+def fire(user, element, event="click.stop"):
+    from nicegui import events
+    with user.client:
+        for listener in element._event_listeners.values():
+            if listener.type == event:
+                events.handle_event(listener.handler, events.GenericEventArguments(sender=element, client=user.client, args=None))
+
+
+async def test_a_folder_with_subfolders_has_an_arrow_that_folds_them(user: User, box) -> None:
+    with db.conn() as c:
+        for k, p in (("a22", "Archive/2022"), ("a23", "Archive/2023")):
+            c.execute("INSERT OR REPLACE INTO folders(account,key,name,path,role,sync) VALUES('testbox',?,?,?,'',1)", (k, p.rsplit("/", 1)[-1], p))
+    await user.open("/")
+    await user.should_see("2022")
+    await user.should_see(marker="ffold-testbox-arch")
+    await user.should_not_see(marker="ffold-testbox-adm")  # la flèche n'existe que sur un dossier qui a des sous-dossiers
+    assert displayed(user) == ["adm", "arch", "a22", "a23", "jur"]
+    (arrow,) = user.find(marker="ffold-testbox-arch").elements
+    fire(user, arrow)  # replier
+    await asyncio.sleep(0.4)
+    assert displayed(user) == ["adm", "arch", "jur"] and "testbox|arch" in main.Mailbox.folders_folded(box[-1])
+    await user.should_not_see("2022")
+    (arrow,) = user.find(marker="ffold-testbox-arch").elements
+    fire(user, arrow)  # déplier
+    await asyncio.sleep(0.4)
+    assert displayed(user) == ["adm", "arch", "a22", "a23", "jur"] and not box[-1].folders_folded()
+
+
+async def test_the_folder_being_viewed_stays_visible_even_under_a_folded_parent(user: User, box) -> None:
+    with db.conn() as c:
+        for k, p in (("a22", "Archive/2022"), ("a23", "Archive/2023")):
+            c.execute("INSERT OR REPLACE INTO folders(account,key,name,path,role,sync) VALUES('testbox',?,?,?,'',1)", (k, p.rsplit("/", 1)[-1], p))
+    db.kv_set("folder_fold", '["testbox|arch"]')
+    await user.open("/")
+    b = box[-1]
+    assert displayed(user) == ["adm", "arch", "jur"]
+    await b.go("folder", "testbox", "a22")
+    await asyncio.sleep(0.4)
+    assert displayed(user) == ["adm", "arch", "a22", "jur"]  # on ne perd pas de vue le dossier ouvert
