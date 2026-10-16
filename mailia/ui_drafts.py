@@ -56,14 +56,6 @@ class DraftsMixin:
             opts = contacts_ui.recipient_options()
             to_sel, add_to = contacts_ui.recipients_field("À", d, "to", opts)
             self.rcpt_add = {"to": add_to}
-            favs = contacts_ui.favorites()
-            if favs:
-                with ui.row().classes("items-center gap-1 q-mt-xs").style("flex-wrap:wrap"):
-                    ui.label("Favoris :").classes("rmeta")
-                    for label, kind, ref in favs[:14]:
-                        ui.button(("⭐ " if kind == "contact" else "") + label,
-                                  on_click=lambda _, k=kind, r=ref: add_to(contacts_ui.favorite_addresses(k, r))).props(
-                            "outline dense no-caps size=sm color=primary")
             cc_field, add_cc = contacts_ui.recipients_field("Cc", d, "cc", opts)
             cc_field.classes("q-mt-sm")
             bcc_field, add_bcc = contacts_ui.recipients_field("Cci (copie cachée)", d, "bcc", opts)
@@ -71,6 +63,7 @@ class DraftsMixin:
             bcc_field.set_visibility(bool(d.get("bcc")))
             self.rcpt_add.update(cc=add_cc, bcc=add_bcc)
             self.bcc_field = bcc_field
+            self.shortcuts_bar()
             self.subject_input = ui.input("Objet").bind_value(d, "subject").props("outlined dense").classes("w-full q-mt-sm")
             with ui.row().classes("gap-1 q-mt-xs"):
                 ui.button("Cci", icon="visibility_off", on_click=lambda: bcc_field.set_visibility(not bcc_field.visible)).props(
@@ -110,6 +103,58 @@ class DraftsMixin:
             # la barre d'actions (et le bouton Envoyer) est au-dessus du texte : on n'a pas à descendre en bas d'un long message
             self.editor = make_editor(d["html"], lambda e: d.__setitem__("html", e.value or ""))
             self.editor.classes("q-mt-sm")
+
+    @ui.refreshable_method
+    def shortcuts_bar(self) -> None:
+        """Raccourcis destinataires, entre les champs d'adresses et l'objet : un clic ajoute un groupe (👥) ou un contact favori (⭐) à « À », « Cc » ou « Cci »
+        selon le choix de gauche. Les raccourcis sont les groupes et favoris des Contacts ; le bouton « + » en crée un à partir des destinataires saisis."""
+        mode = {"v": "to"}
+        favs = contacts_ui.favorites()
+
+        def add(kind: str, ref) -> None:
+            if mode["v"] == "bcc":
+                self.bcc_field.set_visibility(True)
+            self.rcpt_add[mode["v"]](contacts_ui.favorite_addresses(kind, ref))
+
+        with ui.row().classes("w-full items-center gap-1 q-mt-sm").style("flex-wrap:wrap"):
+            ui.label("Raccourcis").classes("rmeta").style("font-weight:600")
+            ui.toggle({"to": "À", "cc": "Cc", "bcc": "Cci"}, value="to").bind_value(mode, "v").props(
+                "dense no-caps unelevated size=sm toggle-color=primary").mark("rcpt-mode").tooltip("Où ajouter le raccourci choisi")
+            for label, kind, ref in favs[:24]:
+                ui.button(("⭐ " if kind == "contact" else "") + label, on_click=lambda _, k=kind, r=ref: add(k, r)).props(
+                    "outline dense no-caps size=sm color=primary").mark(f"shortcut-{kind}-{ref}")
+            if not favs:
+                ui.label("Aucun pour l'instant").classes("rmeta")
+            ui.button(icon="bookmark_add", on_click=self.save_shortcut).props("flat dense round size=sm color=primary").mark("shortcut-new").tooltip(
+                "Enregistrer les destinataires saisis (À et Cc) comme raccourci")
+            ui.button(icon="tune", on_click=self.open_contacts).props("flat dense round size=sm").tooltip(
+                "Gérer mes raccourcis : groupes et favoris (⭐) dans les Contacts")
+
+    async def save_shortcut(self) -> None:
+        """Crée (ou complète) un groupe favori avec les destinataires déjà saisis : c'est lui qui devient un raccourci."""
+        d = self.draft
+        mine = contacts_ui.my_addresses()
+        addrs = [a for a in dict.fromkeys(contacts_ui.split_addrs(d["to"]) + contacts_ui.split_addrs(d["cc"])) if a not in mine]
+        if not addrs:
+            return ui.notify("Saisissez d'abord des destinataires dans « À » ou « Cc ».", type="warning")
+        with self.host, ui.dialog() as dlg, ui.card().style("width:min(460px,92vw)"):
+            ui.label("Nouveau raccourci").classes("text-h6")
+            ui.label(f"{len(addrs)} destinataire(s) : " + ", ".join(addrs[:6]) + ("…" if len(addrs) > 6 else "")).classes("text-caption text-grey")
+            name = ui.input("Nom du raccourci", placeholder="ex : Équipe technique").props("outlined dense autofocus stack-label").classes("w-full").mark("shortcut-name")
+            with ui.row().classes("justify-end w-full gap-2"):
+                ui.button("Annuler", on_click=lambda: dlg.submit(None)).props("flat no-caps")
+                ui.button("Enregistrer", on_click=lambda: dlg.submit((name.value or "").strip())).props("unelevated no-caps color=primary").mark("shortcut-save")
+            name.on("keydown.enter", lambda: dlg.submit((name.value or "").strip()))
+        chosen = await dlg
+        if not chosen:
+            return
+        existing = next((g for g in db.groups_list() if g["name"].lower() == chosen.lower()), None)
+        gid = existing["id"] if existing else db.group_save(None, chosen)
+        for a in addrs:
+            db.group_set_member(gid, a, True)
+        db.group_favorite(gid, True)
+        self.shortcuts_bar.refresh()
+        ui.notify(f"Raccourci « {chosen} » " + ("complété" if existing else "enregistré") + f" ({len(addrs)} destinataire(s)).", type="positive")
 
     def account_changed(self, account: str) -> None:
         """Nouvelle boîte d'expédition : la signature suit (si elle a la sienne)."""

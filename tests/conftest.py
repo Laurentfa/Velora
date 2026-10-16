@@ -29,7 +29,7 @@ def clean_db():
     db.init()
     with db.conn() as c:
         for t in ("messages", "fts", "kv", "drafts", "draft_files", "outbox", "outbox_files", "api_keys", "api_log", "api_idem", "corrections",
-                  "contacts", "usage", "usage_log", "snoozes", "folders"):
+                  "contacts", "groups", "group_members", "usage", "usage_log", "snoozes", "folders"):
             c.execute(f"DELETE FROM {t}")
     yield
 
