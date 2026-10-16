@@ -144,9 +144,9 @@ async def test_typing_a_search_adds_the_server_results_to_the_list(user: User, m
     await user.should_see("Devis chaudière")
     box = mailbox[-1]
     await box.set_query("lemasson")
-    await user.should_not_see("Rapport ancien Lemasson")  # la recherche locale vient d'abord, sans attendre le serveur
+    await user.should_not_see("Rapport ancien")  # la recherche locale vient d'abord, sans attendre le serveur
     await asyncio.sleep(1.3)
-    await user.should_see("Rapport ancien Lemasson")  # puis la liste est complétée par le serveur
+    await user.should_see("Rapport ancien")  # (« Lemasson » est entouré de la balise de surlignage)  # puis la liste est complétée par le serveur
     assert calls and calls[0][0] == "lemasson" and calls[0][2] == "INBOX" and calls[0][3] is True  # depuis la boîte de réception : tous les dossiers
     await box.set_query("lemasson")  # même recherche : pas de deuxième requête (mémoire de 10 minutes)
     await box.set_query("")
@@ -203,6 +203,6 @@ async def test_results_from_other_folders_show_their_folder(user: User, mailbox,
     await user.open("/")
     box = mailbox[-1]
     await box.set_query("lemasson")
-    await user.should_see("Rapport Lemasson ancien")
+    await user.should_see("ancien")
     await user.should_see("2025")  # le dossier d'origine est indiqué sur la ligne
     assert "tous les dossiers" in box.title.text

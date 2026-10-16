@@ -80,3 +80,27 @@ async def test_search_highlights_the_subject_and_shows_a_snippet(user: User, mai
     await box.set_query("")
     await asyncio.sleep(0.4)
     assert not [e for e in user.find(kind=ui.html).elements if "<mark>" in str(getattr(e, "content", ""))]  # recherche effacée : plus de surlignage
+
+
+def test_mail_frame_gets_the_highlight_script_only_during_a_search():
+    from mailia import htmlmail
+    plain = htmlmail.build_doc("<p>Bonjour Lemasson</p>")
+    assert "createElement('mark')" not in plain and plain.count("<script nonce=") == 1
+    doc = htmlmail.build_doc("<p>Bonjour Lemasson</p>", terms=["lemasson", "elodie"])
+    assert "createElement('mark')" in doc and '["lemasson", "elodie"]' in doc
+    assert doc.count("<script nonce=") == 2  # le script de surlignage est autorisé comme celui de l'appli (même jeton) ; sans recherche il n'y en a qu'un
+    bad = htmlmail.build_doc("<p>x</p>", terms=["</script><img src=x onerror=alert(1)>"])
+    assert "</script><img" not in bad and "\\u003c/script\\u003e" in bad  # un mot de recherche ne peut pas sortir du script
+
+
+async def test_plain_text_body_is_highlighted_when_a_search_is_active(user: User, mailbox) -> None:
+    await user.open("/")
+    box = mailbox[-1]
+    await box.set_query("lemasson")
+    await asyncio.sleep(0.4)
+    await box.open("testbox|INBOX|1")
+    box.plain.add("testbox|INBOX|1")  # texte brut
+    box.reader.refresh()
+    await asyncio.sleep(0.4)
+    marked = [str(e.content) for e in user.find(kind=ui.html).elements if "mailbody" in " ".join(e.classes)]
+    assert any("<mark>Lemasson</mark>" in c for c in marked)

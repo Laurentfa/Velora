@@ -5,6 +5,7 @@ import types
 from nicegui import ui
 from nicegui.testing import User
 
+import main
 from mailia import config, perf, ui_common
 from mailia.ui_settings import _tab_use
 
@@ -101,7 +102,6 @@ def test_window_marks_appear_in_the_report_of_the_same_launch_only(monkeypatch):
 
 def test_windows_window_uses_a_permanent_profile_in_the_data_folder(monkeypatch):
     import sys
-    import main
     monkeypatch.setattr(sys, "platform", "win32")
     args = main._webview_args()
     assert args["private_mode"] is False and args["storage_path"] == str(config.DATA_DIR / "webview")

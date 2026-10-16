@@ -744,12 +744,12 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             if trim:  # dans une conversation : on masque les citations répétées
                 short = for_ai(text, 20000)
                 cut = len(short) < len(text) * 0.9
-                ui.label(text if (x["id"] in self.full or not cut) else short).classes("mailbody")
+                self.marked(text if (x["id"] in self.full or not cut) else short, "mailbody")
                 if cut:
                     ui.button("Masquer le message cité" if x["id"] in self.full else "Afficher le message complet",
                               on_click=lambda _, i=x["id"]: self.toggle_full(i)).props("flat dense no-caps size=sm")
             else:
-                ui.label(text).classes("mailbody")
+                self.marked(text, "mailbody")
             if html:
                 ui.button("Afficher la mise en forme", icon="auto_awesome_mosaic",
                           on_click=lambda _, i=x["id"]: self.toggle_plain(i)).props("flat dense no-caps size=sm")
@@ -772,7 +772,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                     ui.label(f"Images affichées automatiquement pour {sender}.").classes("col")
                     ui.button("Ne plus afficher", on_click=lambda _, a=sender: self.trust_sender(a, False)).props("flat dense no-caps size=sm")
             frame = ui.element("iframe").classes("mailframe")
-            frame._props.update({"sandbox": "allow-scripts", "srcdoc": htmlmail.build_doc(clean, allow, self.cids.get(x["id"]))})
+            frame._props.update({"sandbox": "allow-scripts", "srcdoc": htmlmail.build_doc(clean, allow, self.cids.get(x["id"]), self.hl or None)})
             frame.on("mailink", lambda e: self.open_link(((e.args or {}).get("detail") or {}).get("url", "")), args=["detail"])
             ui.button("Texte brut", icon="notes", on_click=lambda _, i=x["id"]: self.toggle_plain(i)).props("flat dense no-caps size=sm")
 

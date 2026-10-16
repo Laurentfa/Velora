@@ -6,6 +6,7 @@ interdit tout chargement externe. Les images distantes — souvent des pixels es
 l'utilisateur ne les autorise pas.
 """
 import html as _html
+import json
 import re
 import secrets
 
@@ -76,8 +77,40 @@ def cid_refs(clean: str) -> list[str]:
     return list(dict.fromkeys(m.group(1).strip("<>") for m in _CID.finditer(clean)))
 
 
-def build_doc(clean: str, allow_images: bool = False, cid_map: dict[str, str] | None = None) -> str:
-    """Document complet pour le cadre isolé. `cid_map` : cid -> URL `data:` de l'image incrustée."""
+HIGHLIGHT_JS = r"""(function (terms) {
+  const fold = s => s.split('').map(c => c.normalize('NFD')[0].toLowerCase()).join('');
+  const esc = t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const rx = new RegExp('(?<![\\p{L}\\p{N}_])(?:' + terms.slice().sort((a, b) => b.length - a.length).map(esc).join('|') + ')', 'gu');
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {acceptNode: n =>
+    n.parentElement && !/^(SCRIPT|STYLE|MARK)$/.test(n.parentElement.tagName) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT});
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  let first = null;
+  for (const n of nodes) {
+    const text = n.nodeValue, folded = fold(text);
+    rx.lastIndex = 0;
+    let m, last = 0, frag = null;
+    while ((m = rx.exec(folded))) {
+      frag = frag || document.createDocumentFragment();
+      frag.append(text.slice(last, m.index));
+      const mk = document.createElement('mark');
+      mk.textContent = text.slice(m.index, m.index + m[0].length);
+      frag.append(mk);
+      first = first || mk;
+      last = m.index + m[0].length;
+    }
+    if (frag) { frag.append(text.slice(last)); n.replaceWith(frag); }
+  }
+  if (first) setTimeout(() => first.scrollIntoView({block: 'center'}), 150);
+})"""
+
+
+MARK_CSS = "mark{background:#ffe566;color:#1d1d1f;border-radius:3px;padding:0 1px}"
+
+
+def build_doc(clean: str, allow_images: bool = False, cid_map: dict[str, str] | None = None, terms: list[str] | None = None) -> str:
+    """Document complet pour le cadre isolé. `cid_map` : cid -> URL `data:` de l'image incrustée. `terms` : mots d'une recherche à surligner
+    (ils sont déjà en minuscules sans accents) ; le cadre saute à la première occurrence."""
     for cid, uri in (cid_map or {}).items():
         clean = re.sub(r"cid:" + re.escape(cid), lambda _: uri, clean, flags=re.I)
         clean = re.sub(r"cid:%3C" + re.escape(cid) + "%3E", lambda _: uri, clean, flags=re.I)
@@ -86,11 +119,15 @@ def build_doc(clean: str, allow_images: bool = False, cid_map: dict[str, str] | 
     csp = (f"default-src 'none'; img-src {imgs}; style-src 'unsafe-inline'; font-src data:; "
            f"script-src 'nonce-{nonce}'")
     theme = db.kv_get("theme") or "auto"  # le cadre est inversé en thème sombre (voir .mailframe) : les images le sont de nouveau pour garder leurs couleurs
-    undo = "body{background:#dae0e9}img,video{filter:invert(1) hue-rotate(180deg)}"  # #dae0e9 devient le fond sombre #1a2029 une fois inversé
+    undo = "body{background:#dae0e9}img,video,mark{filter:invert(1) hue-rotate(180deg)}"  # #dae0e9 devient le fond sombre #1a2029 une fois inversé ; le surlignage garde son jaune
     dark_css = undo if theme == "dark" else f"@media (prefers-color-scheme: dark){{{undo}}}" if theme == "auto" else ""
+    hl = ""
+    if terms:
+        data = json.dumps(terms, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+        hl = f'<script nonce="{nonce}">{HIGHLIGHT_JS}({data})</script>'
     return (f'<!doctype html><html><head><meta charset="utf-8">'
             f'<meta http-equiv="Content-Security-Policy" content="{_html.escape(csp, quote=True)}">'
-            f'<style>{BASE_CSS}{dark_css}</style></head><body>{clean}<script nonce="{nonce}">{PAGE_JS}</script></body></html>')
+            f'<style>{BASE_CSS}{MARK_CSS}{dark_css}</style></head><body>{clean}<script nonce="{nonce}">{PAGE_JS}</script>{hl}</body></html>')
 
 
 # ---------- rédaction : HTML sortant ----------
