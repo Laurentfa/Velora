@@ -251,6 +251,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             on = self.view == view and self.account == acc and self.folder == folder
             el = ui.element("div").classes("nav" + (" on" if on else "") + (" sub" if depth else "")).on(
                 "click", lambda _, v=view, a=acc, f=folder: self.go(v, a, f))
+            if depth > 1:  # sous-dossier (ex : les années dans Archive) : décalé d'un cran par niveau, sous son parent ; les dossiers de premier niveau restent alignés
+                el.style(f"padding-left:{10 + 18 * (depth - 1)}px")
             if fpath is not None:  # un dossier : on peut le glisser avant ou après un autre dossier du même niveau
                 el.classes("navfolder")
                 el._props.update({"draggable": "true", "data-acct": acc, "data-fkey": folder, "data-parent": folder_order.parent_of(fpath)})

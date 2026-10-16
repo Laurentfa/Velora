@@ -85,7 +85,9 @@ def box(monkeypatch):
 
 
 def displayed(user):
-    return [e.props["data-fkey"] for e in user.find(kind=ui.element).elements if e.props.get("data-fkey") and e.props.get("data-acct") == "testbox"]
+    """Les dossiers dans l'ordre où ils sont réellement affichés (l'ordre de création des éléments peut différer après une reconstruction)."""
+    first = next(e for e in user.find(kind=ui.element).elements if e.props.get("data-fkey") and e.props.get("data-acct") == "testbox")
+    return [e.props["data-fkey"] for e in first.parent_slot.parent.default_slot.children if e.props.get("data-fkey")]
 
 
 async def test_sidebar_shows_draggable_folders_and_a_drop_reorders_them(user: User, box) -> None:
@@ -99,3 +101,17 @@ async def test_sidebar_shows_draggable_folders_and_a_drop_reorders_them(user: Us
     assert displayed(user)[:2] == ["jur", "adm"] and folder_order.load("testbox")[:2] == ["jur", "adm"]
     box[-1].folder_dropped({"detail": {"from": "INBOX", "after": True}}, "testbox", "adm")  # la boîte de réception n'est pas déplaçable
     assert folder_order.load("testbox")[:2] == ["jur", "adm"]
+
+
+async def test_subfolders_are_indented_under_their_parent(user: User, box) -> None:
+    with db.conn() as c:
+        for k, p in (("a22", "Archive/2022"), ("a23", "Archive/2023"), ("a22x", "Archive/2022/Envoyés")):
+            c.execute("INSERT OR REPLACE INTO folders(account,key,name,path,role,sync) VALUES('testbox',?,?,?,'',1)", (k, p.rsplit("/", 1)[-1], p))
+    await user.open("/")
+    await user.should_see("Envoyés")
+    el = lambda k: next(e for e in user.find(kind=ui.element).elements if e.props.get("data-fkey") == k)  # noqa: E731
+    padding = lambda k: el(k)._style.get("padding-left")  # noqa: E731
+    assert padding("arch") is None and padding("adm") is None  # premier niveau : alignés à gauche, comme demandé
+    assert padding("a22") == "28px" and padding("a23") == "28px"  # les années, sous Archive
+    assert padding("a22x") == "46px"  # et un niveau de plus en dessous
+    assert displayed(user).index("arch") + 1 == displayed(user).index("a22")  # juste après leur parent
