@@ -30,11 +30,14 @@ def _tab_api(host) -> None:
 
 def _tab_about() -> None:
     """Onglet « À propos » : nom, version et auteur."""
+    from .brand import logo_img
     from .version import APP_VERSION, UPDATE_REPO
     ui.label("À propos de Velora").classes("text-h6").style("font-weight:700")
-    with ui.column().classes("gap-1 q-mt-sm"):
-        ui.label("Velora").classes("text-h5").style("font-weight:700;color:var(--accent)")
-        ui.label("Messagerie personnelle avec assistant IA intégré").classes("text-body2").style("color:var(--muted)")
+    with ui.row().classes("items-center gap-4 no-wrap q-mt-sm"):
+        ui.html(logo_img(64), sanitize=False)
+        with ui.column().classes("gap-1"):
+            ui.label("Velora").classes("text-h5").style("font-weight:700;color:var(--accent)")
+            ui.label("Messagerie personnelle avec assistant IA intégré").classes("text-body2").style("color:var(--muted)")
     with ui.column().classes("gap-2 q-mt-md"):
         for k, v in (("Version", APP_VERSION), ("Auteur", "Laurent Fauvel")):
             with ui.row().classes("items-baseline gap-3 no-wrap"):
