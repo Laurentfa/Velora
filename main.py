@@ -129,6 +129,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self.remote_for, self.remote_busy = "", False
         self._remote_cache: dict = {}
         self.hl: list[str] = []
+        self._more_busy = False
         self._folder_paths: dict[tuple, str] = {}
         self._row_els: dict[str, ui.element] = {}  # id du mail -> élément de sa ligne dans la liste (pour ne redessiner que les lignes modifiées)
         self.rows_sig = None
@@ -192,8 +193,9 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                         ui.button(icon="bookmark_add", on_click=self.save_search).props("flat dense round size=sm").tooltip(
                             "Enregistrer cette recherche dans la colonne de gauche")
                     self.chips()
-                with ui.scroll_area().classes("rows"):
+                with (rows_area := ui.scroll_area().classes("rows")):
                     self.rows_view()
+                rows_area.on("scroll", self.rows_scrolled, args=["verticalPosition", "verticalContainerSize", "verticalSize"], throttle=0.3)
             with ui.column().classes("readercol gap-0"):
                 self.reader()
         ui.run_javascript("mailiaSideInit(%s, %s)" % (
@@ -666,7 +668,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             if kind == "pinned" and folded:
                 continue
             self.row(m)
-        if len(self.rows) >= self.limit:
+        if len(self.rows) >= self.limit and not self.auto_more():  # boîte de réception : la suite se charge toute seule (voir rows_scrolled)
             ui.button("Afficher plus", on_click=self.more).props("flat no-caps").classes("self-center")
 
     # ---------- lecture ----------
@@ -1140,6 +1142,23 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self.limit += 80
         await self.reload(force=True)
 
+    def auto_more(self) -> bool:
+        """Boîte de réception (et « Non lus ») : la liste se prolonge d'elle-même en descendant, sans bouton « Afficher plus »."""
+        return self.view in ("inbox", "unread")
+
+    async def rows_scrolled(self, e) -> None:
+        """Approche du bas de la liste : on charge la suite (80 de plus), ajoutée à la fin sans redessiner ce qui est déjà affiché."""
+        if not self.auto_more() or self._more_busy or len(self.rows) < self.limit:
+            return
+        a = e.args or {}
+        if a.get("verticalPosition", 0) + a.get("verticalContainerSize", 0) < a.get("verticalSize", 0) - 700:
+            return
+        self._more_busy = True
+        try:
+            await self.more()
+        finally:
+            self._more_busy = False
+
     async def reload(self, force: bool = False) -> None:
         self.hl = []  # remis plus bas par la liste de mails quand une recherche est en cours
         self.counts = queries.counts()
@@ -1200,7 +1219,12 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         """Quelques lignes ont changé (lu, résumé IA, sélection, nombre de messages) alors que la liste est la même : on ne reconstruit que
         celles-là. Redessiner les 80 lignes coûte plus d'une seconde de fenêtre figée sur un ordinateur lent. False = il faut tout redessiner."""
         old = self.rows_sig
-        if not (old and old[0] == "l" and sig[0] == "l" and old[1] == sig[1] and len(old[2]) == len(sig[2]) and self._row_els):
+        if not (old and old[0] == "l" and sig[0] == "l" and self._row_els):
+            return False
+        same_look = old[1][:6] + old[1][7:] == sig[1][:6] + sig[1][7:]  # tout sauf la profondeur de la liste (indice 6)
+        if len(sig[2]) > len(old[2]):  # liste prolongée : les lignes sont ajoutées à la suite
+            return same_look and self._append_rows(old, sig)
+        if not (old[1] == sig[1] and len(old[2]) == len(sig[2])):
             return False
         changed = []
         for o, n, m in zip(old[2], sig[2], self.rows):
@@ -1222,6 +1246,25 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             self._row_els[m["id"]].move(parent, target_index=index)
             former.delete()
         perf.record("liste : lignes redessinées", time.perf_counter() - t)
+        return True
+
+    def _append_rows(self, old: tuple, sig: tuple) -> bool:
+        """La liste s'est allongée sans que rien d'autre ne change : on ajoute les nouvelles lignes en bas (seulement quand il n'y a pas de bouton
+        « Afficher plus » à garder en dernier, et que les nouvelles lignes restent dans la même section)."""
+        n = len(old[2])
+        if not self.auto_more() or n == 0 or sig[2][:n] != old[2]:
+            return False
+        new, last = self.rows[n:], self.rows[n - 1]
+        if last.get("woke") or last.get("pinned") or any(m.get("woke") or m.get("pinned") for m in new):
+            return False
+        t = time.perf_counter()
+        parent = next(reversed(self._row_els.values())).parent_slot.parent
+        self._pins = db.pin_keys()
+        self._folder_paths = {(f["account"], f["key"]): f["path"] for a in sync.ACCOUNTS for f in db.folders(a)}
+        with parent:
+            for m in new:
+                self.row(m)
+        perf.record("liste : lignes ajoutées", time.perf_counter() - t)
         return True
 
     async def tick(self) -> None:
