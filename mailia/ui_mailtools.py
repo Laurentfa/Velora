@@ -277,7 +277,7 @@ class MailToolsMixin:
                 ui.button(icon="close", on_click=dlg.close).props("flat round dense")
             ui.label("Posez une question en français : l'IA cherche dans vos mails et répond en citant ses sources. "
                      "Coût : environ un centime par question.").classes("text-caption text-grey")
-            q = ui.input(placeholder="ex : Qu'a répondu Gestis pour la carte Total ?").props("outlined dense autofocus clearable").classes("w-full")
+            q = ui.input(placeholder="ex : Qu'a répondu Dupont pour la facture ?").props("outlined dense autofocus clearable").classes("w-full")
             out = ui.column().classes("w-full gap-2").style("overflow:auto")
 
             async def go() -> None:

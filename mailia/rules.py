@@ -1,4 +1,4 @@
-"""Règles de tri en langage naturel : « les mails de Gestis sans question vont dans Archive ».
+"""Règles de tri en langage naturel : « les mails de Dupont sans question vont dans Archive ».
 
 L'IA ne sert qu'une fois, à interpréter la phrase en une règle structurée que l'on vous montre avant de l'enregistrer. Ensuite la règle
 s'applique sans IA, aux nouveaux mails seulement. Actions possibles : marquer comme lu, déplacer vers un dossier existant, épingler.

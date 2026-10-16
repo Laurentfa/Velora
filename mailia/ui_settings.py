@@ -269,7 +269,7 @@ def _tab_prm(f, host) -> None:
                 ("brief", "Brief du jour : quoi mettre en priorité", ""),
                 ("draft", "Style des réponses et des nouveaux mails", ""),
                 ("rules", "Mes règles personnelles (tri, brief et réponses)",
-                 "ex : Un mail d'un médecin prescripteur est toujours urgent.\nLes messages de GESTIS sans question sont de l'information.")):
+                 "ex : Un mail de mon banquier est toujours urgent.\nLes messages de Dupont sans question sont de l'information.")):
             boxes[key] = ui.textarea(title, placeholder=hint).bind_value(f, f"P_{key}").props("outlined autogrow stack-label").classes("w-full q-mt-sm")
             ui.button("Rétablir l'origine", icon="restart_alt",
                       on_click=lambda _, k=key: boxes[k].set_value(ai.default_text(k))).props("flat dense no-caps size=sm")
