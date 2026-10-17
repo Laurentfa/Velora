@@ -399,3 +399,32 @@ async def test_settings_tab_offers_the_microphone_choice_and_test(user: User, mo
     await user.should_see("Tester le micro (5 s)")
     await user.should_see("Micro utilisé pour la dictée")
     assert db.kv_get("dictation_device") in (None, "")
+
+
+def test_autotune_keeps_the_fastest_thread_count(monkeypatch):
+    from mailia import db
+    monkeypatch.setattr(whisper_engine.os, "cpu_count", lambda: 12)
+    speed = {2: 5.0, 4: 3.0, 6: 2.0, 8: 2.6, 11: 4.0}
+    clock = {"t": 0.0}
+
+    def run(audio):
+        clock["t"] += speed.get(run.state["n"], 9.0)
+        return "x"
+    run.state = {"n": 11}
+    best, times = whisper_engine.autotune(run, np.zeros(16000, dtype="float32"), timer=lambda: clock["t"])
+    assert best == 6 and run.state["n"] == 6 and times[6] == 2.0
+    assert db.kv_get("dictation_threads") == "6" and whisper_engine.chosen_threads() == 6
+
+
+def test_microphone_test_reports_engine_and_threads_and_skips_tuning_when_fast():
+    class Mic(FakeMic):
+        device = None
+
+    def factory(path):
+        def run(audio):
+            return "Bonjour."
+        run.state = {"n": 7}
+        run.system_info = lambda: "AVX2 = 1"
+        return run
+    r = whisper_engine.test_microphone(0.3, mic=Mic([(1.0, "speech")]), runner_factory=factory)
+    assert r["engine"] == "AVX2 = 1" and r["threads"] == 7 and not r.get("tuned")

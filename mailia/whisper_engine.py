@@ -151,6 +151,32 @@ _runner_cache: dict[str, tuple] = {}
 _cache_lock = threading.Lock()
 
 
+def default_threads() -> int:
+    return max(2, min(8, (os.cpu_count() or 4) - 1))
+
+
+def chosen_threads() -> int | None:
+    v = db.kv_get("dictation_threads")
+    return int(v) if v and v.isdigit() and int(v) > 0 else None
+
+
+def autotune(run, audio, timer=time.monotonic) -> tuple[int, dict[int, float]]:
+    """Essaie plusieurs nombres de fils de calcul sur le même enregistrement et garde le plus rapide (sur les processeurs à coeurs mixtes, utiliser tous les
+    coeurs ralentit souvent). Retourne (le meilleur, {fils: secondes}) et le mémorise."""
+    cores = os.cpu_count() or 4
+    cands = sorted({n for n in (2, 4, 6, 8, cores // 2, cores - 1) if 2 <= n <= max(2, cores)})
+    times: dict[int, float] = {}
+    for n in cands:
+        run.state["n"] = n
+        t0 = timer()
+        run(audio)
+        times[n] = timer() - t0
+    best = min(times, key=times.get)
+    run.state["n"] = best
+    db.kv_set("dictation_threads", str(best))
+    return best, times
+
+
 def language() -> str:
     return "en" if db.kv_get("ui_lang") == "en" else "fr"
 
@@ -165,13 +191,16 @@ def load_runner(path: str, prompt: str | None = None):
     if hit:
         return hit[0]
     from pywhispercpp.model import Model as WModel
-    model = WModel(path, n_threads=max(2, min(8, (os.cpu_count() or 4) - 1)), print_progress=False, print_realtime=False)
+    model = WModel(path, n_threads=default_threads(), print_progress=False, print_realtime=False)
+    state = {"n": chosen_threads() or default_threads()}
 
     def run(audio) -> str:
         # no_context : ne pas se laisser influencer par le passage précédent ; suppress_nst : pas de « [musique] », « (rires) » ; temperature_inc=0 : pas de tirages au hasard en cas de doute
         segs = model.transcribe(audio, language=language(), print_progress=False, no_context=True, suppress_nst=True, temperature_inc=0.0,
-                                **({"initial_prompt": prompt} if prompt else {}))
+                                n_threads=state["n"], **({"initial_prompt": prompt} if prompt else {}))
         return " ".join(s.text.strip() for s in segs).strip()
+    run.state = state
+    run.system_info = lambda: str(model.system_info())
     return run
 
 
@@ -364,9 +393,9 @@ class WhisperSession:
         self.events.put({"t": "done"})
 
 
-def test_microphone(seconds: float = 5.0, mic=None, runner_factory=None, on_level=None) -> dict:
+def test_microphone(seconds: float = 5.0, mic=None, runner_factory=None, on_level=None, tune: bool = True) -> dict:
     """Enregistre quelques secondes et transcrit : donne de quoi comprendre un problème (mauvais micro, niveau trop faible, ordinateur lent).
-    Retourne {"device", "peak", "rms", "text", "audio_s", "took"} ou {"error": …}."""
+    Si l'ordinateur est lent, cherche aussi le meilleur nombre de fils de calcul (et le garde). Retourne {"device", "peak", "rms", "text", "audio_s", "took", …} ou {"error": …}."""
     import numpy as np
     mic = mic or MicStream()
     factory = runner_factory or (lambda path: load_runner(path, None))
@@ -392,5 +421,11 @@ def test_microphone(seconds: float = 5.0, mic=None, runner_factory=None, on_leve
     t0 = time.monotonic()
     text = clean_text(run(audio))
     took = time.monotonic() - t0
-    return {"device": device_name(getattr(mic, "device", None)) if isinstance(mic, MicStream) else "", "peak": float(np.abs(audio).max()),
-            "rms": float((audio.astype("float64") ** 2).mean() ** 0.5), "text": text, "audio_s": len(audio) / SAMPLE_RATE, "took": took}
+    out = {"device": device_name(getattr(mic, "device", None)) if isinstance(mic, MicStream) else "", "peak": float(np.abs(audio).max()),
+           "rms": float((audio.astype("float64") ** 2).mean() ** 0.5), "text": text, "audio_s": len(audio) / SAMPLE_RATE, "took": took,
+           "threads": getattr(run, "state", {}).get("n"), "engine": run.system_info() if hasattr(run, "system_info") else ""}
+    if tune and hasattr(run, "state") and took > out["audio_s"] * 0.35:  # lent : on cherche le meilleur réglage du processeur
+        before = took
+        best, times = autotune(run, audio)
+        out.update(tuned=True, best_threads=best, times=times, took_before=before, took=times[best])
+    return out
