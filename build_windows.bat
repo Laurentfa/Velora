@@ -5,6 +5,6 @@ for /f %%i in ('.venv\Scripts\python -c "import nicegui,os;print(os.path.dirname
 .venv\Scripts\pyinstaller main.py --name "Velora" --windowed --noconfirm --clean ^
   --icon assets\icon.ico ^
   --add-data "%NG%;nicegui" ^
-  --collect-all exchangelib --collect-all webview --collect-all keyring --collect-all mammoth --collect-all openpyxl --collect-all pptx --collect-all pillow_heif --collect-all pypdf --collect-all zeroconf --collect-all segno --collect-all sqlcipher3 --collect-all dns --collect-all pywhispercpp --collect-all sounddevice --collect-submodules mailia ^
+  --collect-all exchangelib --collect-all webview --collect-all keyring --collect-all mammoth --collect-all openpyxl --collect-all pptx --collect-all pillow_heif --collect-all pypdf --collect-all zeroconf --collect-all segno --collect-all sqlcipher3 --collect-all dns --collect-all pywhispercpp --collect-all sounddevice --collect-all onnx_asr --collect-all onnxruntime --collect-submodules mailia ^
   --collect-data tzdata
 echo Termine : dist\Velora\Velora.exe

@@ -29,44 +29,52 @@ def _tab_api(host) -> None:
 
 
 def _tab_dictation(host) -> None:
-    """Onglet « Dictée vocale » : le moteur utilisé et, avec Whisper, le choix du modèle à télécharger."""
-    from . import dictation, whisper_engine
+    """Onglet « Dictée vocale » : le moteur utilisé (Apple sur Mac ; Whisper ou Parakeet ailleurs), ses modèles à télécharger, le micro et un diagnostic."""
+    from . import dictation, parakeet_engine, whisper_engine
     from .ui_dictation import whisper_download_dialog
     ui.label("Dictée vocale").classes("text-h6").style("font-weight:700")
     if dictation.engine() == "apple":
         ui.label("Velora utilise la reconnaissance vocale d'Apple, sur ce Mac : rien n'est téléchargé par Velora, rien ne quitte votre ordinateur et l'IA n'est pas utilisée.").classes("text-body2")
         ui.label("Le micro se trouve dans la rédaction : à côté de « ✦ Rédiger » pour dicter une consigne à l'IA, et sous l'objet pour dicter le message.").classes("rmeta")
         return
-    ui.label("Velora utilise Whisper, sur cet ordinateur : rien ne quitte votre ordinateur et l'IA n'est pas utilisée. "
-             "Le modèle de langue se télécharge une fois, avec votre accord. Plus il est gros, plus la dictée est fiable et lente.").classes("text-body2")
+    ui.label("La reconnaissance se fait sur cet ordinateur : rien ne quitte votre ordinateur et l'IA n'est pas utilisée. "
+             "Le modèle de langue se télécharge une fois, avec votre accord.").classes("text-body2")
 
     @ui.refreshable
-    def models() -> None:
-        current = whisper_engine.chosen()
-        opts = {k: f"{m.title} — {whisper_engine.human_mb(m.size)} ({m.hint})" for k, m in whisper_engine.MODELS.items()}
-
-        def pick(e) -> None:
-            whisper_engine.set_chosen(e.value)
-            models.refresh()
-        ui.radio(opts, value=current, on_change=pick).props("dense").mark("dictation-models")
+    def engine_section() -> None:
+        current = dictation.engine()
+        if whisper_engine.libs_ok() and parakeet_engine.libs_ok():
+            def pick_engine(e) -> None:
+                db.kv_set("dictation_engine", e.value)
+                engine_section.refresh()
+            ui.radio({"whisper": "Whisper (OpenAI) — de 60 à 540 Mo ; sait recevoir vos noms propres",
+                      "parakeet": f"Parakeet (NVIDIA) — {whisper_engine.human_mb(parakeet_engine.TOTAL)} ; plus précis en français et plus rapide, plus sensible au bruit de fond"},
+                     value=current, on_change=pick_engine).props("dense").mark("dictation-engine")
+        mod = dictation.engine_module(current)
+        if len(mod.MODELS) > 1:
+            def pick(e) -> None:
+                mod.set_chosen(e.value)
+                engine_section.refresh()
+            ui.radio({k: f"{m.title} — {whisper_engine.human_mb(m.size)} ({m.hint})" for k, m in mod.MODELS.items()}, value=mod.chosen(), on_change=pick).props("dense").mark("dictation-models")
+        key = mod.chosen()
         with ui.row().classes("items-center gap-3 q-mt-sm"):
-            if whisper_engine.is_installed(current):
+            if mod.is_installed(key):
                 ui.icon("check_circle", size="20px").style("color:#1a8f3c")
                 ui.label("Installé sur cet ordinateur").classes("text-body2")
 
                 def drop() -> None:
-                    whisper_engine.remove(current)
-                    models.refresh()
+                    mod.remove(key)
+                    engine_section.refresh()
                 ui.button("Supprimer le modèle", icon="delete_outline", on_click=drop).props("flat no-caps dense").mark("dictation-remove")
             else:
                 ui.icon("cloud_download", size="20px").style("color:var(--muted)")
                 ui.label("Pas encore téléchargé").classes("text-body2")
 
                 async def fetch() -> None:
-                    await whisper_download_dialog(host, current)
-                    models.refresh()
+                    await whisper_download_dialog(host, key, mod)
+                    engine_section.refresh()
                 ui.button("Télécharger", icon="download", on_click=fetch).props("unelevated no-caps dense color=primary").mark("dictation-download")
-    models()
+    engine_section()
     ui.separator().classes("q-my-md")
     ui.label("Micro et diagnostic").classes("text-subtitle1").style("font-weight:600")
     try:
@@ -82,33 +90,41 @@ def _tab_dictation(host) -> None:
     level = ui.linear_progress(value=0, show_value=False).classes("w-full").mark("dictation-level")
     level.set_visibility(False)
 
-    async def test() -> None:
-        if not whisper_engine.is_installed():
-            return ui.notify("Téléchargez d'abord le modèle.", type="warning")
+    async def record(job, *args) -> dict:
         result.clear()
         state = {"p": 0.0}
         level.set_visibility(True)
         timer = ui.timer(0.15, lambda: level.set_value(min(1.0, state["p"])))
         test_btn.disable()
+        compare_btn.disable()
         with result:
             ui.label("Parlez maintenant pendant 5 secondes…").classes("text-body2")
-        r = await run.io_bound(whisper_engine.test_microphone, 5.0, None, None, lambda peak, frac: state.update(p=peak * 2))
+        r = await run.io_bound(job, *args, lambda peak, frac: state.update(p=peak * 2))
         timer.cancel()
         level.set_visibility(False)
         test_btn.enable()
+        compare_btn.enable()
         result.clear()
+        return r
+
+    def describe_level(peak: float) -> str:
+        return "très faible : parlez plus fort, rapprochez-vous ou choisissez un autre micro" if peak < 0.03 else "trop fort (saturé) : baissez le volume d'entrée" if peak > 0.98 else "correct"
+
+    async def test() -> None:
+        mod = dictation.engine_module()
+        if not mod.is_installed():
+            return ui.notify("Téléchargez d'abord le modèle.", type="warning")
+        r = await record(lambda on_level: whisper_engine.test_microphone(5.0, None, None, on_level))
         with result:
             if r.get("error"):
                 ui.label(r["error"]).classes("text-negative text-body2")
                 return
-            quality = "très faible : parlez plus fort, rapprochez-vous ou choisissez un autre micro" if r["peak"] < 0.03 else \
-                      "trop fort (saturé) : baissez le volume d'entrée" if r["peak"] > 0.98 else "correct"
             ui.label(f"Micro : {r['device']}").classes("text-body2")
-            ui.label(f"Niveau : {quality}").classes("text-body2")
+            ui.label(f"Niveau : {describe_level(r['peak'])}").classes("text-body2")
             ui.label(f"Texte entendu : « {r['text'] or '(rien)'} »").classes("text-body2")
             live = r.get("fast_took")
             ratio = (live if live is not None else r["took"]) / max(r["audio_s"], 0.1)
-            verdict = " — trop lent pour un texte en direct : prenez le modèle « Rapide »" if ratio > 0.6 else " — un peu lent : le texte provisoire sera décalé" if ratio > 0.35 else " — assez rapide"
+            verdict = " — trop lent pour un texte en direct : prenez un modèle plus léger" if ratio > 0.6 else " — un peu lent : le texte provisoire sera décalé" if ratio > 0.35 else " — assez rapide"
             ui.label(f"Vitesse : {r['took']:.1f} s pour {r['audio_s']:.0f} s de parole{verdict}").classes("text-body2")
             if live is not None:
                 ui.label(f"Texte provisoire (en direct) : {live:.1f} s pour {r['audio_s']:.0f} s de parole").classes("text-body2")
@@ -116,10 +132,21 @@ def _tab_dictation(host) -> None:
                 ui.label(f"Réglage automatique : {r['best_threads']} fils de calcul (avant : {r['took_before']:.1f} s)").classes("text-body2")
             if r.get("engine"):
                 ui.label(f"Moteur : {r['engine']}").classes("rmeta").style("word-break:break-word")
+
+    async def compare() -> None:
+        r = await record(lambda on_level: whisper_engine.compare_microphone(5.0, None, on_level))
+        with result:
+            if r.get("error"):
+                ui.label(r["error"]).classes("text-negative text-body2")
+                return
+            ui.label(f"Micro : {r['device']} · niveau : {describe_level(r['peak'])}").classes("text-body2")
+            for x in r["results"]:
+                ui.label(f"{'Parakeet' if x['engine'] == 'parakeet' else 'Whisper'} ({x['took']:.1f} s pour {r['audio_s']:.0f} s) : « {x['text'] or '(rien)'} »").classes("text-body2")
     test_btn = ui.button("Tester le micro (5 s)", icon="mic", on_click=test).props("outline no-caps dense color=primary").classes("q-mt-sm").mark("dictation-test")
+    compare_btn = ui.button("Comparer Whisper et Parakeet (5 s)", icon="compare", on_click=compare).props("outline no-caps dense color=primary").classes("q-mt-sm").mark("dictation-compare")
     ui.separator().classes("q-my-md")
     ui.label("Dernière dictée : détails").classes("text-subtitle1").style("font-weight:600")
-    ui.label("Ce que Whisper a renvoyé (brut) et ce que Velora a gardé, passage par passage. Utile pour comprendre une répétition ou une erreur.").classes("rmeta")
+    ui.label("Ce que le moteur de reconnaissance a renvoyé (brut) et ce que Velora a gardé, passage par passage. Utile pour comprendre une répétition ou une erreur.").classes("rmeta")
 
     @ui.refreshable
     def trace() -> None:
@@ -134,7 +161,7 @@ def _tab_dictation(host) -> None:
                 ui.label(f"gardé : « {cut(r['kept'])} »").classes("text-caption").style("font-family:monospace;word-break:break-word;color:var(--accent)")
     trace()
     ui.button("Actualiser", icon="refresh", on_click=trace.refresh).props("flat no-caps dense").mark("dictation-trace-refresh")
-    ui.label("Modèles Whisper d'OpenAI, au format whisper.cpp : licence MIT.").classes("rmeta q-mt-md")
+    ui.label("Whisper (OpenAI), au format whisper.cpp : licence MIT. Parakeet TDT 0.6B v3 : © NVIDIA, licence CC-BY 4.0 (conversion ONNX d'istupakov).").classes("rmeta q-mt-md")
 
 
 def _tab_about() -> None:

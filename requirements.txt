@@ -22,3 +22,5 @@ dnspython
 pywhispercpp
 sounddevice
 numpy
+onnx-asr
+onnxruntime

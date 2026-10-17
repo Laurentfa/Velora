@@ -103,9 +103,11 @@ pendant qu'on parle. Tout se passe sur l'ordinateur : l'audio ne part nulle part
 
 - **Mac (macOS 26 ou plus)** : reconnaissance d'Apple, via un petit programme Swift (`tools/dictate/velora-dictate.swift`, construit par `build_mac.sh` et placé à côté
   de l'exécutable). Rien à télécharger.
-- **Windows, et Mac plus anciens** : Whisper (whisper.cpp, licence MIT). Le modèle n'est pas dans l'appli : un clic dans la rédaction (ou Paramètres › Dictée vocale)
-  propose de le télécharger — Rapide ≈ 60 Mo, Équilibré ≈ 190 Mo (par défaut), Précis ≈ 540 Mo — depuis le dépôt public `ggerganov/whisper.cpp` de Hugging Face.
-  Taille et empreinte SHA-256 sont fixées dans `mailia/whisper_engine.py` et vérifiées.
+- **Windows, et Mac plus anciens** : Whisper (whisper.cpp, licence MIT) ou Parakeet TDT 0.6B v3 (NVIDIA, CC-BY 4.0, via ONNX Runtime), au choix dans Paramètres › Dictée vocale.
+  Le modèle n'est pas dans l'appli : un clic dans la rédaction (ou dans ces Paramètres) propose de le télécharger depuis Hugging Face. Whisper : Rapide ≈ 60 Mo,
+  Équilibré ≈ 190 Mo (par défaut), Précis ≈ 540 Mo (dépôt `ggerganov/whisper.cpp`). Parakeet : ≈ 670 Mo (`istupakov/parakeet-tdt-0.6b-v3-onnx`, version fixée).
+  Tailles et empreintes SHA-256 sont fixées dans `mailia/whisper_engine.py` et `mailia/parakeet_engine.py` et vérifiées. Les Paramètres proposent un test du micro
+  et une comparaison des deux moteurs sur votre voix.
 
 ## Données
 Appli installée : `~/Library/Application Support/MailIA` (Mac), `%LOCALAPPDATA%\MailIA` (Windows).

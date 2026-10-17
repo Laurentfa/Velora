@@ -1,7 +1,8 @@
 """Dictée vocale. Deux moteurs, choisis automatiquement :
 - « apple » (Mac, macOS 26 ou plus) : un petit programme natif (voir tools/dictate) écoute le micro et renvoie le texte au fur et à mesure, avec la
   reconnaissance d'Apple : tout se passe sur l'appareil, rien n'est téléchargé par Velora ;
-- « whisper » (Windows, ou Mac plus ancien) : Whisper en local, avec un modèle téléchargé à la demande (voir whisper_engine).
+- « whisper » (Windows, ou Mac plus ancien) : Whisper en local, avec un modèle téléchargé à la demande (voir whisper_engine) ;
+- « parakeet » (même cas, au choix) : Parakeet TDT 0.6B v3 en local, plus précis et plus rapide, modèle téléchargé à la demande (voir parakeet_engine).
 Dans les deux cas, rien ne quitte l'ordinateur et l'IA n'est pas appelée. `new_session` est remplaçable : les tests y mettent un faux moteur."""
 from __future__ import annotations
 
@@ -42,11 +43,25 @@ def supported() -> bool:
 
 
 def engine() -> str:
-    """« apple », « whisper », ou « » quand la dictée n'est pas possible ici."""
+    """« apple » (Mac, macOS 26 ou plus : toujours), « parakeet » ou « whisper » (choix dans les Paramètres, Whisper par défaut), ou « » quand la dictée n'est pas possible ici."""
     if supported():
         return "apple"
-    from . import whisper_engine
-    return "whisper" if whisper_engine.libs_ok() else ""
+    from . import db, parakeet_engine, whisper_engine
+    if (db.kv_get("dictation_engine") or "") == "parakeet" and parakeet_engine.libs_ok():
+        return "parakeet"
+    return "whisper" if whisper_engine.libs_ok() else ("parakeet" if parakeet_engine.libs_ok() else "")
+
+
+def engine_module(name: str | None = None):
+    """Le module qui télécharge et gère les modèles du moteur (whisper_engine ou parakeet_engine) ; None pour Apple."""
+    name = name or engine()
+    if name == "parakeet":
+        from . import parakeet_engine
+        return parakeet_engine
+    if name == "whisper":
+        from . import whisper_engine
+        return whisper_engine
+    return None
 
 
 def usable() -> bool:
@@ -55,9 +70,9 @@ def usable() -> bool:
 
 def check(locale: str = "fr-FR") -> dict:
     """{"available": bool, "installed": bool} : la dictée est-elle utilisable ici, et sa langue ou son modèle est-il en place ?"""
-    if engine() == "whisper":
-        from . import whisper_engine
-        return {"available": True, "installed": whisper_engine.is_installed()}
+    mod = engine_module()
+    if mod is not None:
+        return {"available": True, "installed": mod.is_installed()}
     p = helper_path()
     if not supported() or p is None:
         return {"available": False, "installed": False}
@@ -135,7 +150,11 @@ class Session:
 
 
 def new_session():
-    if engine() == "whisper":
+    name = engine()
+    if name == "parakeet":
+        from . import parakeet_engine
+        return parakeet_engine.ParakeetSession()
+    if name == "whisper":
         from . import whisper_engine
         return whisper_engine.WhisperSession()
     return Session()

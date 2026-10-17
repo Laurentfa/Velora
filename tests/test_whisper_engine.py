@@ -212,6 +212,8 @@ def test_engine_choice(monkeypatch):
     monkeypatch.setattr(whisper_engine, "libs_ok", lambda: True)
     assert dictation.engine() == "whisper" and dictation.usable()
     monkeypatch.setattr(whisper_engine, "libs_ok", lambda: False)
+    from mailia import parakeet_engine
+    monkeypatch.setattr(parakeet_engine, "libs_ok", lambda: False)
     assert dictation.engine() == "" and not dictation.usable()
 
 

@@ -109,20 +109,19 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def download(key: str, progress=None, cancel: threading.Event | None = None) -> None:
-    """Télécharge le modèle (reprend un téléchargement interrompu), le vérifie, puis le met en place. `progress(fait, total)` ; `cancel.set()` interrompt (le fichier partiel est gardé pour reprendre)."""
-    m = MODELS[key]
-    final = model_path(key)
-    if is_installed(key):
+def fetch_file(url: str, final: Path, size: int, sha256: str, on_bytes=None, cancel: threading.Event | None = None) -> None:
+    """Télécharge un fichier (reprend un téléchargement interrompu), vérifie sa taille et son empreinte, puis le met en place. `on_bytes(octets_reçus)` ; `cancel.set()`
+    interrompt (le fichier partiel est gardé pour reprendre). Sert aux modèles de Whisper et de Parakeet."""
+    if final.is_file() and final.stat().st_size == size:
+        if on_bytes:
+            on_bytes(size)
         return
-    if free_space() < m.size * 1.1:
-        raise DownloadError(f"Il faut {human_mb(int(m.size * 1.1))} d'espace libre pour ce modèle.")
-    part = final.with_name(m.file + ".part")
+    part = final.with_name(final.name + ".part")
     have = part.stat().st_size if part.exists() else 0
-    if have > m.size:
+    if have > size:
         part.unlink()
         have = 0
-    req = urllib.request.Request(BASE_URL + m.file, headers={"User-Agent": "Velora", **({"Range": f"bytes={have}-"} if have else {})})
+    req = urllib.request.Request(url, headers={"User-Agent": "Velora", **({"Range": f"bytes={have}-"} if have else {})})
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             if have and resp.status != 206:  # le serveur ignore la reprise : on repart de zéro
@@ -137,16 +136,26 @@ def download(key: str, progress=None, cancel: threading.Event | None = None) -> 
                         break
                     f.write(chunk)
                     done += len(chunk)
-                    if progress:
-                        progress(done, m.size)
+                    if on_bytes:
+                        on_bytes(done)
     except DownloadError:
         raise
     except (OSError, ValueError) as e:
         raise DownloadError(f"Téléchargement impossible : {e}") from e
-    if part.stat().st_size != m.size or _sha256(part) != m.sha256:
+    if part.stat().st_size != size or _sha256(part) != sha256:
         part.unlink(missing_ok=True)
         raise DownloadError("Le fichier téléchargé est incomplet ou altéré : il a été supprimé. Réessayez.")
     os.replace(part, final)
+
+
+def download(key: str, progress=None, cancel: threading.Event | None = None) -> None:
+    """Télécharge le modèle Whisper `key`. `progress(fait, total)`."""
+    m = MODELS[key]
+    if is_installed(key):
+        return
+    if free_space() < m.size * 1.1:
+        raise DownloadError(f"Il faut {human_mb(int(m.size * 1.1))} d'espace libre pour ce modèle.")
+    fetch_file(BASE_URL + m.file, model_path(key), m.size, m.sha256, (lambda d: progress(d, m.size)) if progress else None, cancel)
 
 
 # ---------------------------------------------------------------- transcription
@@ -168,7 +177,7 @@ def chosen_threads() -> int | None:
 def warm_up(run) -> float:
     """Le premier calcul de Whisper est bien plus lent que les suivants (le modèle se charge réellement en mémoire) : on le fait avant la dictée, sur 1 s de silence.
     Les runners factices des tests n'ont pas d'« état » et sont laissés tels quels."""
-    if not hasattr(run, "state"):
+    if not hasattr(run, "state") and not getattr(run, "needs_warmup", False):
         return 0.0
     import numpy as np
     t0 = time.monotonic()
@@ -350,6 +359,17 @@ class WhisperSession:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
+    # points d'extension : la dictée avec Parakeet réutilise tout le reste (micro, découpage aux pauses, texte provisoire)
+    def _model_path(self) -> str:
+        return str(model_path(self.model_key))
+
+    def _make_prompt(self) -> str | None:
+        from . import dictation_vocab
+        return dictation_vocab.whisper_prompt()  # vos noms propres : Whisper les reconnaît bien mieux avec cette amorce
+
+    def _keep(self, path: str, run) -> None:
+        keep_runner((path, self.prompt), run)
+
     def start(self) -> None:
         self._thread = threading.Thread(target=self._guard, daemon=True)
         self._thread.start()
@@ -374,9 +394,8 @@ class WhisperSession:
     def _run(self) -> None:
         import numpy as np
         self.events.put({"t": "loading"})
-        path = str(model_path(self.model_key))
-        from . import dictation_vocab
-        self.prompt = dictation_vocab.whisper_prompt()  # vos noms propres : Whisper les reconnaît bien mieux avec cette amorce
+        path = self._model_path()
+        self.prompt = self._make_prompt()
         run = self.runner_factory(path)
         warm_up(run)
         self.mic.open()
@@ -451,20 +470,16 @@ class WhisperSession:
             buf.append(b)
             speech_s += block_s if float((b.astype("float64") ** 2).mean() ** 0.5) > max(0.005, floor * 3) else 0
         finish_segment()
-        keep_runner((path, self.prompt), run)
+        self._keep(path, run)
         self.events.put({"t": "done"})
 
 
-def test_microphone(seconds: float = 5.0, mic=None, runner_factory=None, on_level=None, tune: bool = True) -> dict:
-    """Enregistre quelques secondes et transcrit : donne de quoi comprendre un problème (mauvais micro, niveau trop faible, ordinateur lent).
-    Si l'ordinateur est lent, cherche aussi le meilleur nombre de fils de calcul (et le garde). Retourne {"device", "peak", "rms", "text", "audio_s", "took", …} ou {"error": …}."""
+def record_audio(seconds: float, mic=None, on_level=None):
+    """Enregistre `seconds` secondes au micro : (audio numpy float32 16 kHz, micro utilisé). Lève une exception si le micro est inutilisable."""
     import numpy as np
     mic = mic or MicStream()
-    factory = runner_factory or (lambda path: load_runner(path, None))
     blocks = []
     try:
-        run = factory(str(model_path(chosen())))
-        warm_up(run)
         mic.open()
         end = time.monotonic() + seconds
         while time.monotonic() < end:
@@ -474,25 +489,37 @@ def test_microphone(seconds: float = 5.0, mic=None, runner_factory=None, on_leve
             blocks.append(b)
             if on_level:
                 on_level(float(np.abs(b).max()), (time.monotonic() - (end - seconds)) / seconds)
-    except Exception as e:  # noqa: BLE001
-        return {"error": str(e) or "Aucun micro utilisable."}
     finally:
         mic.close()
     if not blocks:
-        return {"error": "Aucun son reçu du micro."}
-    audio = np.concatenate(blocks).astype("float32")
+        raise OSError("Aucun son reçu du micro.")
+    return np.concatenate(blocks).astype("float32"), mic
+
+
+def _engine_factory(name: str | None = None):
+    """(moteur, fonction qui crée le « runner » à partir du dossier ou fichier du modèle) pour le moteur choisi dans les Paramètres."""
+    from . import dictation
+    name = name or dictation.engine()
+    if name == "parakeet":
+        from . import parakeet_engine as pe
+        return "parakeet", (lambda path: pe.load_runner(str(pe.model_dir())))
+    return "whisper", (lambda path: load_runner(str(model_path(chosen())), None))
+
+
+def _measure(run, audio, tune: bool) -> dict:
+    import numpy as np
     t0 = time.monotonic()
     text = clean_text(run(audio))
     took = time.monotonic() - t0
+    audio_s = len(audio) / SAMPLE_RATE
     fast_took = None
-    if "fast" in inspect.signature(run).parameters:  # vitesse du texte provisoire (ce qui compte pour la dictée en direct)
+    if FAST_PARTIALS and "fast" in inspect.signature(run).parameters:  # vitesse du texte provisoire (ce qui compte pour la dictée en direct)
         t1 = time.monotonic()
         run(audio, fast=True)
         fast_took = time.monotonic() - t1
-    out = {"fast_took": fast_took, "device": device_name(getattr(mic, "device", None)) if isinstance(mic, MicStream) else "", "peak": float(np.abs(audio).max()),
-           "rms": float((audio.astype("float64") ** 2).mean() ** 0.5), "text": text, "audio_s": len(audio) / SAMPLE_RATE, "took": took,
-           "threads": getattr(run, "state", {}).get("n"), "engine": run.system_info() if hasattr(run, "system_info") else ""}
-    if tune and hasattr(run, "state") and took > out["audio_s"] * 0.35:  # lent : on cherche le meilleur réglage du processeur
+    out = {"fast_took": fast_took, "peak": float(np.abs(audio).max()), "rms": float((audio.astype("float64") ** 2).mean() ** 0.5), "text": text, "audio_s": audio_s,
+           "took": took, "threads": getattr(run, "state", {}).get("n"), "engine": run.system_info() if hasattr(run, "system_info") else ""}
+    if tune and hasattr(run, "state") and took > audio_s * 0.35:  # lent : on cherche le meilleur réglage du processeur (Whisper)
         before = took
         best, times = autotune(run, audio)
         out.update(tuned=True, best_threads=best, times=times, took_before=before, took=times[best])
@@ -501,3 +528,44 @@ def test_microphone(seconds: float = 5.0, mic=None, runner_factory=None, on_leve
             run(audio, fast=True)
             out["fast_took"] = time.monotonic() - t2
     return out
+
+
+def test_microphone(seconds: float = 5.0, mic=None, runner_factory=None, on_level=None, tune: bool = True) -> dict:
+    """Enregistre quelques secondes et transcrit avec le moteur choisi : donne de quoi comprendre un problème (mauvais micro, niveau trop faible, ordinateur lent).
+    Retourne {"device", "peak", "rms", "text", "audio_s", "took", …} ou {"error": …}."""
+    try:
+        factory = runner_factory or _engine_factory()[1]
+        run = factory(str(model_path(chosen())))
+        warm_up(run)
+        audio, mic = record_audio(seconds, mic, on_level)
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e) or "Aucun micro utilisable."}
+    out = _measure(run, audio, tune)
+    out["device"] = device_name(getattr(mic, "device", None)) if isinstance(mic, MicStream) else ""
+    return out
+
+
+def compare_microphone(seconds: float = 5.0, mic=None, on_level=None, factories: dict | None = None) -> dict:
+    """Un seul enregistrement, transcrit par chaque moteur installé (Whisper, Parakeet) : « {"device", "audio_s", "results": [{"engine", "text", "took"}]} » ou {"error": …}."""
+    from . import parakeet_engine as pe
+    factories = factories or {}
+    if "whisper" not in factories and is_installed():
+        factories["whisper"] = lambda: load_runner(str(model_path(chosen())), None)
+    if "parakeet" not in factories and pe.is_installed():
+        factories["parakeet"] = lambda: pe.load_runner(str(pe.model_dir()))
+    if len(factories) < 2:
+        return {"error": "Installez les deux moteurs (Whisper et Parakeet) pour les comparer."}
+    try:
+        runs = {}
+        for name, make in factories.items():
+            run = make()
+            warm_up(run)
+            runs[name] = run
+        audio, mic = record_audio(seconds, mic, on_level)
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e) or "Aucun micro utilisable."}
+    results = []
+    for name, run in runs.items():
+        m = _measure(run, audio, tune=False)
+        results.append({"engine": name, "text": m["text"], "took": m["took"]})
+    return {"device": device_name(getattr(mic, "device", None)) if isinstance(mic, MicStream) else "", "audio_s": len(audio) / SAMPLE_RATE, "peak": float(abs(audio).max()), "results": results}

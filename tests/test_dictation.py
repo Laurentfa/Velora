@@ -189,7 +189,10 @@ def test_session_without_helper_reports_unavailable(monkeypatch):
     s.start()
     assert s.events.get_nowait()["code"] == "unavailable"
     monkeypatch.setattr(dictation, "supported", lambda: False)
-    monkeypatch.setattr(dictation.whisper_engine if hasattr(dictation, "whisper_engine") else __import__("mailia.whisper_engine", fromlist=["x"]), "libs_ok", lambda: False)
+    import mailia.parakeet_engine as pe
+    import mailia.whisper_engine as we
+    monkeypatch.setattr(we, "libs_ok", lambda: False)
+    monkeypatch.setattr(pe, "libs_ok", lambda: False)
     assert dictation.check() == {"available": False, "installed": False}
 
 
