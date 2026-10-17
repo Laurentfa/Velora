@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest, macos-26]  # macOS 26 : la dictée vocale de Mac (tools/dictate) a besoin de son SDK
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -42,6 +42,7 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           ./build_mac.sh
+          test -x dist/Velora.app/Contents/MacOS/velora-dictate  # la dictée ne doit pas disparaître en silence d'une version publiée
           scripts/package_mac.sh "$VERSION"
       - name: Construction et installateur Windows
         if: runner.os == 'Windows'

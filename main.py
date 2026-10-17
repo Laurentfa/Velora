@@ -69,6 +69,7 @@ from mailia.ui_bulk import BulkMixin
 from mailia.ui_cleanup import CleanupMixin
 from mailia.ui_common import CAT, JOURS_LONG, MOIS, NOLIST_VIEWS, SERVER_MODE, VIEWS, ago, full_date, human_size, initial_view, initials, label_of, log, short_date
 from mailia.ui_compose_ai import ComposeAiMixin
+from mailia.ui_dictation import DictationMixin
 from mailia.ui_drafts import DraftsMixin
 from mailia.ui_files import FilesMixin
 from mailia.ui_lock import lock_applies, lock_screen_now, render_db_error, render_lock_screen, session_unlocked
@@ -114,7 +115,7 @@ perf.install()
 
 
 
-class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin):
+class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin):
     """État et interface d'une fenêtre (chaque client a la sienne)."""
 
     def __init__(self) -> None:

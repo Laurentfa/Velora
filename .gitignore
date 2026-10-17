@@ -21,3 +21,4 @@ logs/
 .nicegui/
 *.plain.old
 *.enc.old
+tools/bin/

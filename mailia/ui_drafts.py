@@ -52,6 +52,7 @@ class DraftsMixin:
                     ui.input("Décrivez le mail à rédiger" if self.new else "Dites à l'IA quoi répondre (facultatif)",
                              placeholder="ex : relancer Mme Martin pour le devis" if self.new else "ex : accepter mais proposer jeudi…"
                              ).bind_value(d, "ins").props("outlined dense stack-label").classes("col").on("keydown.enter", self.gen_draft)
+                    self.dictation_widget("ins")
                     self.gen_btn = ui.button("✦ Rédiger" if not d.get("gen") else "✦ Régénérer", on_click=self.gen_draft).props("unelevated no-caps color=primary")
             opts = contacts_ui.recipient_options()
             to_sel, add_to = contacts_ui.recipients_field("À", d, "to", opts)
@@ -68,6 +69,7 @@ class DraftsMixin:
                 ui.button("Cci", icon="visibility_off", on_click=lambda: bcc_field.set_visibility(not bcc_field.visible)).props(
                     "flat dense no-caps size=sm").tooltip("Ajouter des destinataires en copie cachée (invisibles pour les autres)")
                 self.importance_tool()
+                self.dictation_widget("body")
                 ui.button("Image", icon="image", on_click=self.insert_image).props("flat dense no-caps size=sm").tooltip("Insérer une image dans le message")
                 ui.button("Ma signature", icon="draw", on_click=self.insert_signature).props("flat dense no-caps size=sm").tooltip("Insérer ma signature à l'endroit du curseur")
                 with ui.button("Modèles", icon="description").props("flat dense no-caps size=sm"):
