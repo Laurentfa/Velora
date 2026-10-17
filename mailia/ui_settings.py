@@ -8,7 +8,7 @@ from pathlib import Path
 
 from nicegui import run, ui
 
-from mailia import ai, api_ui, folder_order, gcal, onemin, outgoing, compose, config, db, htmlmail, i18n, logs, notify, perf, queries, settings_ui, sync, wizard
+from mailia import ai, api_ui, dictation, folder_order, gcal, onemin, outgoing, compose, config, db, htmlmail, i18n, logs, notify, perf, queries, settings_ui, sync, wizard
 from mailia.textutil import html_to_text
 
 from mailia.ui_account import delete_account_dialog, friendly_error, open_account
@@ -26,6 +26,48 @@ def state(ok: bool) -> str:
 def _tab_api(host) -> None:
     """Onglet « API et assistants »."""
     api_ui.api_panel(host, lambda url: ui.navigate.to(url, new_tab=True))
+
+
+def _tab_dictation(host) -> None:
+    """Onglet « Dictée vocale » : le moteur utilisé et, avec Whisper, le choix du modèle à télécharger."""
+    from . import dictation, whisper_engine
+    from .ui_dictation import whisper_download_dialog
+    ui.label("Dictée vocale").classes("text-h6").style("font-weight:700")
+    if dictation.engine() == "apple":
+        ui.label("Velora utilise la reconnaissance vocale d'Apple, sur ce Mac : rien n'est téléchargé par Velora, rien ne quitte votre ordinateur et l'IA n'est pas utilisée.").classes("text-body2")
+        ui.label("Le micro se trouve dans la rédaction : à côté de « ✦ Rédiger » pour dicter une consigne à l'IA, et sous l'objet pour dicter le message.").classes("rmeta")
+        return
+    ui.label("Velora utilise Whisper, sur cet ordinateur : rien ne quitte votre ordinateur et l'IA n'est pas utilisée. "
+             "Le modèle de langue se télécharge une fois, avec votre accord. Plus il est gros, plus la dictée est fiable et lente.").classes("text-body2")
+
+    @ui.refreshable
+    def models() -> None:
+        current = whisper_engine.chosen()
+        opts = {k: f"{m.title} — {whisper_engine.human_mb(m.size)} ({m.hint})" for k, m in whisper_engine.MODELS.items()}
+
+        def pick(e) -> None:
+            whisper_engine.set_chosen(e.value)
+            models.refresh()
+        ui.radio(opts, value=current, on_change=pick).props("dense").mark("dictation-models")
+        with ui.row().classes("items-center gap-3 q-mt-sm"):
+            if whisper_engine.is_installed(current):
+                ui.icon("check_circle", size="20px").style("color:#1a8f3c")
+                ui.label("Installé sur cet ordinateur").classes("text-body2")
+
+                def drop() -> None:
+                    whisper_engine.remove(current)
+                    models.refresh()
+                ui.button("Supprimer le modèle", icon="delete_outline", on_click=drop).props("flat no-caps dense").mark("dictation-remove")
+            else:
+                ui.icon("cloud_download", size="20px").style("color:var(--muted)")
+                ui.label("Pas encore téléchargé").classes("text-body2")
+
+                async def fetch() -> None:
+                    await whisper_download_dialog(host, current)
+                    models.refresh()
+                ui.button("Télécharger", icon="download", on_click=fetch).props("unelevated no-caps dense color=primary").mark("dictation-download")
+    models()
+    ui.label("Modèles Whisper d'OpenAI, au format whisper.cpp : licence MIT.").classes("rmeta q-mt-md")
 
 
 def _tab_about() -> None:
@@ -738,9 +780,14 @@ def open_settings(host, on_folders) -> None:
                 ui.tab("priv", label="Confidentialité et sécurité", icon="lock")
                 ui.tab("api", label="API et assistants", icon="hub")
                 ui.tab("use", label="Utilisation et données", icon="insights")
+                if dictation.usable():
+                    ui.tab("dict", label="Dictée vocale", icon="mic")
                 ui.tab("about", label="À propos", icon="info")
             with ui.tab_panels(tabs, value="boites").props("vertical").classes("col").style("min-width:0;height:100%;background:transparent"):
-                sec = {k: ui.tab_panel(k).classes("q-pa-lg").style("overflow-y:auto") for k in ("boites", "aff", "dos", "ia", "prm", "rules", "abs", "cal", "auto", "priv", "api", "use", "about")}
+                sec = {k: ui.tab_panel(k).classes("q-pa-lg").style("overflow-y:auto") for k in ("boites", "aff", "dos", "ia", "prm", "rules", "abs", "cal", "auto", "priv", "api", "use", "about", *(("dict",) if dictation.usable() else ()))}
+        if "dict" in sec:
+            with sec["dict"], ui.column().classes("w-full gap-2").style("max-width:700px"):
+                _tab_dictation(host)
         with sec["about"], ui.column().classes("w-full gap-1").style("max-width:700px"):
             _tab_about()
         with sec["api"], ui.column().classes("w-full gap-1").style("max-width:760px"):

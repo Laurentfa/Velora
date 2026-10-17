@@ -3,11 +3,54 @@
 Le texte s'affiche en provisoire pendant qu'on parle, puis s'écrit à l'endroit du curseur à chaque phrase terminée. Rien ne part sans votre clic sur « Envoyer »."""
 import json
 import queue
+import threading
 
 from nicegui import run, ui
 
-from mailia import dictation
+from mailia import dictation, whisper_engine
 from mailia.ui_common import log
+
+
+async def whisper_download_dialog(host, key: str) -> bool:
+    """Demande l'accord pour télécharger le modèle Whisper, montre la progression, permet d'annuler. Vrai si le modèle est en place à la fin."""
+    m = whisper_engine.MODELS[key]
+    state = {"done": 0}
+    cancel = threading.Event()
+    with host, ui.dialog().props("persistent") as dlg, ui.card().style("width:min(520px,92vw)"):
+        ui.label("Télécharger le modèle de dictée").classes("text-h6")
+        ui.label(f"Modèle « {m.title} » ({whisper_engine.human_mb(m.size)}), depuis le dépôt public de whisper.cpp sur huggingface.co. "
+                 "Il reste sur cet ordinateur : ensuite, la dictée fonctionne sans connexion et sans l'IA. Le fichier est vérifié avant d'être utilisé.").classes("text-body2")
+        bar = ui.linear_progress(value=0, show_value=False).classes("w-full").mark("dictate-progress")
+        bar.set_visibility(False)
+        info = ui.label("").classes("rmeta")
+        with ui.row().classes("justify-end w-full gap-2"):
+            ui.button("Annuler", on_click=lambda: (cancel.set(), dlg.submit(False))).props("flat no-caps").mark("dictate-cancel")
+            go_btn = ui.button("Télécharger").props("unelevated no-caps color=primary").mark("dictate-download")
+
+        def refresh() -> None:
+            bar.set_value(min(1.0, state["done"] / m.size))
+            info.set_text(f"{whisper_engine.human_mb(state['done'])} / {whisper_engine.human_mb(m.size)}" if state["done"] else info.text)
+
+        timer = ui.timer(0.3, refresh)
+
+        async def go() -> None:
+            go_btn.disable()
+            bar.set_visibility(True)
+            info.set_text("Téléchargement…")
+            try:
+                await run.io_bound(whisper_engine.download, key, lambda d, t: state.update(done=d), cancel)
+            except whisper_engine.DownloadError as e:
+                info.set_text(str(e))
+                go_btn.set_text("Réessayer")
+                go_btn.enable()
+                return
+            dlg.submit(True)
+
+        go_btn.on_click(go)
+    ok = bool(await dlg)
+    timer.cancel()
+    dlg.delete()
+    return ok
 
 
 class DictationMixin:
@@ -15,7 +58,7 @@ class DictationMixin:
 
     def dictation_widget(self, target: str) -> None:
         """Le bouton micro (« body » : le message, « ins » : la consigne de l'IA) et sa ligne d'état. Absent quand la dictée n'est pas possible sur cette machine."""
-        if not dictation.supported():
+        if not dictation.usable():
             return
         btn = ui.button(icon="mic", on_click=lambda t=target: self.toggle_dictation(t)).props("flat dense round size=sm color=primary").tooltip(
             "Dicter : un clic pour parler, un clic pour arrêter").mark(f"dictate-{target}")
@@ -53,6 +96,8 @@ class DictationMixin:
         self._dict_paint(target, True, "Démarrage…")
 
     async def _dictation_install(self) -> bool:
+        if dictation.engine() == "whisper":
+            return await whisper_download_dialog(self.host, whisper_engine.chosen())
         with self.host, ui.dialog() as dlg, ui.card().style("width:min(460px,92vw)"):
             ui.label("Installer la langue de dictée").classes("text-h6")
             ui.label("macOS va télécharger le modèle de reconnaissance du français. Il reste sur ce Mac, et la dictée fonctionne ensuite sans connexion.").classes("text-body2")
@@ -81,7 +126,9 @@ class DictationMixin:
             except queue.Empty:
                 break
             kind = ev.get("t")
-            if kind == "ready":
+            if kind == "loading":
+                self._dict_paint(target, True, "Chargement du modèle…")
+            elif kind == "ready":
                 self._dict_paint(target, True, "J'écoute… (clic sur le micro pour arrêter)")
             elif kind == "partial":
                 self._dictation_live(target, ev.get("text") or "", False)

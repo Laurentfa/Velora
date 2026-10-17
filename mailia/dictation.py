@@ -1,7 +1,8 @@
-"""Dictée vocale : le micro est écouté par un petit programme natif (voir tools/dictate), qui renvoie le texte au fur et à mesure.
-
-Sur Mac (macOS 26 ou plus) il s'appuie sur la reconnaissance d'Apple : tout se passe sur l'appareil, rien n'est téléchargé par Velora et l'IA n'est pas appelée.
-Ailleurs, la dictée n'est pas proposée pour l'instant. `new_session` est remplaçable : les tests y mettent un faux moteur."""
+"""Dictée vocale. Deux moteurs, choisis automatiquement :
+- « apple » (Mac, macOS 26 ou plus) : un petit programme natif (voir tools/dictate) écoute le micro et renvoie le texte au fur et à mesure, avec la
+  reconnaissance d'Apple : tout se passe sur l'appareil, rien n'est téléchargé par Velora ;
+- « whisper » (Windows, ou Mac plus ancien) : Whisper en local, avec un modèle téléchargé à la demande (voir whisper_engine).
+Dans les deux cas, rien ne quitte l'ordinateur et l'IA n'est pas appelée. `new_session` est remplaçable : les tests y mettent un faux moteur."""
 from __future__ import annotations
 
 import json
@@ -17,7 +18,8 @@ ERRORS = {
     "mic_denied": "L'accès au micro est refusé. Autorisez Velora dans Réglages Système › Confidentialité et sécurité › Microphone.",
     "asset_missing": "La langue de dictée n'est pas installée sur ce Mac.",
     "unavailable": "La reconnaissance vocale n'est pas disponible sur ce Mac.",
-    "mic": "Aucun micro utilisable.",
+    "mic": "Aucun micro utilisable. Sous Windows : Paramètres › Confidentialité et sécurité › Microphone, et autorisez les applications de bureau.",
+    "failed": "La dictée a rencontré un problème.",
 }
 
 
@@ -39,8 +41,23 @@ def supported() -> bool:
     return major >= 26 and helper_path() is not None
 
 
+def engine() -> str:
+    """« apple », « whisper », ou « » quand la dictée n'est pas possible ici."""
+    if supported():
+        return "apple"
+    from . import whisper_engine
+    return "whisper" if whisper_engine.libs_ok() else ""
+
+
+def usable() -> bool:
+    return bool(engine())
+
+
 def check(locale: str = "fr-FR") -> dict:
-    """{"available": bool, "installed": bool} : la langue est-elle utilisable sur ce Mac ?"""
+    """{"available": bool, "installed": bool} : la dictée est-elle utilisable ici, et sa langue ou son modèle est-il en place ?"""
+    if engine() == "whisper":
+        from . import whisper_engine
+        return {"available": True, "installed": whisper_engine.is_installed()}
     p = helper_path()
     if not supported() or p is None:
         return {"available": False, "installed": False}
@@ -117,7 +134,10 @@ class Session:
         self.finished = True
 
 
-def new_session() -> Session:
+def new_session():
+    if engine() == "whisper":
+        from . import whisper_engine
+        return whisper_engine.WhisperSession()
     return Session()
 
 

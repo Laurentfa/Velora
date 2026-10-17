@@ -45,7 +45,7 @@ def box(monkeypatch):
 @pytest.fixture
 def fake(monkeypatch):
     s = FakeSession()
-    monkeypatch.setattr(dictation, "supported", lambda: True)
+    monkeypatch.setattr(dictation, "usable", lambda: True)
     monkeypatch.setattr(dictation, "check", lambda locale="fr-FR": {"available": True, "installed": True})
     monkeypatch.setattr(dictation, "new_session", lambda: s)
     return s
@@ -68,7 +68,7 @@ async def open_composer(user, box):
 
 
 async def test_no_microphone_button_when_dictation_is_not_possible(user: User, box, monkeypatch) -> None:
-    monkeypatch.setattr(dictation, "supported", lambda: False)
+    monkeypatch.setattr(dictation, "usable", lambda: False)
     await open_composer(user, box)
     await user.should_not_see(marker="dictate-body")
     await user.should_not_see(marker="dictate-ins")
@@ -187,7 +187,9 @@ def test_session_without_helper_reports_unavailable(monkeypatch):
     s = dictation.Session()
     s.start()
     assert s.events.get_nowait()["code"] == "unavailable"
-    assert dictation.check() == {"available": False, "installed": False} or sys.platform != "darwin"
+    monkeypatch.setattr(dictation, "supported", lambda: False)
+    monkeypatch.setattr(dictation.whisper_engine if hasattr(dictation, "whisper_engine") else __import__("mailia.whisper_engine", fromlist=["x"]), "libs_ok", lambda: False)
+    assert dictation.check() == {"available": False, "installed": False}
 
 
 def test_supported_requires_a_mac_with_macos_26(monkeypatch, tmp_path):

@@ -96,6 +96,17 @@ sans rien enregistrer ; « Réanalyser » remet les mails récents en file avec 
 - Mac : `./build_mac.sh` → `dist/Velora.app`
 - Windows (à lancer sur un PC) : `build_windows.bat` → `dist\Velora\Velora.exe`
 
+## Dictée vocale
+
+Un bouton micro dans la rédaction (à côté de « ✦ Rédiger » pour dicter une consigne à l'IA, et sous l'objet pour dicter le message) ; le texte s'affiche
+pendant qu'on parle. Tout se passe sur l'ordinateur : l'audio ne part nulle part et l'IA n'est pas appelée.
+
+- **Mac (macOS 26 ou plus)** : reconnaissance d'Apple, via un petit programme Swift (`tools/dictate/velora-dictate.swift`, construit par `build_mac.sh` et placé à côté
+  de l'exécutable). Rien à télécharger.
+- **Windows, et Mac plus anciens** : Whisper (whisper.cpp, licence MIT). Le modèle n'est pas dans l'appli : un clic dans la rédaction (ou Paramètres › Dictée vocale)
+  propose de le télécharger — Rapide ≈ 60 Mo, Équilibré ≈ 190 Mo (par défaut), Précis ≈ 540 Mo — depuis le dépôt public `ggerganov/whisper.cpp` de Hugging Face.
+  Taille et empreinte SHA-256 sont fixées dans `mailia/whisper_engine.py` et vérifiées.
+
 ## Données
 Appli installée : `~/Library/Application Support/MailIA` (Mac), `%LOCALAPPDATA%\MailIA` (Windows).
 Depuis les sources : à la racine du projet (`.env`, `mail.db`).

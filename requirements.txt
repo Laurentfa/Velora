@@ -19,3 +19,6 @@ segno
 sqlcipher3-wheels
 pyobjc-framework-LocalAuthentication; sys_platform == "darwin"
 dnspython
+pywhispercpp
+sounddevice
+numpy
