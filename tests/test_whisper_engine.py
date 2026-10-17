@@ -446,3 +446,28 @@ def test_provisional_text_uses_the_fast_mode_and_final_text_the_full_one(monkeyp
     s.stop()
     drain(s, {"done", "error"}, 20)
     assert True in modes and modes[-1] is False  # le passage définitif n'est jamais en mode rapide
+
+
+def test_repetition_loops_are_removed_but_real_repetitions_stay():
+    c = whisper_engine.clean_text
+    looped = "Si elle tombe avant 19 heures. " + "L'Ophe, " * 30 + "Encore faudra-t-il que les pyros soient prêts. " + "Dital, " * 40 + "Je pense que c'est le 12 juillet."
+    assert c(looped) == "Si elle tombe avant 19 heures. Encore faudra-t-il que les pyros soient prêts. Je pense que c'est le 12 juillet."
+    assert c("je suis un amour, " * 12 + "voilà.") == "voilà."  # une phrase entière qui tourne en boucle
+    assert c("Oh non non non, mais ça va pas du tout. Très très bien.") == "Oh non non non, mais ça va pas du tout. Très très bien."
+    assert c("Allez allez allez allez allez, on y va.") == "Allez, on y va."  # 4 à 5 fois : un seul exemplaire
+
+
+def test_a_looping_engine_does_not_flood_the_text(monkeypatch):
+    monkeypatch.setattr(whisper_engine, "keep_runner", lambda *a, **k: None)
+    s, calls = session([(0.3, "silence"), (2.0, "speech"), (1.2, "silence")], ["Bonjour. " + "Dital, " * 50])
+    s.start()
+    evs = drain(s, {"final"}, 20)
+    s.stop()
+    evs += drain(s, {"done", "error"}, 20)
+    assert [e["text"] for e in evs if e["t"] in ("partial", "final")] and all("Dital" not in e["text"] for e in evs if "text" in e)
+
+
+def test_the_fallback_of_whisper_is_not_disabled():
+    import inspect
+    src = inspect.getsource(whisper_engine.load_runner)
+    assert "temperature_inc=0" not in src  # sans ce repli, Whisper peut se répéter sans fin

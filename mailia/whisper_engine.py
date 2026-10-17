@@ -12,6 +12,7 @@ import importlib.util
 import inspect
 import os
 import queue
+import re
 import logging
 import threading
 import time
@@ -213,8 +214,8 @@ def load_runner(path: str, prompt: str | None = None):
     def run(audio, fast: bool = False) -> str:
         # fast (texte provisoire) : Whisper traite toujours 30 s d'audio même pour une phrase de 3 s ; audio_ctx limite le calcul à la durée réellement parlée
         extra = {"audio_ctx": min(1500, int(len(audio) / SAMPLE_RATE * 50) + 100), "single_segment": True, "no_timestamps": True} if fast and len(audio) < SAMPLE_RATE * 25 else {}
-        # no_context : ne pas se laisser influencer par le passage précédent ; suppress_nst : pas de « [musique] », « (rires) » ; temperature_inc=0 : pas de tirages au hasard en cas de doute
-        segs = model.transcribe(audio, language=language(), print_progress=False, no_context=True, suppress_nst=True, temperature_inc=0.0,
+        # no_context : ne pas se laisser influencer par le passage précédent ; suppress_nst : pas de « [musique] », « (rires) ». Le repli de Whisper (nouvel essai à température plus haute quand il se répète) reste actif : sans lui, il peut boucler
+        segs = model.transcribe(audio, language=language(), print_progress=False, no_context=True, suppress_nst=True,
                                 n_threads=state["n"], **extra, **({"initial_prompt": prompt} if prompt else {}))
         return " ".join(s.text.strip() for s in segs).strip()
     run.state = state
@@ -236,9 +237,43 @@ def keep_runner(key, run, minutes: float = 3) -> None:
         _runner_cache[key] = (run, t)
 
 
+def _norm(tok: str) -> str:
+    return tok.strip(".,;:!?…«»\"'()").lower()
+
+
+def drop_loops(text: str) -> str:
+    """Whisper boucle parfois (« L'Ophe, L'Ophe, L'Ophe… », « je suis un amour, et je suis un amour… »). Une suite de 1 à 8 mots répétée au moins 6 fois de suite est
+    supprimée en entier (c'est du bruit, pas de la parole) ; répétée 4 ou 5 fois, elle est réduite à un exemplaire ; jusqu'à 3 fois (« non non non »), elle est gardée."""
+    toks = text.split()
+    changed = True
+    while changed:
+        changed = False
+        for n in range(1, 9):
+            i = 0
+            while i + 2 * n <= len(toks):
+                unit = [_norm(t) for t in toks[i:i + n]]
+                if not any(unit):
+                    i += 1
+                    continue
+                reps = 1
+                while i + (reps + 1) * n <= len(toks) and [_norm(t) for t in toks[i + reps * n:i + (reps + 1) * n]] == unit:
+                    reps += 1
+                if reps >= 4:
+                    keep = [] if reps >= 6 else toks[i:i + n]
+                    if keep:  # la ponctuation de la dernière répétition (« allez allez allez allez, on y va ») est conservée
+                        tail = re.search(r"[.,;:!?…]+$", toks[i + reps * n - 1])
+                        if tail and not re.search(r"[.,;:!?…]$", keep[-1]):
+                            keep[-1] += tail.group(0)
+                    toks[i:i + reps * n] = keep
+                    changed = True
+                else:
+                    i += 1
+    return " ".join(toks)
+
+
 def clean_text(text: str) -> str:
-    """Whisper invente parfois du texte sur du silence (« Sous-titrage… ») : on l'écarte."""
-    t = (text or "").strip()
+    """Whisper invente parfois du texte sur du silence (« Sous-titrage… ») ou boucle : on écarte l'un et l'autre."""
+    t = drop_loops((text or "").strip())
     low = t.lower()
     return "" if not t or any(p in low for p in _PHANTOMS) or set(t) <= set(".… ") else t
 
@@ -299,7 +334,7 @@ class WhisperSession:
     """Même interface que dictation.Session : `events` reçoit ready / partial / final / done / error, avec `loading` en plus pendant le chargement du modèle."""
     PAUSE = 0.8          # secondes de silence qui terminent une phrase
     PARTIAL_EVERY = 1.2  # secondes de parole nouvelle entre deux textes provisoires
-    MAX_SEGMENT = 25.0   # une phrase très longue est coupée ici
+    MAX_SEGMENT = 15.0   # une phrase très longue est coupée ici (les longs passages sans pause sont ceux où Whisper boucle le plus)
     MIN_SPEECH = 0.35    # moins que ça : du bruit, pas de la parole
 
     def __init__(self, model_key: str | None = None, mic=None, runner_factory=None) -> None:
