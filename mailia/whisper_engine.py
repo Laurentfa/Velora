@@ -11,12 +11,16 @@ import hashlib
 import importlib.util
 import os
 import queue
+import logging
 import threading
+import time
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
 from . import config, db
+
+log = logging.getLogger("dictation")
 
 BASE_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
 SAMPLE_RATE = 16000
@@ -161,10 +165,12 @@ def load_runner(path: str, prompt: str | None = None):
     if hit:
         return hit[0]
     from pywhispercpp.model import Model as WModel
-    model = WModel(path, n_threads=min(4, os.cpu_count() or 2), print_progress=False, print_realtime=False)
+    model = WModel(path, n_threads=max(2, min(8, (os.cpu_count() or 4) - 1)), print_progress=False, print_realtime=False)
 
     def run(audio) -> str:
-        segs = model.transcribe(audio, language=language(), print_progress=False, **({"initial_prompt": prompt} if prompt else {}))
+        # no_context : ne pas se laisser influencer par le passage précédent ; suppress_nst : pas de « [musique] », « (rires) » ; temperature_inc=0 : pas de tirages au hasard en cas de doute
+        segs = model.transcribe(audio, language=language(), print_progress=False, no_context=True, suppress_nst=True, temperature_inc=0.0,
+                                **({"initial_prompt": prompt} if prompt else {}))
         return " ".join(s.text.strip() for s in segs).strip()
     return run
 
@@ -190,16 +196,40 @@ def clean_text(text: str) -> str:
     return "" if not t or any(p in low for p in _PHANTOMS) or set(t) <= set(".… ") else t
 
 
+def input_devices() -> list[tuple[int, str]]:
+    """Les micros de l'ordinateur : (numéro, nom)."""
+    import sounddevice as sd
+    out = []
+    for i, d in enumerate(sd.query_devices()):
+        if d.get("max_input_channels", 0) > 0:
+            out.append((i, d["name"]))
+    return out
+
+
+def chosen_device() -> int | None:
+    v = db.kv_get("dictation_device")
+    return int(v) if v and v.lstrip("-").isdigit() else None
+
+
+def device_name(device: int | None = None) -> str:
+    import sounddevice as sd
+    try:
+        return sd.query_devices(device if device is not None else sd.default.device[0])["name"]
+    except Exception:  # noqa: BLE001
+        return "?"
+
+
 class MicStream:
     """Le micro, en blocs de 0,1 s (numpy float32 mono 16 kHz). Remplaçable par un faux dans les tests."""
 
-    def __init__(self) -> None:
+    def __init__(self, device: int | None = None) -> None:
         self.q: queue.Queue = queue.Queue()
         self.stream = None
+        self.device = chosen_device() if device is None else device
 
     def open(self) -> None:
         import sounddevice as sd
-        self.stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", blocksize=SAMPLE_RATE // 10,
+        self.stream = sd.InputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", blocksize=SAMPLE_RATE // 10, device=self.device,
                                      callback=lambda data, frames, t, status: self.q.put(data[:, 0].copy()))
         self.stream.start()
 
@@ -271,8 +301,22 @@ class WhisperSession:
         speech_s = silent_s = since_partial = 0.0
         floor = 0.01
 
-        def text_of(chunks) -> str:
-            return clean_text(run(np.concatenate(chunks).astype("float32")))
+        slow = {"n": 0, "off": False}
+
+        def text_of(chunks, partial: bool = False) -> str:
+            audio = np.concatenate(chunks).astype("float32")
+            if partial and len(audio) > SAMPLE_RATE * 10:
+                audio = audio[-SAMPLE_RATE * 10:]  # le texte provisoire ne reprend que les 10 dernières secondes : le coût ne grandit pas avec la phrase
+            t0 = time.monotonic()
+            txt = clean_text(run(audio))
+            took, length = time.monotonic() - t0, len(audio) / SAMPLE_RATE
+            log.info("dictée Whisper : %.1f s d'audio transcrites en %.1f s (%s)", length, took, "provisoire" if partial else "définitif")
+            if partial and not slow["off"]:
+                slow["n"] = slow["n"] + 1 if took > length * 0.8 else 0
+                if slow["n"] >= 2:  # l'ordinateur ne suit pas : plus de texte provisoire, seulement aux pauses
+                    slow["off"] = True
+                    self.events.put({"t": "slow"})
+            return txt
 
         def finish_segment() -> None:
             nonlocal buf, speech_s, silent_s, since_partial
@@ -301,9 +345,9 @@ class WhisperSession:
             if not buf:
                 buf, pre = pre, []
             buf.append(block)
-            if voiced and since_partial >= self.PARTIAL_EVERY and speech_s >= self.MIN_SPEECH:
+            if voiced and not slow["off"] and since_partial >= self.PARTIAL_EVERY and speech_s >= self.MIN_SPEECH:
                 since_partial = 0.0
-                txt = text_of(buf)
+                txt = text_of(buf, partial=True)
                 if txt:
                     self.events.put({"t": "partial", "text": txt})
             if (speech_s and silent_s >= self.PAUSE) or len(buf) * block_s >= self.MAX_SEGMENT:
@@ -318,3 +362,35 @@ class WhisperSession:
         finish_segment()
         keep_runner((path, self.prompt), run)
         self.events.put({"t": "done"})
+
+
+def test_microphone(seconds: float = 5.0, mic=None, runner_factory=None, on_level=None) -> dict:
+    """Enregistre quelques secondes et transcrit : donne de quoi comprendre un problème (mauvais micro, niveau trop faible, ordinateur lent).
+    Retourne {"device", "peak", "rms", "text", "audio_s", "took"} ou {"error": …}."""
+    import numpy as np
+    mic = mic or MicStream()
+    factory = runner_factory or (lambda path: load_runner(path, None))
+    blocks = []
+    try:
+        run = factory(str(model_path(chosen())))
+        mic.open()
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            b = mic.read()
+            if b is None:
+                continue
+            blocks.append(b)
+            if on_level:
+                on_level(float(np.abs(b).max()), (time.monotonic() - (end - seconds)) / seconds)
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e) or "Aucun micro utilisable."}
+    finally:
+        mic.close()
+    if not blocks:
+        return {"error": "Aucun son reçu du micro."}
+    audio = np.concatenate(blocks).astype("float32")
+    t0 = time.monotonic()
+    text = clean_text(run(audio))
+    took = time.monotonic() - t0
+    return {"device": device_name(getattr(mic, "device", None)) if isinstance(mic, MicStream) else "", "peak": float(np.abs(audio).max()),
+            "rms": float((audio.astype("float64") ** 2).mean() ** 0.5), "text": text, "audio_s": len(audio) / SAMPLE_RATE, "took": took}

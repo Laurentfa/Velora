@@ -67,6 +67,47 @@ def _tab_dictation(host) -> None:
                     models.refresh()
                 ui.button("Télécharger", icon="download", on_click=fetch).props("unelevated no-caps dense color=primary").mark("dictation-download")
     models()
+    ui.separator().classes("q-my-md")
+    ui.label("Micro et diagnostic").classes("text-subtitle1").style("font-weight:600")
+    try:
+        devices = whisper_engine.input_devices()
+    except Exception:  # noqa: BLE001 — pas de bibliothèque audio ou aucun micro
+        devices = []
+    default = whisper_engine.device_name()
+    opts = {"": f"Micro par défaut du système ({default})", **{str(i): n for i, n in devices}}
+    cur = db.kv_get("dictation_device") or ""
+    ui.select(opts, value=cur if cur in opts else "", label="Micro utilisé pour la dictée",
+              on_change=lambda e: db.kv_set("dictation_device", e.value or "")).props("outlined dense").classes("w-full").mark("dictation-device")
+    result = ui.column().classes("gap-0 q-mt-sm")
+    level = ui.linear_progress(value=0, show_value=False).classes("w-full").mark("dictation-level")
+    level.set_visibility(False)
+
+    async def test() -> None:
+        if not whisper_engine.is_installed():
+            return ui.notify("Téléchargez d'abord le modèle.", type="warning")
+        result.clear()
+        state = {"p": 0.0}
+        level.set_visibility(True)
+        timer = ui.timer(0.15, lambda: level.set_value(min(1.0, state["p"])))
+        test_btn.disable()
+        with result:
+            ui.label("Parlez maintenant pendant 5 secondes…").classes("text-body2")
+        r = await run.io_bound(whisper_engine.test_microphone, 5.0, None, None, lambda peak, frac: state.update(p=peak * 2))
+        timer.cancel()
+        level.set_visibility(False)
+        test_btn.enable()
+        result.clear()
+        with result:
+            if r.get("error"):
+                ui.label(r["error"]).classes("text-negative text-body2")
+                return
+            quality = "très faible : parlez plus fort, rapprochez-vous ou choisissez un autre micro" if r["peak"] < 0.03 else \
+                      "trop fort (saturé) : baissez le volume d'entrée" if r["peak"] > 0.98 else "correct"
+            ui.label(f"Micro : {r['device']}").classes("text-body2")
+            ui.label(f"Niveau : {quality}").classes("text-body2")
+            ui.label(f"Texte entendu : « {r['text'] or '(rien)'} »").classes("text-body2")
+            ui.label(f"Vitesse : {r['took']:.1f} s pour {r['audio_s']:.0f} s de parole" + (" — trop lent pour un texte en direct : prenez le modèle « Rapide »" if r["took"] > r["audio_s"] * 0.8 else " — assez rapide")).classes("text-body2")
+    test_btn = ui.button("Tester le micro (5 s)", icon="mic", on_click=test).props("outline no-caps dense color=primary").classes("q-mt-sm").mark("dictation-test")
     ui.label("Modèles Whisper d'OpenAI, au format whisper.cpp : licence MIT.").classes("rmeta q-mt-md")
 
 

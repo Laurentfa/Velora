@@ -312,3 +312,90 @@ async def test_a_failed_download_can_be_retried(user: User, box, monkeypatch) ->
     await user.should_see("hors connexion")
     await user.should_see("Réessayer")
     assert b.dict_state is None
+
+
+def test_a_slow_computer_stops_the_provisional_text_but_still_transcribes_at_pauses(monkeypatch):
+    monkeypatch.setattr(whisper_engine, "keep_runner", lambda *a, **k: None)
+    clock = {"t": 0.0}
+    monkeypatch.setattr(whisper_engine.time, "monotonic", lambda: clock["t"])
+
+    def factory(path):
+        def run(audio):
+            clock["t"] += len(audio) / 16000 * 1.5  # 1,5 fois plus lent que la parole
+            return "texte"
+        return run
+    s = whisper_engine.WhisperSession("rapide", mic=FakeMic([(0.3, "silence"), (4.0, "speech"), (1.2, "silence")]), runner_factory=factory)
+    s.PARTIAL_EVERY = 0.5
+    s.start()
+    evs = drain(s, {"final"}, 20)
+    s.stop()
+    evs += drain(s, {"done", "error"}, 20)
+    kinds = [e["t"] for e in evs]
+    assert "slow" in kinds and kinds.count("partial") <= 2 and "final" in kinds
+
+
+def test_provisional_text_only_reads_the_last_ten_seconds(monkeypatch):
+    monkeypatch.setattr(whisper_engine, "keep_runner", lambda *a, **k: None)
+    lengths = []
+
+    def factory(path):
+        def run(audio):
+            lengths.append(len(audio) / 16000)
+            return "mot"
+        return run
+    s = whisper_engine.WhisperSession("rapide", mic=FakeMic([(0.3, "silence"), (14.0, "speech")]), runner_factory=factory)
+    s.PARTIAL_EVERY = 0.5
+    s.start()
+    drain(s, {"ready"})
+    for _ in range(40):
+        threading.Event().wait(0.1)
+        if len(lengths) >= 20:
+            break
+    s.stop()
+    drain(s, {"done", "error"}, 30)
+    assert lengths and max(lengths[:-1] or [0]) <= 10.05  # sauf le passage définitif de fin
+
+
+def test_microphone_test_reports_level_text_and_speed(monkeypatch):
+    class Mic(FakeMic):
+        device = None
+    mic = Mic([(1.0, "speech")])
+    levels = []
+    r = whisper_engine.test_microphone(0.5, mic=mic, runner_factory=lambda p: (lambda a: "Bonjour test."), on_level=lambda peak, frac: levels.append(peak))
+    assert r["text"] == "Bonjour test." and r["peak"] > 0.1 and r["audio_s"] > 0.3 and r["took"] >= 0 and levels
+
+
+def test_microphone_test_reports_a_broken_microphone():
+    class Broken(FakeMic):
+        def open(self):
+            raise OSError("micro absent")
+    r = whisper_engine.test_microphone(0.3, mic=Broken([]), runner_factory=lambda p: (lambda a: ""))
+    assert "micro absent" in r["error"]
+
+
+def test_chosen_device_is_read_from_settings():
+    from mailia import db
+    db.kv_set("dictation_device", "3")
+    assert whisper_engine.chosen_device() == 3
+    db.kv_set("dictation_device", "")
+    assert whisper_engine.chosen_device() is None
+
+
+async def test_settings_tab_offers_the_microphone_choice_and_test(user: User, monkeypatch) -> None:
+    from mailia import db
+    from mailia.ui_settings import open_settings
+    monkeypatch.setattr(dictation, "engine", lambda: "whisper")
+    monkeypatch.setattr(dictation, "usable", lambda: True)
+    monkeypatch.setattr(whisper_engine, "input_devices", lambda: [(2, "Micro du casque"), (5, "Micro intégré")])
+    monkeypatch.setattr(whisper_engine, "device_name", lambda device=None: "Micro intégré")
+
+    @ui.page("/settings")
+    def page() -> None:
+        open_settings(ui.element("div"), lambda acct: None)
+    await user.open("/settings")
+    await user.should_see("Dictée vocale")
+    user.find("Dictée vocale").click()
+    await user.should_see("Micro et diagnostic")
+    await user.should_see("Tester le micro (5 s)")
+    await user.should_see("Micro utilisé pour la dictée")
+    assert db.kv_get("dictation_device") in (None, "")

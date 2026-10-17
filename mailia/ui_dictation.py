@@ -131,6 +131,8 @@ class DictationMixin:
             kind = ev.get("t")
             if kind == "loading":
                 self._dict_paint(target, True, "Chargement du modèle…")
+            elif kind == "slow":
+                ui.notify("Cet ordinateur transcrit lentement : le texte n'apparaîtra qu'aux pauses. Le modèle « Rapide » (Paramètres › Dictée vocale) ira plus vite.", type="warning", multi_line=True)
             elif kind == "ready":
                 self._dict_paint(target, True, "J'écoute… (clic sur le micro pour arrêter)")
             elif kind == "partial":
