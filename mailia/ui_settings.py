@@ -117,6 +117,23 @@ def _tab_dictation(host) -> None:
             if r.get("engine"):
                 ui.label(f"Moteur : {r['engine']}").classes("rmeta").style("word-break:break-word")
     test_btn = ui.button("Tester le micro (5 s)", icon="mic", on_click=test).props("outline no-caps dense color=primary").classes("q-mt-sm").mark("dictation-test")
+    ui.separator().classes("q-my-md")
+    ui.label("Dernière dictée : détails").classes("text-subtitle1").style("font-weight:600")
+    ui.label("Ce que Whisper a renvoyé (brut) et ce que Velora a gardé, passage par passage. Utile pour comprendre une répétition ou une erreur.").classes("rmeta")
+
+    @ui.refreshable
+    def trace() -> None:
+        rows = list(whisper_engine.TRACE)[-14:]
+        if not rows:
+            ui.label("Rien encore : dictez un message, puis revenez ici.").classes("text-body2")
+        for r in rows:
+            cut = lambda t: (t[:170] + "…") if len(t) > 170 else t
+            ui.label(f"{r['kind']} · {r['audio_s']} s · calculé en {r['took']} s · niveau {r['rms']}").classes("rmeta").style("margin-top:6px")
+            ui.label(f"brut : « {cut(r['raw'])} »").classes("text-caption").style("font-family:monospace;word-break:break-word")
+            if r["kept"] != r["raw"]:
+                ui.label(f"gardé : « {cut(r['kept'])} »").classes("text-caption").style("font-family:monospace;word-break:break-word;color:var(--accent)")
+    trace()
+    ui.button("Actualiser", icon="refresh", on_click=trace.refresh).props("flat no-caps dense").mark("dictation-trace-refresh")
     ui.label("Modèles Whisper d'OpenAI, au format whisper.cpp : licence MIT.").classes("rmeta q-mt-md")
 
 

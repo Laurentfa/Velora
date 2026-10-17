@@ -471,3 +471,21 @@ def test_the_fallback_of_whisper_is_not_disabled():
     import inspect
     src = inspect.getsource(whisper_engine.load_runner)
     assert "temperature_inc=0" not in src  # sans ce repli, Whisper peut se répéter sans fin
+
+
+def test_every_transcription_leaves_a_trace_for_the_settings_screen(monkeypatch):
+    monkeypatch.setattr(whisper_engine, "keep_runner", lambda *a, **k: None)
+    whisper_engine.TRACE.clear()
+    s, calls = session([(0.3, "silence"), (2.0, "speech"), (1.2, "silence")], ["Bonjour. " + "Dital, " * 20 + "Merci."])
+    s.start()
+    drain(s, {"final"}, 20)
+    s.stop()
+    drain(s, {"done", "error"}, 20)
+    rows = list(whisper_engine.TRACE)
+    assert rows and any(r["kind"] == "définitif" for r in rows)
+    r = next(r for r in rows if r["kind"] == "définitif")
+    assert "Dital" in r["raw"] and "Dital" not in r["kept"] and r["audio_s"] > 0 and "rms" in r
+
+
+def test_fast_partials_are_off_because_they_favour_repetitions():
+    assert whisper_engine.FAST_PARTIALS is False

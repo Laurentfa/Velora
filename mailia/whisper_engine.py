@@ -7,6 +7,7 @@ Whisper traite des enregistrements, pas un flux : la dictée découpe la parole 
 secondes pour afficher un texte provisoire. Le micro, le moteur et le téléchargement sont remplaçables (tests)."""
 from __future__ import annotations
 
+import collections
 import hashlib
 import importlib.util
 import inspect
@@ -26,6 +27,8 @@ log = logging.getLogger("dictation")
 
 BASE_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
 SAMPLE_RATE = 16000
+FAST_PARTIALS = False  # audio_ctx raccourcit le calcul mais favorise les répétitions de Whisper : le préchauffage suffit à rendre le texte provisoire assez rapide
+TRACE: "collections.deque[dict]" = collections.deque(maxlen=40)  # dernières transcriptions (brut / gardé) : montrées dans les Paramètres pour comprendre un défaut
 
 
 @dataclass(frozen=True)
@@ -213,7 +216,7 @@ def load_runner(path: str, prompt: str | None = None):
 
     def run(audio, fast: bool = False) -> str:
         # fast (texte provisoire) : Whisper traite toujours 30 s d'audio même pour une phrase de 3 s ; audio_ctx limite le calcul à la durée réellement parlée
-        extra = {"audio_ctx": min(1500, int(len(audio) / SAMPLE_RATE * 50) + 100), "single_segment": True, "no_timestamps": True} if fast and len(audio) < SAMPLE_RATE * 25 else {}
+        extra = {"audio_ctx": min(1500, int(len(audio) / SAMPLE_RATE * 50) + 100), "single_segment": True, "no_timestamps": True} if FAST_PARTIALS and fast and len(audio) < SAMPLE_RATE * 25 else {}
         # no_context : ne pas se laisser influencer par le passage précédent ; suppress_nst : pas de « [musique] », « (rires) ». Le repli de Whisper (nouvel essai à température plus haute quand il se répète) reste actif : sans lui, il peut boucler
         segs = model.transcribe(audio, language=language(), print_progress=False, no_context=True, suppress_nst=True,
                                 n_threads=state["n"], **extra, **({"initial_prompt": prompt} if prompt else {}))
@@ -393,8 +396,11 @@ class WhisperSession:
             if partial and len(audio) > SAMPLE_RATE * 10:
                 audio = audio[-SAMPLE_RATE * 10:]  # le texte provisoire ne reprend que les 10 dernières secondes : le coût ne grandit pas avec la phrase
             t0 = time.monotonic()
-            txt = clean_text(run(audio, fast=True) if partial and fast_ok else run(audio))
+            raw = run(audio, fast=True) if partial and fast_ok else run(audio)
+            txt = clean_text(raw)
             took, length = time.monotonic() - t0, len(audio) / SAMPLE_RATE
+            TRACE.append({"kind": "provisoire" if partial else "définitif", "audio_s": round(length, 1), "took": round(took, 1), "raw": raw, "kept": txt,
+                          "rms": round(float((audio.astype("float64") ** 2).mean() ** 0.5), 4)})
             log.info("dictée Whisper : %.1f s d'audio transcrites en %.1f s (%s)", length, took, "provisoire" if partial else "définitif")
             if partial and not slow["off"]:
                 slow["n"] = slow["n"] + 1 if took > length * 0.8 else 0
