@@ -76,7 +76,7 @@ body.resizing iframe{pointer-events:none}
 .brand{display:flex;align-items:center;gap:13px;font-weight:700;font-size:26px;letter-spacing:-.01em;padding:2px 10px 14px}.brand img{border-radius:10px}
 .nav{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border-radius:9px;cursor:pointer;user-select:none}
 .nav:hover{background:var(--surface2)}.nav.on{background:var(--sel);font-weight:600}
-.nav .ic{width:20px;text-align:center;color:var(--muted)}.nav.on .ic{color:var(--accent)}
+.nav .ic{width:21px;text-align:center;color:var(--accent)}
 .nav .lbl{flex:1}.nav .cnt{font-size:12px;color:var(--muted)}
 .nav .cnt.hot{background:var(--accent);color:#fff;border-radius:999px;padding:0 7px;font-weight:600}
 .nav.sub{padding:6px 10px;font-size:14px}

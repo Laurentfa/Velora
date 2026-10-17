@@ -64,6 +64,7 @@ from mailia import ai, aipolicy, apiserver, compose, config, db, folder_order, f
 from mailia.textutil import for_ai
 from mailia.ui_account import friendly_error
 from mailia.ui_assets import CSS, SWIPE_JS
+from mailia import icons
 from mailia.brand import logo_big, logo_img
 from mailia.ui_bulk import BulkMixin
 from mailia.ui_cleanup import CleanupMixin
@@ -277,12 +278,17 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                 if fold is not None:  # petite flèche : replie ou déplie les dossiers de la boîte
                     ui.icon("expand_more" if fold else "chevron_right", size="18px").style("color:var(--muted);margin-right:-6px").on(
                         "click.stop", lambda _, a=acc: self.toggle_fold(a)).tooltip("Replier les dossiers" if fold else "Déplier les dossiers").mark(f"fold-{acc}")
+                if fparent is not None or view == "ghost" or fkey == "INBOX":  # ligne de l'arbre : la flèche (sous-dossiers) puis l'icône ; sans sous-dossiers, une place vide garde les icônes alignées
+                    if ffold is not None:
+                        ui.icon("expand_more" if ffold else "chevron_right", size="18px").style("color:var(--muted);cursor:pointer;width:18px;margin-right:-6px").on(
+                            "click.stop", lambda _, a=acc, k=(fkey or folder): self.toggle_folder_fold(a, k)).tooltip(
+                            "Replier les sous-dossiers" if ffold else "Déplier les sous-dossiers").mark(f"ffold-{acc}-{fkey or folder}")
+                    else:
+                        ui.element("span").style("width:18px;flex:none;margin-right:-6px")
                 if icon == "logo":  # le logo Velora devant chaque boîte
                     ui.html(logo_img(20), sanitize=False).classes("ic").style("display:flex;justify-content:center")
-                elif ffold is not None:  # dossier qui a des sous-dossiers : la flèche les replie ou les déplie (à la place du petit triangle)
-                    ui.icon("expand_more" if ffold else "chevron_right", size="18px").classes("ic").style("color:var(--muted);cursor:pointer").on(
-                        "click.stop", lambda _, a=acc, k=(fkey or folder): self.toggle_folder_fold(a, k)).tooltip(
-                        "Replier les sous-dossiers" if ffold else "Déplier les sous-dossiers").mark(f"ffold-{acc}-{fkey or folder}")
+                elif icons.name_of(icon):  # icône dessinée (style Apple Mail) ; un ancien glyphe est converti
+                    ui.html(icons.svg(icons.name_of(icon)), sanitize=False).classes("ic").style("display:flex;justify-content:center" + (";opacity:.55" if view == "ghost" else ""))
                 else:
                     ui.label(icon).classes("ic")
                 ui.label(label).classes("lbl")
@@ -311,7 +317,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             if use_ai:
                 item("brief", "", "✦", "Brief du jour", "…" if c["pending"] else "")
             ui.label("Boîtes").classes("grp")
-            item("inbox", "", "✉", "Toutes les boîtes", c["unread"], True, total=c["tot_all"])
+            item("inbox", "", "svg:tray2", "Toutes les boîtes", c["unread"], True, total=c["tot_all"])
             folded = self.folded()
             ffolded = self.folders_folded()
             for key, cfg in sync.ACCOUNTS.items():
@@ -333,7 +339,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                         item("inbox", key, "✉", n["name"], c["accounts"].get(key, 0), True, drop="INBOX", depth=n["depth"] + 1, ffold=ffold,
                              total=c["tot_accounts"].get(key, 0), tip=tip, fkey="INBOX", extra=hidden)
                     else:
-                        item("folder", key, "▸", n["name"], c["folders"].get(f"{key}|{n['key']}", 0), folder=n["key"], depth=n["depth"] + 1, drop=n["key"],
+                        item("folder", key, "svg:" + icons.ROLES.get(n["role"], "folder"), n["name"], c["folders"].get(f"{key}|{n['key']}", 0), folder=n["key"], depth=n["depth"] + 1, drop=n["key"],
                              total=c["tot_folders"].get(f"{key}|{n['key']}", 0), fparent=n["parent"], ffold=ffold, tip=tip, extra=hidden)
             ui.label("Vues").classes("grp")
             if use_ai:
@@ -349,14 +355,14 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             if c.get("followups") or self.view == "followups":
                 item("followups", "", "↩", "À relancer", c.get("followups", 0), True)
             with ui.element("div").classes("nav").on("click", lambda: self.open_contacts()):
-                ui.label("👥").classes("ic")
+                ui.html(icons.svg("people"), sanitize=False).classes("ic").style("display:flex;justify-content:center")
                 ui.label("Contacts").classes("lbl")
             if use_ai:
                 with ui.element("div").classes("nav").on("click", lambda: self.ask_dialog()).mark("ask"):
-                    ui.label("✦").classes("ic")
+                    ui.html(icons.svg("sparkle"), sanitize=False).classes("ic").style("display:flex;justify-content:center")
                     ui.label("Demander à ma boîte").classes("lbl")
             with ui.element("div").classes("nav").on("click", lambda: self.cleanup_dialog()):
-                ui.label("⌫").classes("ic")
+                ui.html(icons.svg("broom"), sanitize=False).classes("ic").style("display:flex;justify-content:center")
                 ui.label("Nettoyer ma boîte").classes("lbl")
             if use_ai:
                 item("newsletter", "", "☰", "Newsletters", c["newsletter"], total=c["tot_newsletter"])
