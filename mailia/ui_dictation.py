@@ -95,6 +95,8 @@ class DictationMixin:
         self.dict_state = {"session": session, "target": target, "timer": ui.timer(0.2, self._dictation_pump),
                            "vocab": dictation_vocab.terms() if dictation.engine() == "apple" else []}
         self._dict_paint(target, True, "Démarrage…")
+        if target == "body":
+            self._dictation_live("body", "", "start")  # le repère fixe l'endroit où le texte s'écrira, même après un long silence
 
     async def _dictation_install(self) -> bool:
         if dictation.engine() == "whisper":
@@ -132,10 +134,10 @@ class DictationMixin:
             elif kind == "ready":
                 self._dict_paint(target, True, "J'écoute… (clic sur le micro pour arrêter)")
             elif kind == "partial":
-                self._dictation_live(target, ev.get("text") or "", False)
+                self._dictation_live(target, ev.get("text") or "", "partial")
                 self._dict_paint(target, True, "J'écoute…")
             elif kind == "final":
-                self._dictation_live(target, ev.get("text") or "", True)
+                self._dictation_live(target, ev.get("text") or "", "final")
                 self._dict_paint(target, True, "" if state.get("stopping") else "J'écoute…")
             elif kind == "error":
                 log.warning("dictée : %s %s", ev.get("code"), ev.get("msg"))
@@ -150,13 +152,13 @@ class DictationMixin:
             return
         state["timer"].cancel()
         if state["target"] == "body":
-            self._dictation_live("body", "", True)  # un texte provisoire resté en gris devient du texte normal
+            self._dictation_live("body", "", "end")  # retire le repère ; un texte provisoire resté en gris devient du texte normal
         if kill:
             state["session"].kill()
         self._dict_paint(state["target"], False, "")
 
-    def _dictation_live(self, target: str, text: str, final: bool) -> None:
-        """Texte reconnu : provisoire (gris, remplacé à chaque mise à jour) tant qu'il n'est pas `final`, puis écrit pour de bon."""
+    def _dictation_live(self, target: str, text: str, mode: str) -> None:
+        """Texte reconnu : « partial » (provisoire, gris, remplacé à chaque mise à jour) ou « final » (écrit pour de bon) ; « start » et « end » posent et retirent le repère du message."""
         text = dictation_text.clean(text)
         if (self.dict_state or {}).get("vocab"):  # reconnaissance d'Apple : correction des noms propres après coup
             text = dictation_vocab.correct(text, self.dict_state["vocab"])
@@ -164,7 +166,7 @@ class DictationMixin:
             state = self.dict_state or {}
             base = state.setdefault("base", self.draft.get("ins", ""))
             self.draft["ins"] = (base + " " + text).strip()
-            if final:
+            if mode == "final":
                 state["base"] = self.draft["ins"]
         else:
-            ui.run_javascript(f"mailiaLive({json.dumps(self.editor.html_id)}, {json.dumps(text)}, {'true' if final else 'false'})")
+            ui.run_javascript(f"mailiaLive({json.dumps(self.editor.html_id)}, {json.dumps(text)}, {json.dumps(mode)})")

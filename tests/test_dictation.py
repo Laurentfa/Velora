@@ -106,11 +106,12 @@ async def test_dictating_the_body_updates_the_live_text_in_the_editor(user: User
     fake.events.put({"t": "final", "text": "Bonjour."})
     await asyncio.sleep(0.6)
     live = [c for c in calls if "mailiaLive" in c]
-    assert live[0].endswith('"bon", false)') and live[1].endswith('"bonjour", false)') and live[2].endswith('"Bonjour.", true)')
+    assert live[0].endswith('"", "start")')  # le repère est posé dès le début
+    assert live[1].endswith('"bon", "partial")') and live[2].endswith('"bonjour", "partial")') and live[3].endswith('"Bonjour.", "final")')
     click(user, "dictate-body")
     await asyncio.sleep(0.6)
     assert b.dict_state is None
-    assert [c for c in calls if "mailiaLive" in c][-1].endswith('"", true)')  # à la fin, plus aucun texte provisoire
+    assert [c for c in calls if "mailiaLive" in c][-1].endswith('"", "end")')  # à la fin, le repère est retiré
 
 
 async def test_a_second_click_stops_and_ends_cleanly(user: User, box, fake) -> None:
