@@ -421,7 +421,7 @@ def test_microphone_test_reports_engine_and_threads_and_skips_tuning_when_fast()
         device = None
 
     def factory(path):
-        def run(audio):
+        def run(audio, fast=False):
             return "Bonjour."
         run.state = {"n": 7}
         run.system_info = lambda: "AVX2 = 1"

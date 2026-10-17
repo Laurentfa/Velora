@@ -161,6 +161,21 @@ def chosen_threads() -> int | None:
     return int(v) if v and v.isdigit() and int(v) > 0 else None
 
 
+def warm_up(run) -> float:
+    """Le premier calcul de Whisper est bien plus lent que les suivants (le modèle se charge réellement en mémoire) : on le fait avant la dictée, sur 1 s de silence.
+    Les runners factices des tests n'ont pas d'« état » et sont laissés tels quels."""
+    if not hasattr(run, "state"):
+        return 0.0
+    import numpy as np
+    t0 = time.monotonic()
+    quiet = np.zeros(SAMPLE_RATE, dtype="float32")
+    run(quiet)
+    run(quiet, fast=True)
+    took = time.monotonic() - t0
+    log.info("dictée Whisper : préchauffage en %.1f s", took)
+    return took
+
+
 def autotune(run, audio, timer=time.monotonic) -> tuple[int, dict[int, float]]:
     """Essaie plusieurs nombres de fils de calcul sur le même enregistrement et garde le plus rapide (sur les processeurs à coeurs mixtes, utiliser tous les
     coeurs ralentit souvent). Retourne (le meilleur, {fils: secondes}) et le mémorise."""
@@ -325,6 +340,7 @@ class WhisperSession:
         from . import dictation_vocab
         self.prompt = dictation_vocab.whisper_prompt()  # vos noms propres : Whisper les reconnaît bien mieux avec cette amorce
         run = self.runner_factory(path)
+        warm_up(run)
         self.mic.open()
         self.events.put({"t": "ready"})
         block_s = 0.1
@@ -407,6 +423,7 @@ def test_microphone(seconds: float = 5.0, mic=None, runner_factory=None, on_leve
     blocks = []
     try:
         run = factory(str(model_path(chosen())))
+        warm_up(run)
         mic.open()
         end = time.monotonic() + seconds
         while time.monotonic() < end:
