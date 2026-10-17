@@ -397,6 +397,42 @@ SWIPE_JS = """<script>
     inp.addEventListener('change', async () => { for (const f of inp.files) await window.mailiaAddImage(f, root.id); });
     inp.click();
   };
+  // dictée : le texte provisoire s'affiche en gris à l'endroit du curseur et se met à jour pendant qu'on parle ; fin = true : il devient du texte normal.
+  // Même emplacement que mailiaInsert (au-dessus de la signature et du message cité), mais le DOM est modifié directement : insertHTML supprimerait la marque.
+  window.mailiaLive = (htmlId, text, fin) => {
+    const root = document.getElementById(htmlId);
+    const c = root && root.querySelector('.q-editor__content');
+    if (!c) return;
+    let sp = c.querySelector('span.dictlive');
+    if (!sp) {
+      if (!text) return;
+      const mark = c.querySelector('.msig, hr');
+      const before = (a, b) => a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+      const inTail = r => mark && (mark === r.startContainer || mark.contains(r.startContainer) || before(mark, r.startContainer));
+      let r;
+      if (edRange && c.contains(edRange.startContainer) && !inTail(edRange)) r = edRange.cloneRange();
+      else {
+        r = document.createRange();
+        if (mark) {
+          const prev = mark.previousElementSibling;
+          if (prev && !prev.textContent.trim() && !prev.querySelector('img,table')) { r.selectNodeContents(prev); r.collapse(true); }
+          else { r.setStartBefore(mark); r.collapse(true); }
+        } else { r.selectNodeContents(c); r.collapse(false); }
+      }
+      r.deleteContents();
+      sp = document.createElement('span'); sp.className = 'dictlive'; sp.style.color = '#6b7280';
+      const pre = r.startContainer.nodeType === 3 ? r.startContainer.textContent.slice(0, r.startOffset) : (r.startContainer.childNodes[r.startOffset - 1] || {}).textContent || '';
+      sp.dataset.lead = pre && !pre.endsWith(' ') && !pre.endsWith(String.fromCharCode(160)) ? ' ' : '';
+      r.insertNode(sp);
+    }
+    const lead = sp.dataset.lead || '';
+    if (!fin) { sp.textContent = lead + text; return; }
+    const t = document.createTextNode(text ? lead + text + ' ' : '');
+    sp.replaceWith(t);
+    const r2 = document.createRange(); r2.setStartAfter(t); r2.collapse(true);
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r2); edRange = r2.cloneRange();
+    c.dispatchEvent(new Event('input', {bubbles: true}));
+  };
   window.mailiaInsert = (htmlId, html) => {
     const root = document.getElementById(htmlId);
     const c = root && root.querySelector('.q-editor__content');

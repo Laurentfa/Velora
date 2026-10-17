@@ -74,17 +74,43 @@ async def test_no_microphone_button_when_dictation_is_not_possible(user: User, b
     await user.should_not_see(marker="dictate-ins")
 
 
-async def test_dictating_the_instruction_writes_each_finished_sentence(user: User, box, fake) -> None:
+async def test_dictating_the_instruction_shows_the_live_text_then_keeps_each_sentence(user: User, box, fake) -> None:
     b = await open_composer(user, box)
     assert user.find(marker="dictate-ins").elements and user.find(marker="dictate-body").elements
     click(user, "dictate-ins")
     await asyncio.sleep(0.5)
     assert b.dict_state and b.dict_state["target"] == "ins"
     fake.events.put({"t": "partial", "text": "relancer Mme"})
+    await asyncio.sleep(0.5)
+    assert b.draft["ins"] == "relancer Mme"  # provisoire : visible tout de suite
+    fake.events.put({"t": "partial", "text": "Relancer Mme Martin"})
     fake.events.put({"t": "final", "text": "Relancer Mme Martin pour le devis."})
+    fake.events.put({"t": "partial", "text": "Ton"})
+    await asyncio.sleep(0.6)
+    assert b.draft["ins"] == "Relancer Mme Martin pour le devis. Ton"  # la phrase finie est gardée, la suivante est provisoire
     fake.events.put({"t": "final", "text": "Ton aimable."})
     await asyncio.sleep(0.6)
     assert b.draft["ins"] == "Relancer Mme Martin pour le devis. Ton aimable."
+
+
+async def test_dictating_the_body_updates_the_live_text_in_the_editor(user: User, box, fake, monkeypatch) -> None:
+    from mailia import ui_dictation
+    calls = []
+    real = ui_dictation.ui.run_javascript
+    monkeypatch.setattr(ui_dictation.ui, "run_javascript", lambda js, **k: (calls.append(js), real(js, **k))[1])
+    b = await open_composer(user, box)
+    click(user, "dictate-body")
+    await asyncio.sleep(0.5)
+    fake.events.put({"t": "partial", "text": "bon"})
+    fake.events.put({"t": "partial", "text": "bonjour"})
+    fake.events.put({"t": "final", "text": "Bonjour."})
+    await asyncio.sleep(0.6)
+    live = [c for c in calls if "mailiaLive" in c]
+    assert live[0].endswith('"bon", false)') and live[1].endswith('"bonjour", false)') and live[2].endswith('"Bonjour.", true)')
+    click(user, "dictate-body")
+    await asyncio.sleep(0.6)
+    assert b.dict_state is None
+    assert [c for c in calls if "mailiaLive" in c][-1].endswith('"", true)')  # à la fin, plus aucun texte provisoire
 
 
 async def test_a_second_click_stops_and_ends_cleanly(user: User, box, fake) -> None:
@@ -114,20 +140,6 @@ async def test_leaving_the_composer_stops_the_microphone(user: User, box, fake) 
     b.compose = False
     await asyncio.sleep(0.6)
     assert fake.killed and b.dict_state is None
-
-
-def test_text_written_in_the_body_is_escaped(monkeypatch):
-    calls = []
-    monkeypatch.setattr(main.ui, "run_javascript", lambda js: calls.append(js))
-    from mailia import ui_dictation
-    monkeypatch.setattr(ui_dictation.ui, "run_javascript", lambda js: calls.append(js))
-
-    class Box(ui_dictation.DictationMixin):
-        class editor:
-            html_id = "ed1"
-        draft = {"ins": ""}
-    Box()._dictation_write("body", "a < b & c")
-    assert calls and "a &lt; b &amp; c" in calls[0] and "ed1" in calls[0]
 
 
 def test_session_reads_events_from_the_helper_and_stops_it(tmp_path):

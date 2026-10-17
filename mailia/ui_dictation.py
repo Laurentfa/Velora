@@ -1,7 +1,6 @@
 """Dictée vocale dans la rédaction : un bouton micro pour le corps du message et un pour la consigne donnée à l'IA.
 
 Le texte s'affiche en provisoire pendant qu'on parle, puis s'écrit à l'endroit du curseur à chaque phrase terminée. Rien ne part sans votre clic sur « Envoyer »."""
-import html
 import json
 import queue
 
@@ -85,9 +84,10 @@ class DictationMixin:
             if kind == "ready":
                 self._dict_paint(target, True, "J'écoute… (clic sur le micro pour arrêter)")
             elif kind == "partial":
-                self._dict_paint(target, True, "… " + (ev.get("text") or ""))
+                self._dictation_live(target, ev.get("text") or "", False)
+                self._dict_paint(target, True, "J'écoute…")
             elif kind == "final":
-                self._dictation_write(target, ev.get("text") or "")
+                self._dictation_live(target, ev.get("text") or "", True)
                 self._dict_paint(target, True, "" if state.get("stopping") else "J'écoute…")
             elif kind == "error":
                 log.warning("dictée : %s %s", ev.get("code"), ev.get("msg"))
@@ -101,15 +101,20 @@ class DictationMixin:
         if not state:
             return
         state["timer"].cancel()
+        if state["target"] == "body":
+            self._dictation_live("body", "", True)  # un texte provisoire resté en gris devient du texte normal
         if kill:
             state["session"].kill()
         self._dict_paint(state["target"], False, "")
 
-    def _dictation_write(self, target: str, text: str) -> None:
+    def _dictation_live(self, target: str, text: str, final: bool) -> None:
+        """Texte reconnu : provisoire (gris, remplacé à chaque mise à jour) tant qu'il n'est pas `final`, puis écrit pour de bon."""
         text = text.strip()
-        if not text:
-            return
         if target == "ins":
-            self.draft["ins"] = (self.draft.get("ins", "") + " " + text).strip()
+            state = self.dict_state or {}
+            base = state.setdefault("base", self.draft.get("ins", ""))
+            self.draft["ins"] = (base + " " + text).strip()
+            if final:
+                state["base"] = self.draft["ins"]
         else:
-            ui.run_javascript(f"mailiaInsert({json.dumps(self.editor.html_id)}, {json.dumps(html.escape(text) + ' ')})")
+            ui.run_javascript(f"mailiaLive({json.dumps(self.editor.html_id)}, {json.dumps(text)}, {'true' if final else 'false'})")
