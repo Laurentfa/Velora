@@ -428,3 +428,21 @@ def test_microphone_test_reports_engine_and_threads_and_skips_tuning_when_fast()
         return run
     r = whisper_engine.test_microphone(0.3, mic=Mic([(1.0, "speech")]), runner_factory=factory)
     assert r["engine"] == "AVX2 = 1" and r["threads"] == 7 and not r.get("tuned")
+
+
+def test_provisional_text_uses_the_fast_mode_and_final_text_the_full_one(monkeypatch):
+    monkeypatch.setattr(whisper_engine, "keep_runner", lambda *a, **k: None)
+    modes = []
+
+    def factory(path):
+        def run(audio, fast=False):
+            modes.append(fast)
+            return "mot"
+        return run
+    s = whisper_engine.WhisperSession("rapide", mic=FakeMic([(0.3, "silence"), (2.5, "speech"), (1.2, "silence")]), runner_factory=factory)
+    s.PARTIAL_EVERY = 0.5
+    s.start()
+    drain(s, {"final"}, 20)
+    s.stop()
+    drain(s, {"done", "error"}, 20)
+    assert True in modes and modes[-1] is False  # le passage définitif n'est jamais en mode rapide

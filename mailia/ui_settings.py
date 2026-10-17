@@ -106,9 +106,12 @@ def _tab_dictation(host) -> None:
             ui.label(f"Micro : {r['device']}").classes("text-body2")
             ui.label(f"Niveau : {quality}").classes("text-body2")
             ui.label(f"Texte entendu : « {r['text'] or '(rien)'} »").classes("text-body2")
-            ratio = r["took"] / max(r["audio_s"], 0.1)
+            live = r.get("fast_took")
+            ratio = (live if live is not None else r["took"]) / max(r["audio_s"], 0.1)
             verdict = " — trop lent pour un texte en direct : prenez le modèle « Rapide »" if ratio > 0.6 else " — un peu lent : le texte provisoire sera décalé" if ratio > 0.35 else " — assez rapide"
-            ui.label(f"Vitesse : {r['took']:.1f} s pour {r['audio_s']:.0f} s de parole" + verdict).classes("text-body2")
+            ui.label(f"Vitesse : {r['took']:.1f} s pour {r['audio_s']:.0f} s de parole{verdict}").classes("text-body2")
+            if live is not None:
+                ui.label(f"Texte provisoire (en direct) : {live:.1f} s pour {r['audio_s']:.0f} s de parole").classes("text-body2")
             if r.get("tuned"):
                 ui.label(f"Réglage automatique : {r['best_threads']} fils de calcul (avant : {r['took_before']:.1f} s)").classes("text-body2")
             if r.get("engine"):

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import inspect
 import os
 import queue
 import logging
@@ -194,10 +195,12 @@ def load_runner(path: str, prompt: str | None = None):
     model = WModel(path, n_threads=default_threads(), print_progress=False, print_realtime=False)
     state = {"n": chosen_threads() or default_threads()}
 
-    def run(audio) -> str:
+    def run(audio, fast: bool = False) -> str:
+        # fast (texte provisoire) : Whisper traite toujours 30 s d'audio même pour une phrase de 3 s ; audio_ctx limite le calcul à la durée réellement parlée
+        extra = {"audio_ctx": min(1500, int(len(audio) / SAMPLE_RATE * 50) + 100), "single_segment": True, "no_timestamps": True} if fast and len(audio) < SAMPLE_RATE * 25 else {}
         # no_context : ne pas se laisser influencer par le passage précédent ; suppress_nst : pas de « [musique] », « (rires) » ; temperature_inc=0 : pas de tirages au hasard en cas de doute
         segs = model.transcribe(audio, language=language(), print_progress=False, no_context=True, suppress_nst=True, temperature_inc=0.0,
-                                n_threads=state["n"], **({"initial_prompt": prompt} if prompt else {}))
+                                n_threads=state["n"], **extra, **({"initial_prompt": prompt} if prompt else {}))
         return " ".join(s.text.strip() for s in segs).strip()
     run.state = state
     run.system_info = lambda: str(model.system_info())
@@ -332,12 +335,14 @@ class WhisperSession:
 
         slow = {"n": 0, "off": False}
 
+        fast_ok = "fast" in inspect.signature(run).parameters
+
         def text_of(chunks, partial: bool = False) -> str:
             audio = np.concatenate(chunks).astype("float32")
             if partial and len(audio) > SAMPLE_RATE * 10:
                 audio = audio[-SAMPLE_RATE * 10:]  # le texte provisoire ne reprend que les 10 dernières secondes : le coût ne grandit pas avec la phrase
             t0 = time.monotonic()
-            txt = clean_text(run(audio))
+            txt = clean_text(run(audio, fast=True) if partial and fast_ok else run(audio))
             took, length = time.monotonic() - t0, len(audio) / SAMPLE_RATE
             log.info("dictée Whisper : %.1f s d'audio transcrites en %.1f s (%s)", length, took, "provisoire" if partial else "définitif")
             if partial and not slow["off"]:
@@ -421,11 +426,20 @@ def test_microphone(seconds: float = 5.0, mic=None, runner_factory=None, on_leve
     t0 = time.monotonic()
     text = clean_text(run(audio))
     took = time.monotonic() - t0
-    out = {"device": device_name(getattr(mic, "device", None)) if isinstance(mic, MicStream) else "", "peak": float(np.abs(audio).max()),
+    fast_took = None
+    if "fast" in inspect.signature(run).parameters:  # vitesse du texte provisoire (ce qui compte pour la dictée en direct)
+        t1 = time.monotonic()
+        run(audio, fast=True)
+        fast_took = time.monotonic() - t1
+    out = {"fast_took": fast_took, "device": device_name(getattr(mic, "device", None)) if isinstance(mic, MicStream) else "", "peak": float(np.abs(audio).max()),
            "rms": float((audio.astype("float64") ** 2).mean() ** 0.5), "text": text, "audio_s": len(audio) / SAMPLE_RATE, "took": took,
            "threads": getattr(run, "state", {}).get("n"), "engine": run.system_info() if hasattr(run, "system_info") else ""}
     if tune and hasattr(run, "state") and took > out["audio_s"] * 0.35:  # lent : on cherche le meilleur réglage du processeur
         before = took
         best, times = autotune(run, audio)
         out.update(tuned=True, best_threads=best, times=times, took_before=before, took=times[best])
+        if fast_took is not None:
+            t2 = time.monotonic()
+            run(audio, fast=True)
+            out["fast_took"] = time.monotonic() - t2
     return out

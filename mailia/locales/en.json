@@ -1237,6 +1237,7 @@
 "Texte brut": "Plain text",
 "Texte du message :": "Message text:",
 "Texte envoyé": "Text sent",
+"Texte provisoire (en direct) : {0} s pour {1} s de parole": "Live text: {0} s for {1} s of speech",
 "Thème": "Theme",
 "Titre": "Title",
 "Ton d'urgence ou de menace («": "Urgent or threatening tone (\"",
