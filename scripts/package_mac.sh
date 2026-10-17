@@ -9,6 +9,7 @@ ditto -c -k --keepParent dist/Velora.app "$OUT/Velora-$V-mac.zip"
 cp -R dist/Velora.app "dist/dmg/"
 ln -s /Applications "dist/dmg/Applications"
 cp INSTALLER.md "dist/dmg/Lisez-moi (première ouverture).txt"
-hdiutil create -volname "Velora" -srcfolder "dist/dmg" -ov -format UDZO "$OUT/Velora-$V-mac.dmg" >/dev/null
+# hdiutil répond parfois « Resource busy » sur les machines de construction : on réessaie
+for try in 1 2 3 4; do hdiutil create -volname "Velora" -srcfolder "dist/dmg" -ov -format UDZO "$OUT/Velora-$V-mac.dmg" >/dev/null && break; [ $try = 4 ] && exit 1; sleep 10; done
 rm -rf "dist/dmg"
 ls -lh "$OUT"
