@@ -151,10 +151,11 @@ def language() -> str:
     return "en" if db.kv_get("ui_lang") == "en" else "fr"
 
 
-def load_runner(path: str):
-    """Retourne une fonction « audio (numpy float32, 16 kHz) -> texte ». Le modèle chargé est gardé en mémoire quelques minutes après la dictée."""
+def load_runner(path: str, prompt: str | None = None):
+    """Retourne une fonction « audio (numpy float32, 16 kHz) -> texte ». `prompt` : amorce de texte (noms propres) qui oriente la reconnaissance.
+    Le modèle chargé est gardé en mémoire quelques minutes après la dictée."""
     with _cache_lock:
-        hit = _runner_cache.get(path)
+        hit = _runner_cache.get((path, prompt))
         if hit:
             hit[1].cancel()
     if hit:
@@ -163,23 +164,23 @@ def load_runner(path: str):
     model = WModel(path, n_threads=min(4, os.cpu_count() or 2), print_progress=False, print_realtime=False)
 
     def run(audio) -> str:
-        segs = model.transcribe(audio, language=language(), print_progress=False)
+        segs = model.transcribe(audio, language=language(), print_progress=False, **({"initial_prompt": prompt} if prompt else {}))
         return " ".join(s.text.strip() for s in segs).strip()
     return run
 
 
-def keep_runner(path: str, run, minutes: float = 3) -> None:
+def keep_runner(key, run, minutes: float = 3) -> None:
     def drop():
         with _cache_lock:
-            _runner_cache.pop(path, None)
+            _runner_cache.pop(key, None)
     with _cache_lock:
-        old = _runner_cache.get(path)
+        old = _runner_cache.get(key)
         if old:
             old[1].cancel()
         t = threading.Timer(minutes * 60, drop)
         t.daemon = True
         t.start()
-        _runner_cache[path] = (run, t)
+        _runner_cache[key] = (run, t)
 
 
 def clean_text(text: str) -> str:
@@ -227,7 +228,8 @@ class WhisperSession:
     def __init__(self, model_key: str | None = None, mic=None, runner_factory=None) -> None:
         self.model_key = model_key or chosen()
         self.mic = mic or MicStream()
-        self.runner_factory = runner_factory or load_runner
+        self.prompt = None
+        self.runner_factory = runner_factory or (lambda path: load_runner(path, self.prompt))
         self.events: queue.Queue[dict] = queue.Queue()
         self.finished = False
         self._stop = threading.Event()
@@ -258,6 +260,8 @@ class WhisperSession:
         import numpy as np
         self.events.put({"t": "loading"})
         path = str(model_path(self.model_key))
+        from . import dictation_vocab
+        self.prompt = dictation_vocab.whisper_prompt()  # vos noms propres : Whisper les reconnaît bien mieux avec cette amorce
         run = self.runner_factory(path)
         self.mic.open()
         self.events.put({"t": "ready"})
@@ -312,5 +316,5 @@ class WhisperSession:
             buf.append(b)
             speech_s += block_s if float((b.astype("float64") ** 2).mean() ** 0.5) > max(0.005, floor * 3) else 0
         finish_segment()
-        keep_runner(path, run)
+        keep_runner((path, self.prompt), run)
         self.events.put({"t": "done"})

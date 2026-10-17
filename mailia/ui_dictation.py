@@ -7,7 +7,7 @@ import threading
 
 from nicegui import run, ui
 
-from mailia import dictation, whisper_engine
+from mailia import dictation, dictation_text, dictation_vocab, whisper_engine
 from mailia.ui_common import log
 
 
@@ -92,7 +92,8 @@ class DictationMixin:
             return
         session = dictation.new_session()
         session.start()
-        self.dict_state = {"session": session, "target": target, "timer": ui.timer(0.2, self._dictation_pump)}
+        self.dict_state = {"session": session, "target": target, "timer": ui.timer(0.2, self._dictation_pump),
+                           "vocab": dictation_vocab.terms() if dictation.engine() == "apple" else []}
         self._dict_paint(target, True, "Démarrage…")
 
     async def _dictation_install(self) -> bool:
@@ -156,7 +157,9 @@ class DictationMixin:
 
     def _dictation_live(self, target: str, text: str, final: bool) -> None:
         """Texte reconnu : provisoire (gris, remplacé à chaque mise à jour) tant qu'il n'est pas `final`, puis écrit pour de bon."""
-        text = text.strip()
+        text = dictation_text.clean(text)
+        if (self.dict_state or {}).get("vocab"):  # reconnaissance d'Apple : correction des noms propres après coup
+            text = dictation_vocab.correct(text, self.dict_state["vocab"])
         if target == "ins":
             state = self.dict_state or {}
             base = state.setdefault("base", self.draft.get("ins", ""))
