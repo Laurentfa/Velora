@@ -514,3 +514,93 @@ async def test_settings_show_the_reactivity_slider_only_with_parakeet(user: User
         sl.set_value(4)
     await asyncio.sleep(0.3)
     assert db.kv_get("dictation_reactivity") == "4"
+
+
+def test_two_simultaneous_loads_build_the_model_only_once(monkeypatch):
+    built = []
+
+    def slow_build(path):
+        built.append(path)
+        threading.Event().wait(0.3)
+        def run(audio, fast=False):
+            return ""
+        return run
+    monkeypatch.setattr(parakeet_engine, "_build_runner", slow_build)
+    monkeypatch.setattr(parakeet_engine, "_runner_cache", {})
+    got = []
+    ts = [threading.Thread(target=lambda: got.append(parakeet_engine.load_runner("/x/model"))) for _ in range(3)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert len(built) == 1 and len({id(r) for r in got}) == 1  # préchargement et clic sur le micro ne chargent pas le modèle deux fois
+
+
+def test_a_loaded_model_stays_in_memory_for_ten_minutes(monkeypatch):
+    assert whisper_engine.KEEP_MINUTES == 10
+    import inspect
+    assert inspect.signature(parakeet_engine.keep_runner).parameters["minutes"].default == 10
+    assert inspect.signature(whisper_engine.keep_runner).parameters["minutes"].default == 10
+
+
+def test_preload_loads_and_warms_once_and_does_nothing_without_a_model(server, monkeypatch):
+    monkeypatch.setattr(parakeet_engine, "libs_ok", lambda: True)
+    assert parakeet_engine.preload() is False  # modèle pas installé : rien à charger
+    parakeet_engine.download()
+    loads, warms = [], []
+
+    def fake_build(path):
+        loads.append(path)
+        def run(audio, fast=False):
+            return ""
+        run.needs_warmup = True
+        return run
+    monkeypatch.setattr(parakeet_engine, "_build_runner", fake_build)
+    monkeypatch.setattr(parakeet_engine, "_runner_cache", {})
+    monkeypatch.setattr(whisper_engine, "warm_up", lambda run: warms.append(1) or 0.0)
+    assert parakeet_engine.preload() is True and parakeet_engine.preload() is True
+    assert len(loads) == 1 and len(warms) == 1  # la deuxième fois, le modèle est déjà là
+    run = parakeet_engine.load_runner(str(parakeet_engine.model_dir()))
+    assert len(loads) == 1 and run  # et la dictée qui suit le réutilise
+
+
+def test_the_parakeet_warm_up_is_not_digital_silence():
+    import numpy as np
+    src = open(parakeet_engine.__file__, encoding="utf-8").read()
+    assert "warmup_audio" in src
+    a = (np.random.default_rng(0).standard_normal(16000) * 0.01).astype("float32")
+    assert float(np.abs(parakeet_engine.normalize(a)).max()) > 0.003 and float(np.abs(a).max()) >= 0.003  # il passe le filtre du silence et atteint le modèle
+
+
+def test_dictation_preload_uses_the_chosen_engine_and_never_raises(monkeypatch):
+    calls = []
+
+    class Mod:
+        @staticmethod
+        def preload():
+            calls.append(1)
+            return True
+    monkeypatch.setattr(dictation, "engine_module", lambda name=None: Mod)
+    assert dictation.preload() is True and calls == [1]
+
+    class Broken:
+        @staticmethod
+        def preload():
+            raise RuntimeError("disque illisible")
+    monkeypatch.setattr(dictation, "engine_module", lambda name=None: Broken)
+    assert dictation.preload() is False
+    monkeypatch.setattr(dictation, "engine_module", lambda name=None: None)  # Apple : rien à charger
+    assert dictation.preload() is False
+
+
+async def test_opening_the_composer_preloads_the_model_once(user: User, box, monkeypatch) -> None:
+    from mailia import ui_dictation
+    calls = []
+    monkeypatch.setattr(dictation, "usable", lambda: True)
+    monkeypatch.setattr(dictation, "preload", lambda: calls.append(1) or True)
+    ui_dictation._last_preload[0] = 0.0
+    await user.open("/")
+    b = box[-1]
+    b.new_message()
+    await asyncio.sleep(0.6)
+    b.new_message()
+    await asyncio.sleep(0.6)
+    assert len(calls) == 1  # pas à chaque réaffichage de la rédaction

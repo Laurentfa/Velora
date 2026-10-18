@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -140,12 +141,19 @@ def ensure_config(path: str) -> None:
 def load_runner(path: str):
     """Retourne « audio (numpy float32, 16 kHz) -> texte ». Le modèle chargé est gardé en mémoire quelques minutes après la dictée."""
     key = f"{path}|{threads()}"  # un autre réglage de réactivité = un autre nombre de fils = un autre chargement
-    with _cache_lock:
-        hit = _runner_cache.get(key)
+    with whisper_engine._load_lock:  # un seul chargement de modèle à la fois (préchargement et clic sur le micro)
+        with _cache_lock:
+            hit = _runner_cache.get(key)
+            if hit:
+                hit[1].cancel()
         if hit:
-            hit[1].cancel()
-    if hit:
-        return hit[0]
+            return hit[0]
+        run = _build_runner(path)
+        keep_runner(path, run)
+        return run
+
+
+def _build_runner(path: str):
     import numpy as np
     import onnx_asr
     import onnxruntime as ort
@@ -173,11 +181,13 @@ def load_runner(path: str):
         parts = [str(model.recognize(a[i:i + step])).strip() for i in range(0, len(a), step)]
         return " ".join(p for p in parts if p)
     run.needs_warmup = True
+    # le préchauffage utilise un très léger bruit : un silence numérique est écarté avant d'atteindre le modèle, qui ne serait donc pas préchauffé
+    run.warmup_audio = (np.random.default_rng(0).standard_normal(whisper_engine.SAMPLE_RATE) * 0.01).astype("float32")
     run.system_info = lambda: f"Parakeet TDT 0.6B v3 (int8) · ONNX Runtime {ort.__version__} · {threads()} fils de calcul"
     return run
 
 
-def keep_runner(path: str, run, minutes: float = 3) -> None:
+def keep_runner(path: str, run, minutes: float = whisper_engine.KEEP_MINUTES) -> None:
     key = f"{path}|{threads()}"
 
     def drop():
@@ -191,6 +201,21 @@ def keep_runner(path: str, run, minutes: float = 3) -> None:
         t.daemon = True
         t.start()
         _runner_cache[key] = (run, t)
+
+
+def preload() -> bool:
+    """Charge et préchauffe Parakeet en tâche de fond (à l'ouverture de la rédaction). Sans effet s'il est déjà chargé."""
+    if not (libs_ok() and is_installed()):
+        return False
+    path = str(model_dir())
+    with _cache_lock:
+        if f"{path}|{threads()}" in _runner_cache:
+            return True
+    t0 = time.monotonic()
+    ensure_config(path)
+    whisper_engine.warm_up(load_runner(path))
+    whisper_engine.log.info("dictée Parakeet : modèle préchargé en %.1f s", time.monotonic() - t0)
+    return True
 
 
 class ParakeetSession(WhisperSession):

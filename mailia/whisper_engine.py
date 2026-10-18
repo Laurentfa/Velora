@@ -165,6 +165,8 @@ _PHANTOMS = ("sous-titrage", "sous-titres réalisés", "amara.org", "merci d'avo
              "abonnez-vous", "n'hésitez pas à vous abonner")
 _runner_cache: dict[str, tuple] = {}
 _cache_lock = threading.Lock()
+_load_lock = threading.Lock()  # un seul chargement de modèle à la fois : un préchargement et un clic sur le micro ne le chargent pas deux fois
+KEEP_MINUTES = 10  # un modèle chargé reste en mémoire ce temps après son dernier usage (le recharger prend plusieurs secondes)
 
 
 def default_threads() -> int:
@@ -183,12 +185,29 @@ def warm_up(run) -> float:
         return 0.0
     import numpy as np
     t0 = time.monotonic()
-    quiet = np.zeros(SAMPLE_RATE, dtype="float32")
+    quiet = getattr(run, "warmup_audio", None)
+    if quiet is None:
+        quiet = np.zeros(SAMPLE_RATE, dtype="float32")
     run(quiet)
     run(quiet, fast=True)
     took = time.monotonic() - t0
     log.info("dictée Whisper : préchauffage en %.1f s", took)
     return took
+
+
+def preload() -> bool:
+    """Charge et préchauffe le modèle Whisper en tâche de fond (à l'ouverture de la rédaction) pour que le clic sur le micro soit immédiat. Sans effet s'il est déjà chargé."""
+    if not (libs_ok() and is_installed()):
+        return False
+    from . import dictation_vocab
+    path, prompt = str(model_path(chosen())), dictation_vocab.whisper_prompt()
+    with _cache_lock:
+        if (path, prompt) in _runner_cache:
+            return True
+    t0 = time.monotonic()
+    warm_up(load_runner(path, prompt))
+    log.info("dictée Whisper : modèle préchargé en %.1f s", time.monotonic() - t0)
+    return True
 
 
 def autotune(run, audio, timer=time.monotonic) -> tuple[int, dict[int, float]]:
@@ -215,12 +234,19 @@ def language() -> str:
 def load_runner(path: str, prompt: str | None = None):
     """Retourne une fonction « audio (numpy float32, 16 kHz) -> texte ». `prompt` : amorce de texte (noms propres) qui oriente la reconnaissance.
     Le modèle chargé est gardé en mémoire quelques minutes après la dictée."""
-    with _cache_lock:
-        hit = _runner_cache.get((path, prompt))
+    with _load_lock:
+        with _cache_lock:
+            hit = _runner_cache.get((path, prompt))
+            if hit:
+                hit[1].cancel()
         if hit:
-            hit[1].cancel()
-    if hit:
-        return hit[0]
+            return hit[0]
+        run = _build_runner(path, prompt)
+        keep_runner((path, prompt), run)  # mis en cache tout de suite : le préchargement sert la dictée qui suit
+        return run
+
+
+def _build_runner(path: str, prompt: str | None):
     from pywhispercpp.model import Model as WModel
     model = WModel(path, n_threads=default_threads(), print_progress=False, print_realtime=False)
     state = {"n": chosen_threads() or default_threads()}
@@ -237,7 +263,7 @@ def load_runner(path: str, prompt: str | None = None):
     return run
 
 
-def keep_runner(key, run, minutes: float = 3) -> None:
+def keep_runner(key, run, minutes: float = KEEP_MINUTES) -> None:
     def drop():
         with _cache_lock:
             _runner_cache.pop(key, None)

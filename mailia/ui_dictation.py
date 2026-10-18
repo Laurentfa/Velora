@@ -4,8 +4,9 @@ Le texte s'affiche en provisoire pendant qu'on parle, puis s'écrit à l'endroit
 import json
 import queue
 import threading
+import time
 
-from nicegui import run, ui
+from nicegui import background_tasks, run, ui
 
 from mailia import db, dictation, dictation_text, dictation_vocab, whisper_engine
 from mailia.ui_common import log
@@ -55,6 +56,17 @@ async def whisper_download_dialog(host, key: str, engine=None) -> bool:
     return ok
 
 
+_last_preload = [0.0]
+
+
+def preload_soon() -> None:
+    """À l'ouverture de la rédaction : charge le modèle de dictée en arrière-plan (au plus une fois toutes les 2 minutes ; sans effet s'il est déjà chargé)."""
+    if time.monotonic() - _last_preload[0] < 120:
+        return
+    _last_preload[0] = time.monotonic()
+    background_tasks.create(run.io_bound(dictation.preload))
+
+
 class DictationMixin:
     dict_state: dict | None = None
 
@@ -62,6 +74,7 @@ class DictationMixin:
         """Le bouton micro (« body » : le message, « ins » : la consigne de l'IA) et sa ligne d'état. Absent quand la dictée n'est pas possible sur cette machine."""
         if not dictation.usable():
             return
+        preload_soon()
         btn = ui.button(icon="mic", on_click=lambda t=target: self.toggle_dictation(t)).props("flat dense round size=sm color=primary").tooltip(
             "Dicter : un clic pour parler, un clic pour arrêter").mark(f"dictate-{target}")
         status = ui.label("").classes("rmeta").style("max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-style:italic").mark(f"dictate-status-{target}")

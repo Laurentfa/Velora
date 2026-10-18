@@ -164,3 +164,16 @@ def message(code: str, msg: str = "") -> str:
     if code in ("failed", "crash", "mic") and msg:  # le détail (type d'erreur, endroit du code) aide à comprendre un problème
         return f"{ERRORS.get(code, '')} {msg}".strip() if code != "mic" else msg
     return ERRORS.get(code) or msg or "La dictée a rencontré un problème."
+
+
+def preload() -> bool:
+    """Prépare le moteur en tâche de fond : charge le modèle de Whisper ou de Parakeet pour que le premier clic sur le micro ne fasse pas attendre. Apple n'en a pas besoin."""
+    mod = engine_module()
+    if mod is None or not hasattr(mod, "preload"):
+        return False
+    try:
+        return bool(mod.preload())
+    except Exception:  # noqa: BLE001 — le préchargement est un confort : une erreur se verra au vrai clic, avec son message
+        import logging
+        logging.getLogger("dictation").warning("préchargement impossible", exc_info=True)
+        return False
