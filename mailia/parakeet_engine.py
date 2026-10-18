@@ -148,7 +148,9 @@ def load_runner(path: str):
                 hit[1].cancel()
         if hit:
             return hit[0]
+        t0 = time.monotonic()
         run = _build_runner(path)
+        whisper_engine.log.info("dictée Parakeet : modèle chargé en %.1f s (%d fils)", time.monotonic() - t0, threads())
         keep_runner(path, run)
         return run
 
@@ -180,9 +182,7 @@ def _build_runner(path: str):
         step = MAX_CHUNK * whisper_engine.SAMPLE_RATE
         parts = [str(model.recognize(a[i:i + step])).strip() for i in range(0, len(a), step)]
         return " ".join(p for p in parts if p)
-    run.needs_warmup = True
-    # le préchauffage utilise un très léger bruit : un silence numérique est écarté avant d'atteindre le modèle, qui ne serait donc pas préchauffé
-    run.warmup_audio = (np.random.default_rng(0).standard_normal(whisper_engine.SAMPLE_RATE) * 0.01).astype("float32")
+    # pas de préchauffage : le premier calcul de Parakeet n'est pas plus lent que les suivants (mesuré : 0,05 s), et un calcul de plus au chargement a bloqué un PC
     run.system_info = lambda: f"Parakeet TDT 0.6B v3 (int8) · ONNX Runtime {ort.__version__} · {threads()} fils de calcul"
     return run
 
@@ -213,8 +213,10 @@ def preload() -> bool:
             return True
     t0 = time.monotonic()
     ensure_config(path)
-    whisper_engine.warm_up(load_runner(path))
-    whisper_engine.log.info("dictée Parakeet : modèle préchargé en %.1f s", time.monotonic() - t0)
+    load_runner(path)
+    took = time.monotonic() - t0
+    whisper_engine.log.info("dictée Parakeet : modèle préchargé en %.1f s", took)
+    whisper_engine.TRACE.append({"kind": "chargement", "audio_s": 0, "took": round(took, 1), "raw": "modèle Parakeet chargé en arrière-plan", "kept": "modèle Parakeet chargé en arrière-plan", "rms": 0})
     return True
 
 

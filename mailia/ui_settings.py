@@ -87,6 +87,9 @@ def _tab_dictation(host) -> None:
                     engine_section.refresh()
                 ui.button("Télécharger", icon="download", on_click=fetch).props("unelevated no-caps dense color=primary").mark("dictation-download")
     engine_section()
+    ui.switch("Charger le modèle à l'ouverture de la rédaction (dictée immédiate, mais le modèle occupe environ 1 Go de mémoire pendant 10 minutes)",
+              value=(db.kv_get("dictation_preload") or "1") == "1",
+              on_change=lambda e: db.kv_set("dictation_preload", "1" if e.value else "0")).classes("q-mt-md").mark("dictation-preload")
     ui.separator().classes("q-my-md")
     ui.label("Micro et diagnostic").classes("text-subtitle1").style("font-weight:600")
     try:

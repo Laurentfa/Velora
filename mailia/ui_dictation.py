@@ -56,6 +56,7 @@ async def whisper_download_dialog(host, key: str, engine=None) -> bool:
     return ok
 
 
+LOAD_TIMEOUT = 60  # secondes d'attente du chargement du modèle avant d'abandonner
 _last_preload = [0.0]
 
 
@@ -95,7 +96,10 @@ class DictationMixin:
     async def toggle_dictation(self, target: str) -> None:
         state = self.dict_state
         if state:
-            if state["target"] == target and not state.get("stopping"):
+            if state["target"] == target and not state.get("ready"):  # modèle encore en chargement : un clic annule tout de suite (le chargement se termine en arrière-plan)
+                self._dictation_end(kill=True)
+                ui.notify("Dictée annulée.")
+            elif state["target"] == target and not state.get("stopping"):
                 state["stopping"] = True
                 state["session"].stop()
                 self._dict_paint(target, True, "Fin de la dictée…")
@@ -107,7 +111,7 @@ class DictationMixin:
             return
         session = dictation.new_session()
         session.start()
-        self.dict_state = {"session": session, "target": target, "timer": ui.timer(0.1, self._dictation_pump),
+        self.dict_state = {"session": session, "target": target, "timer": ui.timer(0.1, self._dictation_pump), "t0": time.monotonic(),
                            "vocab": dictation_vocab.terms() if dictation.engine() in ("apple", "parakeet") else []}
         self._dict_paint(target, True, "Démarrage…")
         if target == "body":
@@ -139,6 +143,17 @@ class DictationMixin:
         target, session = state["target"], state["session"]
         if not (self.new or self.compose):  # on a quitté la rédaction
             return self._dictation_end(kill=True)
+        if not state.get("ready"):  # attente du chargement : le temps écoulé s'affiche, et au-delà d'une minute on abandonne plutôt que de bloquer
+            waited = time.monotonic() - state["t0"]
+            if waited > LOAD_TIMEOUT:
+                log.warning("dictée : chargement abandonné après %.0f s", waited)
+                ui.notify("Le chargement du modèle dépasse une minute : dictée abandonnée. Essayez l'autre moteur (Paramètres › Dictée vocale).", type="negative", multi_line=True)
+                if dictation.engine() == "parakeet" and whisper_engine.libs_ok() and whisper_engine.is_installed():
+                    db.kv_set("dictation_engine", "whisper")
+                    ui.notify("Retour à Whisper pour la prochaine dictée.", type="warning")
+                return self._dictation_end(kill=True)
+            if state.get("loading") and waited >= 2:
+                self._dict_paint(target, True, f"Chargement du modèle… {int(waited)} s")
         while True:
             try:
                 ev = session.events.get_nowait()
@@ -147,9 +162,11 @@ class DictationMixin:
             kind = ev.get("t")
             if kind == "loading":
                 self._dict_paint(target, True, "Chargement du modèle…")
+                state["loading"] = True
             elif kind == "slow":
                 ui.notify("Cet ordinateur transcrit lentement : le texte n'apparaîtra qu'aux pauses. Le modèle « Rapide » (Paramètres › Dictée vocale) ira plus vite.", type="warning", multi_line=True)
             elif kind == "ready":
+                state["ready"] = True
                 self._dict_paint(target, True, "J'écoute… (clic sur le micro pour arrêter)")
             elif kind == "partial":
                 self._dictation_live(target, ev.get("text") or "", "partial")

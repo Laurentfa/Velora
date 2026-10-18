@@ -168,6 +168,9 @@ def message(code: str, msg: str = "") -> str:
 
 def preload() -> bool:
     """Prépare le moteur en tâche de fond : charge le modèle de Whisper ou de Parakeet pour que le premier clic sur le micro ne fasse pas attendre. Apple n'en a pas besoin."""
+    from . import db
+    if (db.kv_get("dictation_preload") or "1") != "1":  # réglable dans les Paramètres : le modèle occupe 1 Go de mémoire tant qu'il est chargé
+        return False
     mod = engine_module()
     if mod is None or not hasattr(mod, "preload"):
         return False

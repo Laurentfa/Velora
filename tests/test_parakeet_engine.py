@@ -541,7 +541,7 @@ def test_a_loaded_model_stays_in_memory_for_ten_minutes(monkeypatch):
     assert inspect.signature(whisper_engine.keep_runner).parameters["minutes"].default == 10
 
 
-def test_preload_loads_and_warms_once_and_does_nothing_without_a_model(server, monkeypatch):
+def test_preload_loads_once_and_does_nothing_without_a_model(server, monkeypatch):
     monkeypatch.setattr(parakeet_engine, "libs_ok", lambda: True)
     assert parakeet_engine.preload() is False  # modèle pas installé : rien à charger
     parakeet_engine.download()
@@ -557,17 +557,9 @@ def test_preload_loads_and_warms_once_and_does_nothing_without_a_model(server, m
     monkeypatch.setattr(parakeet_engine, "_runner_cache", {})
     monkeypatch.setattr(whisper_engine, "warm_up", lambda run: warms.append(1) or 0.0)
     assert parakeet_engine.preload() is True and parakeet_engine.preload() is True
-    assert len(loads) == 1 and len(warms) == 1  # la deuxième fois, le modèle est déjà là
+    assert len(loads) == 1 and not warms  # la deuxième fois, le modèle est déjà là ; Parakeet n'a pas de préchauffage
     run = parakeet_engine.load_runner(str(parakeet_engine.model_dir()))
     assert len(loads) == 1 and run  # et la dictée qui suit le réutilise
-
-
-def test_the_parakeet_warm_up_is_not_digital_silence():
-    import numpy as np
-    src = open(parakeet_engine.__file__, encoding="utf-8").read()
-    assert "warmup_audio" in src
-    a = (np.random.default_rng(0).standard_normal(16000) * 0.01).astype("float32")
-    assert float(np.abs(parakeet_engine.normalize(a)).max()) > 0.003 and float(np.abs(a).max()) >= 0.003  # il passe le filtre du silence et atteint le modèle
 
 
 def test_dictation_preload_uses_the_chosen_engine_and_never_raises(monkeypatch):
@@ -604,3 +596,100 @@ async def test_opening_the_composer_preloads_the_model_once(user: User, box, mon
     b.new_message()
     await asyncio.sleep(0.6)
     assert len(calls) == 1  # pas à chaque réaffichage de la rédaction
+
+
+class SlowSession:
+    """Une session dont le modèle ne finit jamais de se charger."""
+    def __init__(self):
+        self.events = queue.Queue()
+        self.finished = False
+        self.killed = False
+
+    def start(self):
+        self.events.put({"t": "loading"})
+
+    def stop(self):
+        pass
+
+    def kill(self):
+        self.killed = True
+
+
+async def open_slow(user, box, monkeypatch, engine="parakeet"):
+    sess = SlowSession()
+    monkeypatch.setattr(dictation, "usable", lambda: True)
+    monkeypatch.setattr(dictation, "engine", lambda: engine)
+    monkeypatch.setattr(dictation, "check", lambda locale="fr-FR": {"available": True, "installed": True})
+    monkeypatch.setattr(dictation, "new_session", lambda: sess)
+    await user.open("/")
+    b = box[-1]
+    b.new_message()
+    await asyncio.sleep(0.4)
+    return b, sess
+
+
+async def test_a_click_while_the_model_loads_cancels_at_once(user: User, box, monkeypatch) -> None:
+    b, sess = await open_slow(user, box, monkeypatch)
+    click(user, "dictate-body")
+    await asyncio.sleep(0.5)
+    assert b.dict_state and not b.dict_state.get("ready")
+    click(user, "dictate-body")
+    await asyncio.sleep(0.4)
+    assert b.dict_state is None and sess.killed  # plus de micro « bloqué » : on peut recommencer
+
+
+async def test_waiting_for_the_model_shows_the_elapsed_time_then_gives_up(user: User, box, monkeypatch) -> None:
+    from mailia import ui_dictation
+    monkeypatch.setattr(ui_dictation, "LOAD_TIMEOUT", 3)
+    monkeypatch.setattr(whisper_engine, "libs_ok", lambda: True)
+    monkeypatch.setattr(whisper_engine, "is_installed", lambda key=None: True)
+    db.kv_set("dictation_engine", "parakeet")
+    b, sess = await open_slow(user, box, monkeypatch)
+    click(user, "dictate-body")
+    await asyncio.sleep(2.6)
+    await user.should_see("Chargement du modèle… 2 s")
+    await asyncio.sleep(1.6)
+    await user.should_see("dépasse une minute")
+    await user.should_see("Retour à Whisper")
+    assert b.dict_state is None and sess.killed and db.kv_get("dictation_engine") == "whisper"
+
+
+def test_preload_can_be_turned_off_in_the_settings(monkeypatch):
+    calls = []
+
+    class Mod:
+        @staticmethod
+        def preload():
+            calls.append(1)
+            return True
+    monkeypatch.setattr(dictation, "engine_module", lambda name=None: Mod)
+    db.kv_set("dictation_preload", "0")
+    assert dictation.preload() is False and not calls
+    db.kv_set("dictation_preload", "1")
+    assert dictation.preload() is True and calls == [1]
+
+
+def test_parakeet_does_not_run_an_extra_inference_when_it_loads():
+    src = open(parakeet_engine.__file__, encoding="utf-8").read()
+    assert "needs_warmup = True" not in src and "run.warmup_audio" not in src
+
+
+async def test_settings_switch_controls_the_preload(user: User, monkeypatch) -> None:
+    from mailia.ui_settings import open_settings
+    monkeypatch.setattr(dictation, "supported", lambda: False)
+    monkeypatch.setattr(whisper_engine, "libs_ok", lambda: True)
+    monkeypatch.setattr(parakeet_engine, "libs_ok", lambda: True)
+    monkeypatch.setattr(whisper_engine, "input_devices", lambda: [])
+    monkeypatch.setattr(whisper_engine, "device_name", lambda device=None: "Micro")
+
+    @ui.page("/settings")
+    def page() -> None:
+        open_settings(ui.element("div"), lambda acct: None)
+    await user.open("/settings")
+    user.find("Dictée vocale").click()
+    (sw,) = user.find(marker="dictation-preload").elements
+    assert sw.value is True
+    with user.client:
+        sw.set_value(False)
+    await asyncio.sleep(0.3)
+    assert db.kv_get("dictation_preload") == "0"
