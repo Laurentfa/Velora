@@ -647,7 +647,7 @@ async def test_waiting_for_the_model_shows_the_elapsed_time_then_gives_up(user: 
     b, sess = await open_slow(user, box, monkeypatch)
     click(user, "dictate-body")
     await asyncio.sleep(2.6)
-    await user.should_see("Chargement du modèle… 2 s")
+    await user.should_see("Démarrage : modèle et micro… 2 s")
     await asyncio.sleep(1.6)
     await user.should_see("dépasse une minute")
     await user.should_see("Retour à Whisper")
@@ -693,3 +693,59 @@ async def test_settings_switch_controls_the_preload(user: User, monkeypatch) -> 
         sw.set_value(False)
     await asyncio.sleep(0.3)
     assert db.kv_get("dictation_preload") == "0"
+
+
+def test_the_model_loads_while_the_microphone_opens_and_timings_are_reported(monkeypatch):
+    monkeypatch.setattr(parakeet_engine, "keep_runner", lambda *a, **k: None)
+    log = []
+
+    class SlowMic(FakeMic):
+        def open(self):
+            log.append("micro:début")
+            threading.Event().wait(0.5)
+            log.append("micro:fin")
+
+    def factory(path):
+        log.append("modèle:début")
+        threading.Event().wait(0.5)
+        log.append("modèle:fin")
+        def run(audio, fast=False):
+            return ""
+        return run
+    whisper_engine.TRACE.clear()
+    s = parakeet_engine.ParakeetSession(mic=SlowMic([]), runner_factory=factory)
+    t0 = __import__("time").monotonic()
+    s.start()
+    ready = drain(s, {"ready"})[-1]
+    took = __import__("time").monotonic() - t0
+    s.stop()
+    drain(s, {"done", "error"})
+    assert took < 0.95  # 0,5 s + 0,5 s en parallèle, pas 1 s l'un après l'autre
+    assert log.index("modèle:début") < log.index("micro:fin") and log.index("micro:début") < log.index("modèle:fin")
+    assert ready["timings"]["model"] >= 0.4 and ready["timings"]["mic"] >= 0.4
+    assert any(r["kind"] == "démarrage" and "modèle" in r["raw"] and "micro" in r["raw"] for r in whisper_engine.TRACE)
+
+
+def test_a_model_that_fails_to_load_is_reported_even_though_the_mic_opened(monkeypatch):
+    closed = []
+
+    class Mic(FakeMic):
+        def close(self):
+            closed.append(1)
+
+    def factory(path):
+        raise RuntimeError("modèle illisible")
+    s = parakeet_engine.ParakeetSession(mic=Mic([]), runner_factory=factory)
+    s.start()
+    ev = drain(s, {"error"})[-1]
+    assert "modèle illisible" in ev["msg"] and closed  # et le micro est refermé
+
+
+def test_a_microphone_that_fails_to_open_is_reported(monkeypatch):
+    class Mic(FakeMic):
+        def open(self):
+            raise OSError("périphérique occupé")
+    s = parakeet_engine.ParakeetSession(mic=Mic([]), runner_factory=lambda p: (lambda a, fast=False: ""))
+    s.start()
+    ev = drain(s, {"error"})[-1]
+    assert "périphérique occupé" in ev["msg"]

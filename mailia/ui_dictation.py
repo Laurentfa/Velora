@@ -147,13 +147,13 @@ class DictationMixin:
             waited = time.monotonic() - state["t0"]
             if waited > LOAD_TIMEOUT:
                 log.warning("dictée : chargement abandonné après %.0f s", waited)
-                ui.notify("Le chargement du modèle dépasse une minute : dictée abandonnée. Essayez l'autre moteur (Paramètres › Dictée vocale).", type="negative", multi_line=True)
+                ui.notify("Le démarrage de la dictée dépasse une minute : dictée abandonnée. Essayez l'autre moteur (Paramètres › Dictée vocale).", type="negative", multi_line=True)
                 if dictation.engine() == "parakeet" and whisper_engine.libs_ok() and whisper_engine.is_installed():
                     db.kv_set("dictation_engine", "whisper")
                     ui.notify("Retour à Whisper pour la prochaine dictée.", type="warning")
                 return self._dictation_end(kill=True)
             if state.get("loading") and waited >= 2:
-                self._dict_paint(target, True, f"Chargement du modèle… {int(waited)} s")
+                self._dict_paint(target, True, f"Démarrage : modèle et micro… {int(waited)} s")
         while True:
             try:
                 ev = session.events.get_nowait()
@@ -161,7 +161,7 @@ class DictationMixin:
                 break
             kind = ev.get("t")
             if kind == "loading":
-                self._dict_paint(target, True, "Chargement du modèle…")
+                self._dict_paint(target, True, "Démarrage : modèle et micro…")
                 state["loading"] = True
             elif kind == "slow":
                 ui.notify("Cet ordinateur transcrit lentement : le texte n'apparaîtra qu'aux pauses. Le modèle « Rapide » (Paramètres › Dictée vocale) ira plus vite.", type="warning", multi_line=True)
