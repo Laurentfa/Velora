@@ -138,6 +138,8 @@ def fetch_file(url: str, final: Path, size: int, sha256: str, on_bytes=None, can
                     done += len(chunk)
                     if on_bytes:
                         on_bytes(done)
+                f.flush()
+                os.fsync(f.fileno())  # sur le disque pour de bon : après une coupure de courant, Windows peut sinon laisser un fichier de la bonne taille mais rempli de zéros
     except DownloadError:
         raise
     except (OSError, ValueError) as e:

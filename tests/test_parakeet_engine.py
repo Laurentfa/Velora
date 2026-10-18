@@ -383,3 +383,40 @@ async def test_when_parakeet_fails_to_start_velora_goes_back_to_whisper(user: Us
     await user.should_see("JSONDecodeError")
     await user.should_see("retour à Whisper")
     assert db.kv_get("dictation_engine") == "whisper" and b.dict_state is None
+
+
+def test_a_corrupted_model_is_detected_deleted_and_reported(server, monkeypatch):
+    import onnx_asr
+    parakeet_engine.download()
+    # un fichier de la bonne taille mais rempli de zéros (ce qu'une coupure peut laisser sous Windows)
+    bad = parakeet_engine.model_dir() / "a.bin"
+    bad.write_bytes(b"\0" * len(FILES["a.bin"]))
+    assert parakeet_engine.is_installed()  # la taille seule ne le voit pas
+    assert parakeet_engine.verify_files() == ["a.bin"]
+
+    def boom(*a, **k):
+        raise RuntimeError("INVALID_PROTOBUF")
+    monkeypatch.setattr(onnx_asr, "load_model", boom)
+    with pytest.raises(RuntimeError, match="abîmés \\(a.bin\\)"):
+        parakeet_engine.load_runner(str(parakeet_engine.model_dir()))
+    assert not bad.exists() and not parakeet_engine.is_installed()  # prêt à être retéléchargé
+
+
+def test_an_engine_failure_with_intact_files_says_so(server, monkeypatch):
+    import onnx_asr
+    parakeet_engine.download()
+
+    def boom(*a, **k):
+        raise RuntimeError("autre problème")
+    monkeypatch.setattr(onnx_asr, "load_model", boom)
+    with pytest.raises(RuntimeError, match="fichiers sont intacts"):
+        parakeet_engine.load_runner(str(parakeet_engine.model_dir()))
+    assert parakeet_engine.is_installed()
+
+
+def test_downloaded_files_are_flushed_to_disk(server, monkeypatch):
+    calls = []
+    real = whisper_engine.os.fsync
+    monkeypatch.setattr(whisper_engine.os, "fsync", lambda fd: (calls.append(fd), real(fd))[1])
+    parakeet_engine.download()
+    assert len(calls) == len(parakeet_engine.FILES)

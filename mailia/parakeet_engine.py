@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import whisper_engine
-from .whisper_engine import DownloadError, WhisperSession, fetch_file, human_mb, models_dir
+from .whisper_engine import DownloadError, WhisperSession, _sha256, fetch_file, human_mb, models_dir
 
 REVISION = "8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce"
 BASE_URL = f"https://huggingface.co/istupakov/parakeet-tdt-0.6b-v3-onnx/resolve/{REVISION}/"
@@ -59,6 +59,12 @@ def is_installed(key: str | None = None) -> bool:
 def libs_ok() -> bool:
     """Le moteur (onnx-asr et ONNX Runtime) et la capture du micro sont présents dans cette installation."""
     return all(importlib.util.find_spec(m) is not None for m in ("onnx_asr", "onnxruntime", "sounddevice", "numpy"))
+
+
+def verify_files() -> list[str]:
+    """Noms des fichiers du modèle absents, de mauvaise taille ou dont l'empreinte SHA-256 ne correspond pas (quelques secondes pour le gros fichier)."""
+    d = model_dir()
+    return [n for n, size, sha in FILES if not (d / n).is_file() or (d / n).stat().st_size != size or _sha256(d / n) != sha]
 
 
 def remove(key: str | None = None) -> None:
@@ -133,7 +139,18 @@ def load_runner(path: str):
     ensure_config(path)
     so = ort.SessionOptions()
     so.intra_op_num_threads = threads()
-    model = onnx_asr.load_model("nemo-conformer-tdt", path=path, quantization="int8", sess_options=so, providers=["CPUExecutionProvider"])
+    try:
+        model = onnx_asr.load_model("nemo-conformer-tdt", path=path, quantization="int8", sess_options=so, providers=["CPUExecutionProvider"])
+    except Exception as e:  # noqa: BLE001 — avant de blâmer le moteur, on vérifie que les fichiers sont intacts
+        bad = verify_files()
+        for n in bad:  # un fichier abîmé est supprimé : le modèle apparaît « pas encore téléchargé » et se retélécharge d'un clic
+            try:
+                (model_dir() / n).unlink()
+            except OSError:
+                pass
+        if bad:
+            raise RuntimeError(f"Fichiers du modèle abîmés ({', '.join(bad)}) : supprimés. Retéléchargez le modèle dans Paramètres › Dictée vocale. Détail : {e}") from e
+        raise RuntimeError(f"Le modèle ne se charge pas, alors que ses fichiers sont intacts (empreintes vérifiées). Détail : {e}") from e
 
     def run(audio, fast: bool = False) -> str:
         a = normalize(audio)
