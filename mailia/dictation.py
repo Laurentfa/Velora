@@ -161,4 +161,6 @@ def new_session():
 
 
 def message(code: str, msg: str = "") -> str:
+    if code in ("failed", "crash", "mic") and msg:  # le détail (type d'erreur, endroit du code) aide à comprendre un problème
+        return f"{ERRORS.get(code, '')} {msg}".strip() if code != "mic" else msg
     return ERRORS.get(code) or msg or "La dictée a rencontré un problème."

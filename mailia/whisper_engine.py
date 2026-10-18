@@ -385,8 +385,7 @@ class WhisperSession:
         try:
             self._run()
         except Exception as e:  # noqa: BLE001 — on ne laisse jamais la dictée se figer : l'erreur est montrée
-            from . import dictation
-            self.events.put({"t": "error", "code": "mic" if "PortAudio" in type(e).__name__ or "sounddevice" in repr(e) else "failed", "msg": str(e) or dictation.ERRORS["mic"]})
+            self.events.put({"t": "error", "code": "mic" if "PortAudio" in type(e).__name__ or "sounddevice" in repr(e) else "failed", "msg": describe_error(e)})
         finally:
             self.mic.close()
             self.finished = True
@@ -474,6 +473,15 @@ class WhisperSession:
         self.events.put({"t": "done"})
 
 
+def describe_error(e: BaseException) -> str:
+    """Message d'erreur utile pour un diagnostic à distance : le texte, le type de l'erreur et les deux derniers endroits du code traversés."""
+    import traceback
+    frames = traceback.extract_tb(e.__traceback__)[-2:]
+    where = " › ".join(f"{os.path.basename(f.filename)}:{f.lineno} ({f.name})" for f in frames)
+    log.warning("dictée : erreur", exc_info=e)
+    return f"{str(e) or 'Aucun micro utilisable.'} [{type(e).__name__}{' · ' + where if where else ''}]"
+
+
 def record_audio(seconds: float, mic=None, on_level=None):
     """Enregistre `seconds` secondes au micro : (audio numpy float32 16 kHz, micro utilisé). Lève une exception si le micro est inutilisable."""
     import numpy as np
@@ -539,8 +547,11 @@ def test_microphone(seconds: float = 5.0, mic=None, runner_factory=None, on_leve
         warm_up(run)
         audio, mic = record_audio(seconds, mic, on_level)
     except Exception as e:  # noqa: BLE001
-        return {"error": str(e) or "Aucun micro utilisable."}
-    out = _measure(run, audio, tune)
+        return {"error": describe_error(e)}
+    try:
+        out = _measure(run, audio, tune)
+    except Exception as e:  # noqa: BLE001
+        return {"error": describe_error(e)}
     out["device"] = device_name(getattr(mic, "device", None)) if isinstance(mic, MicStream) else ""
     return out
 
@@ -563,9 +574,12 @@ def compare_microphone(seconds: float = 5.0, mic=None, on_level=None, factories:
             runs[name] = run
         audio, mic = record_audio(seconds, mic, on_level)
     except Exception as e:  # noqa: BLE001
-        return {"error": str(e) or "Aucun micro utilisable."}
+        return {"error": describe_error(e)}
     results = []
     for name, run in runs.items():
-        m = _measure(run, audio, tune=False)
-        results.append({"engine": name, "text": m["text"], "took": m["took"]})
+        try:
+            m = _measure(run, audio, tune=False)
+            results.append({"engine": name, "text": m["text"], "took": m["took"]})
+        except Exception as e:  # noqa: BLE001 — un moteur qui échoue n'empêche pas de voir l'autre
+            results.append({"engine": name, "text": "(échec : " + describe_error(e) + ")", "took": 0.0})
     return {"device": device_name(getattr(mic, "device", None)) if isinstance(mic, MicStream) else "", "audio_s": len(audio) / SAMPLE_RATE, "peak": float(abs(audio).max()), "results": results}

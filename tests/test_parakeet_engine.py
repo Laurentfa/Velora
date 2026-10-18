@@ -297,3 +297,44 @@ async def test_settings_tab_lets_you_choose_between_the_two_engines(user: User, 
     await user.should_see("Whisper (OpenAI)")
     await user.should_see("Comparer Whisper et Parakeet (5 s)")
     assert db.kv_get("dictation_engine") in (None, "")
+
+
+def test_errors_tell_what_failed_and_where(monkeypatch):
+    class Broken:
+        def open(self):
+            pass
+
+        def read(self, timeout=0.3):
+            return None
+
+        def close(self):
+            pass
+
+    def factory(path=None):
+        import json
+        json.loads("")  # le genre d'erreur obscure vue sur un vrai poste
+    r = whisper_engine.test_microphone(0.2, mic=Broken(), runner_factory=factory)
+    assert "Expecting value" in r["error"] and "JSONDecodeError" in r["error"] and ".py:" in r["error"]
+    r = whisper_engine.compare_microphone(0.2, mic=Broken(), factories={"whisper": factory, "parakeet": factory})
+    assert "JSONDecodeError" in r["error"]
+
+
+def test_one_engine_failing_does_not_hide_the_other():
+    def ok():
+        def run(audio, fast=False):
+            return "texte"
+        run.needs_warmup = True
+        return run
+
+    def bad():
+        def run(audio, fast=False):
+            raise ValueError("moteur cassé")
+        return run
+    r = whisper_engine.compare_microphone(0.3, mic=FakeMic([(1.0, "speech")]), factories={"whisper": ok, "parakeet": bad})
+    by = {x["engine"]: x["text"] for x in r["results"]}
+    assert by["whisper"] == "texte" and "moteur cassé" in by["parakeet"] and "ValueError" in by["parakeet"]
+
+
+def test_dictation_messages_keep_the_detail():
+    assert "JSONDecodeError" in dictation.message("failed", "x [JSONDecodeError · a.py:1 (f)]")
+    assert dictation.message("mic_denied") == dictation.ERRORS["mic_denied"]
