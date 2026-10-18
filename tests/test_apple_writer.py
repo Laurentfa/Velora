@@ -214,3 +214,12 @@ def test_the_page_scripts_are_valid_javascript(tmp_path):
     f.write_text(code, encoding="utf-8")
     r = subprocess.run([node, "--check", str(f)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr[:400]
+
+
+def test_the_builds_ship_the_translation_files():
+    """Sans mailia/locales dans l'appli empaquetée, le choix « English » ne traduisait rien (le dictionnaire restait introuvable)."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    assert "mailia/locales" in (root / "build_mac.sh").read_text(encoding="utf-8")
+    assert "mailia\\locales" in (root / "build_windows.bat").read_text(encoding="utf-8")
+    assert (root / "mailia" / "locales" / "en.json").is_file()
