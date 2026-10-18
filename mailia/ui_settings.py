@@ -8,7 +8,7 @@ from pathlib import Path
 
 from nicegui import run, ui
 
-from mailia import ai, api_ui, dictation, folder_order, gcal, onemin, outgoing, compose, config, db, htmlmail, i18n, logs, notify, perf, queries, settings_ui, sync, wizard
+from mailia import ai, api_ui, apple_writer, dictation, folder_order, gcal, onemin, outgoing, compose, config, db, htmlmail, i18n, logs, notify, perf, queries, settings_ui, sync, wizard
 from mailia.textutil import html_to_text
 
 from mailia.ui_account import delete_account_dialog, friendly_error, open_account
@@ -348,6 +348,11 @@ def _tab_ia(f) -> None:
         ui.label("Aucune clé d'API n'est enregistrée : les fonctions IA restent masquées. Elles apparaissent dès que vous ajoutez une clé ci-dessous "
                  "(Claude ou 1min.AI), puis « Enregistrer ».").classes("text-caption text-negative")
     ui.label("Désactivées : plus aucun envoi à un fournisseur d\'IA, et les éléments IA disparaissent de l'écran.").classes("text-caption text-grey")
+    if apple_writer.supported():
+        ui.switch("Boutons Apple Intelligence dans la rédaction (corriger, reformuler)", value=apple_writer.enabled(),
+                  on_change=lambda e: db.kv_set("apple_writer", "1" if e.value else "0")).mark("apple-writer-switch")
+        ui.label("Apple Intelligence tourne sur ce Mac : gratuit, rien n'est envoyé, et ces boutons restent disponibles même si les fonctions IA ci-dessus sont désactivées "
+                 "ou sans clé. Il faut l'activer dans Réglages Système › Apple Intelligence et Siri.").classes("text-caption text-grey")
     with ui.row().classes("w-full items-center no-wrap gap-2"):
         ui.switch("Notification pour les mails urgents, les messages à revoir et les relances", value=notify.enabled(),
                   on_change=lambda e: db.kv_set("notify_urgent", "1" if e.value else "0")).classes("col")

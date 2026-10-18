@@ -43,6 +43,7 @@ jobs:
         run: |
           ./build_mac.sh
           test -x dist/Velora.app/Contents/MacOS/velora-dictate  # la dictée ne doit pas disparaître en silence d'une version publiée
+          test -x dist/Velora.app/Contents/MacOS/velora-write  # ni les boutons Apple Intelligence
           scripts/package_mac.sh "$VERSION"
       - name: Construction et installateur Windows
         if: runner.os == 'Windows'

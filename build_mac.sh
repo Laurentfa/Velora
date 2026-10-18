@@ -21,6 +21,12 @@ if swiftc -swift-version 5 -parse-as-library -O -target "$(uname -m)-apple-macos
 else
   echo "→ dictée vocale non incluse (voir /tmp/velora-dictate-build.log)"
 fi
+# Apple Intelligence (corriger / reformuler dans la rédaction) : même principe, Swift pour macOS 26 ou plus
+if swiftc -swift-version 5 -parse-as-library -O -target "$(uname -m)-apple-macos26.0" tools/write/velora-write.swift -o dist/Velora.app/Contents/MacOS/velora-write 2>/tmp/velora-write-build.log; then
+  echo "→ Apple Intelligence (rédaction) incluse"
+else
+  echo "→ Apple Intelligence (rédaction) non incluse (voir /tmp/velora-write-build.log)"
+fi
 # Images distantes en http:// (logo de signature hébergé sans HTTPS, newsletters) : sans cette exception, la fenêtre macOS les bloque
 /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PL" 2>/dev/null
 /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent bool true" "$PL" 2>/dev/null

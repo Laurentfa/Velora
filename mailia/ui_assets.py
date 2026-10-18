@@ -443,6 +443,44 @@ SWIPE_JS = """<script>
     }
     c.dispatchEvent(new Event('input', {bubbles: true}));
   };
+  // Apple Intelligence : le texte à corriger est la sélection, sinon la partie écrite par l'utilisateur (au-dessus de la signature et du message cité)
+  const fragText = frag => {
+    const d = document.createElement('div');
+    d.style.cssText = 'position:absolute;left:-9999px;top:0;white-space:pre-wrap;width:600px';
+    d.appendChild(frag); document.body.appendChild(d);
+    const t = d.innerText; d.remove(); return t;
+  };
+  window.mailiaTarget = htmlId => {
+    const root = document.getElementById(htmlId);
+    const c = root && root.querySelector('.q-editor__content');
+    if (!c) return null;
+    const sel = getSelection();
+    let r, kind;
+    if (sel.rangeCount && !sel.isCollapsed && c.contains(sel.anchorNode)) { r = sel.getRangeAt(0).cloneRange(); kind = 'selection'; }
+    else {
+      r = document.createRange(); r.selectNodeContents(c);
+      const mark = c.querySelector('.msig, hr, blockquote');
+      if (mark) r.setEndBefore(mark);
+      kind = 'message';
+    }
+    window.__aiRange = r; window.__aiRoot = c; window.__aiKind = kind; window.__aiText = r.toString();
+    return {text: fragText(r.cloneContents()).replace(/\\n{3,}/g, '\\n\\n').trim(), kind: kind};
+  };
+  window.mailiaApply = (htmlId, text) => {
+    const root = document.getElementById(htmlId);
+    const c = root && root.querySelector('.q-editor__content');
+    const r = window.__aiRange;
+    if (!c || !r || window.__aiRoot !== c || !c.contains(r.startContainer) || r.toString() !== window.__aiText) return false;  // le texte a changé depuis : on n'écrase rien
+    c.focus();
+    const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    const esc = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const lines = text.split('\\n').map(esc);
+    // message entier : un bloc par ligne puis une ligne vide avant la signature ; sélection : simples retours à la ligne
+    document.execCommand('insertHTML', false, window.__aiKind === 'message' ? lines.map(l => '<div>' + (l || '<br>') + '</div>').join('') + '<div><br></div>' : lines.join('<br>'));  // insertHTML : la touche « annuler » de l'éditeur fonctionne
+    c.dispatchEvent(new Event('input', {bubbles: true}));
+    window.__aiRange = null;
+    return true;
+  };
   window.mailiaInsert = (htmlId, html) => {
     const root = document.getElementById(htmlId);
     const c = root && root.querySelector('.q-editor__content');

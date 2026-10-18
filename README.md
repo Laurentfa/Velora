@@ -109,6 +109,14 @@ pendant qu'on parle. Tout se passe sur l'ordinateur : l'audio ne part nulle part
   Tailles et empreintes SHA-256 sont fixées dans `mailia/whisper_engine.py` et `mailia/parakeet_engine.py` et vérifiées. Les Paramètres proposent un test du micro
   et une comparaison des deux moteurs sur votre voix.
 
+## Apple Intelligence (Mac)
+
+Sur Mac avec macOS 26 et Apple Intelligence activée, le bouton « Apple Intelligence » de la rédaction corrige, reformule, rend plus professionnel, plus chaleureux ou plus court
+le texte sélectionné (sinon tout le message), avec le modèle local d'Apple (programme Swift `tools/write/velora-write.swift`). Gratuit, rien n'est envoyé, et ces boutons restent
+disponibles même quand les fonctions IA de Velora sont désactivées ou sans clé (réglage dédié dans Paramètres › Intelligence artificielle). Le résultat est toujours montré à côté
+de l'original avant d'être appliqué. Mesuré sur 300 de vos mails : ce modèle est trop approximatif pour **trier** le courrier (52 % d'accord avec Haiku, presque tout classé urgent) :
+le tri reste confié à Claude.
+
 ## Données
 Appli installée : `~/Library/Application Support/MailIA` (Mac), `%LOCALAPPDATA%\MailIA` (Windows).
 Depuis les sources : à la racine du projet (`.env`, `mail.db`).

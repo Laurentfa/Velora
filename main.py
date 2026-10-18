@@ -63,6 +63,7 @@ from nicegui import app, background_tasks, native, run, ui
 from mailia import ai, aipolicy, apiserver, compose, config, db, folder_order, folder_tree, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, vault, wizard
 from mailia.textutil import for_ai
 from mailia.ui_account import friendly_error
+from mailia.ui_apple import AppleWriterMixin
 from mailia.ui_assets import CSS, SWIPE_JS
 from mailia import icons
 from mailia.brand import logo_big, logo_img
@@ -116,7 +117,7 @@ perf.install()
 
 
 
-class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin):
+class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin, AppleWriterMixin):
     """État et interface d'une fenêtre (chaque client a la sienne)."""
 
     def __init__(self) -> None:
