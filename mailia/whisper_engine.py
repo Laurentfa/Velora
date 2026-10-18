@@ -425,32 +425,17 @@ class WhisperSession:
         self.events.put({"t": "loading"})
         path = self._model_path()
         self.prompt = self._make_prompt()
-        # le modèle se charge pendant que le micro s'ouvre (sous Windows, ouvrir un micro peut prendre plusieurs secondes) : l'attente est la plus longue des deux, pas leur somme.
-        # Le micro enregistre déjà : ce qui est dit pendant le chargement n'est pas perdu.
-        box: dict = {}
-
-        def load() -> None:
-            t = time.monotonic()
-            try:
-                box["run"] = self.runner_factory(path)
-                warm_up(box["run"])
-            except BaseException as e:  # noqa: BLE001 — repris dans le fil principal
-                box["error"] = e
-            box["model_s"] = time.monotonic() - t
-        loader = threading.Thread(target=load, daemon=True)
-        loader.start()
-        t_mic = time.monotonic()
-        try:
-            self.mic.open()
-        finally:
-            mic_s = time.monotonic() - t_mic
-            loader.join()
-        if "error" in box:
-            raise box["error"]
-        run = box["run"]
-        timings = {"model": round(box["model_s"], 1), "mic": round(mic_s, 1)}
-        log.info("dictée : démarrage — modèle %.1f s, ouverture du micro %.1f s (en parallèle)", box["model_s"], mic_s)
-        TRACE.append({"kind": "démarrage", "audio_s": 0, "took": round(max(box["model_s"], mic_s), 1), "rms": 0,
+        # d'abord le modèle, puis le micro, l'un après l'autre : ouvrir le micro pendant que le modèle se charge a bloqué le démarrage sous Windows (v1.0.26)
+        t = time.monotonic()
+        run = self.runner_factory(path)
+        warm_up(run)
+        model_s = time.monotonic() - t
+        t = time.monotonic()
+        self.mic.open()
+        mic_s = time.monotonic() - t
+        timings = {"model": round(model_s, 1), "mic": round(mic_s, 1)}
+        log.info("dictée : démarrage — modèle %.1f s, ouverture du micro %.1f s", model_s, mic_s)
+        TRACE.append({"kind": "démarrage", "audio_s": 0, "took": round(model_s + mic_s, 1), "rms": 0,
                       "raw": f"modèle {timings['model']} s · ouverture du micro {timings['mic']} s", "kept": f"modèle {timings['model']} s · ouverture du micro {timings['mic']} s"})
         self.events.put({"t": "ready", "timings": timings})
         block_s = 0.1

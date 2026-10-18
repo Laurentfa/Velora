@@ -695,34 +695,32 @@ async def test_settings_switch_controls_the_preload(user: User, monkeypatch) -> 
     assert db.kv_get("dictation_preload") == "0"
 
 
-def test_the_model_loads_while_the_microphone_opens_and_timings_are_reported(monkeypatch):
+def test_the_microphone_opens_after_the_model_is_loaded_and_timings_are_reported(monkeypatch):
     monkeypatch.setattr(parakeet_engine, "keep_runner", lambda *a, **k: None)
     log = []
 
     class SlowMic(FakeMic):
         def open(self):
             log.append("micro:début")
-            threading.Event().wait(0.5)
+            threading.Event().wait(0.3)
             log.append("micro:fin")
 
     def factory(path):
         log.append("modèle:début")
-        threading.Event().wait(0.5)
+        threading.Event().wait(0.3)
         log.append("modèle:fin")
         def run(audio, fast=False):
             return ""
         return run
     whisper_engine.TRACE.clear()
     s = parakeet_engine.ParakeetSession(mic=SlowMic([]), runner_factory=factory)
-    t0 = __import__("time").monotonic()
     s.start()
     ready = drain(s, {"ready"})[-1]
-    took = __import__("time").monotonic() - t0
     s.stop()
     drain(s, {"done", "error"})
-    assert took < 0.95  # 0,5 s + 0,5 s en parallèle, pas 1 s l'un après l'autre
-    assert log.index("modèle:début") < log.index("micro:fin") and log.index("micro:début") < log.index("modèle:fin")
-    assert ready["timings"]["model"] >= 0.4 and ready["timings"]["mic"] >= 0.4
+    # l'un après l'autre : l'ouverture simultanée du micro et du modèle a bloqué le démarrage sous Windows (v1.0.26)
+    assert log == ["modèle:début", "modèle:fin", "micro:début", "micro:fin"]
+    assert ready["timings"]["model"] >= 0.25 and ready["timings"]["mic"] >= 0.25
     assert any(r["kind"] == "démarrage" and "modèle" in r["raw"] and "micro" in r["raw"] for r in whisper_engine.TRACE)
 
 
