@@ -104,6 +104,21 @@ def normalize(audio, target: float = 0.06):
     return np.clip(audio * min(target / rms, 60.0), -1.0, 1.0).astype("float32")
 
 
+CONFIG_JSON = '{\n    "model_type": "nemo-conformer-tdt",\n    "features_size": 128,\n    "subsampling_factor": 8\n}'
+
+
+def ensure_config(path: str) -> None:
+    """Le moteur lit config.json au chargement : s'il est vide ou illisible (téléchargement interrompu, antivirus…), on le remet à neuf (son contenu est connu)."""
+    import json
+    cfg = Path(path) / "config.json"
+    try:
+        json.loads(cfg.read_text(encoding="utf-8"))
+        return
+    except (OSError, ValueError):
+        pass
+    cfg.write_text(CONFIG_JSON, encoding="utf-8")
+
+
 def load_runner(path: str):
     """Retourne « audio (numpy float32, 16 kHz) -> texte ». Le modèle chargé est gardé en mémoire quelques minutes après la dictée."""
     with _cache_lock:
@@ -115,6 +130,7 @@ def load_runner(path: str):
     import numpy as np
     import onnx_asr
     import onnxruntime as ort
+    ensure_config(path)
     so = ort.SessionOptions()
     so.intra_op_num_threads = threads()
     model = onnx_asr.load_model("nemo-conformer-tdt", path=path, quantization="int8", sess_options=so, providers=["CPUExecutionProvider"])

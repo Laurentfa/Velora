@@ -7,7 +7,7 @@ import threading
 
 from nicegui import run, ui
 
-from mailia import dictation, dictation_text, dictation_vocab, whisper_engine
+from mailia import db, dictation, dictation_text, dictation_vocab, whisper_engine
 from mailia.ui_common import log
 
 
@@ -147,6 +147,9 @@ class DictationMixin:
             elif kind == "error":
                 log.warning("dictée : %s %s", ev.get("code"), ev.get("msg"))
                 ui.notify(dictation.message(ev.get("code", ""), ev.get("msg", "")), type="negative", multi_line=True)
+                if ev.get("code") == "failed" and dictation.engine() == "parakeet" and whisper_engine.libs_ok() and whisper_engine.is_installed():
+                    db.kv_set("dictation_engine", "whisper")  # Parakeet ne démarre pas ici : on revient à Whisper pour la prochaine dictée
+                    ui.notify("Parakeet ne démarre pas sur cet ordinateur : retour à Whisper pour la prochaine dictée.", type="warning")
                 return self._dictation_end()
             elif kind == "done":
                 return self._dictation_end()

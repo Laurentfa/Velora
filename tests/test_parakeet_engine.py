@@ -338,3 +338,48 @@ def test_one_engine_failing_does_not_hide_the_other():
 def test_dictation_messages_keep_the_detail():
     assert "JSONDecodeError" in dictation.message("failed", "x [JSONDecodeError · a.py:1 (f)]")
     assert dictation.message("mic_denied") == dictation.ERRORS["mic_denied"]
+
+
+def test_an_empty_or_broken_config_is_repaired_before_loading(tmp_path):
+    import json
+    (tmp_path / "config.json").write_text("", encoding="utf-8")
+    parakeet_engine.ensure_config(str(tmp_path))
+    assert json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))["model_type"] == "nemo-conformer-tdt"
+    (tmp_path / "config.json").write_text('{"model_type": "autre", "x": 1}', encoding="utf-8")
+    parakeet_engine.ensure_config(str(tmp_path))  # un fichier valide n'est pas touché
+    assert json.loads((tmp_path / "config.json").read_text(encoding="utf-8"))["model_type"] == "autre"
+    (tmp_path / "config.json").unlink()
+    parakeet_engine.ensure_config(str(tmp_path))  # absent : recréé
+    assert (tmp_path / "config.json").exists()
+
+
+async def test_when_parakeet_fails_to_start_velora_goes_back_to_whisper(user: User, box, monkeypatch) -> None:
+    class Fake:
+        def __init__(self):
+            self.events = queue.Queue()
+            self.finished = False
+
+        def start(self):
+            self.events.put({"t": "error", "code": "failed", "msg": "boom [JSONDecodeError · a.py:1 (f)]"})
+
+        def stop(self):
+            pass
+
+        def kill(self):
+            pass
+    monkeypatch.setattr(dictation, "usable", lambda: True)
+    monkeypatch.setattr(dictation, "engine", lambda: "parakeet")
+    monkeypatch.setattr(dictation, "check", lambda locale="fr-FR": {"available": True, "installed": True})
+    monkeypatch.setattr(dictation, "new_session", lambda: Fake())
+    monkeypatch.setattr(whisper_engine, "libs_ok", lambda: True)
+    monkeypatch.setattr(whisper_engine, "is_installed", lambda key=None: True)
+    db.kv_set("dictation_engine", "parakeet")
+    await user.open("/")
+    b = box[-1]
+    b.new_message()
+    await asyncio.sleep(0.4)
+    click(user, "dictate-body")
+    await asyncio.sleep(0.8)
+    await user.should_see("JSONDecodeError")
+    await user.should_see("retour à Whisper")
+    assert db.kv_get("dictation_engine") == "whisper" and b.dict_state is None

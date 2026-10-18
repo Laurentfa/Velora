@@ -977,6 +977,7 @@
 "Par fonction, ce mois-ci": "By feature, this month",
 "Parakeet (NVIDIA) — {0} ; plus précis en français et plus rapide, plus sensible au bruit de fond": "Parakeet (NVIDIA) — {0}; more accurate in French and faster, more sensitive to background noise",
 "Parakeet TDT 0.6B v3 (int8) · ONNX Runtime {0} · {1} fils de calcul": "Parakeet TDT 0.6B v3 (int8) · ONNX Runtime {0} · {1} compute threads",
+"Parakeet ne démarre pas sur cet ordinateur : retour à Whisper pour la prochaine dictée.": "Parakeet does not start on this computer: going back to Whisper for the next dictation.",
 "Paramètres": "Settings",
 "Paramètres enregistrés": "Settings saved",
 "Parlez maintenant pendant 5 secondes…": "Speak now for 5 seconds…",
