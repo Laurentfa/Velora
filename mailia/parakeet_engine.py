@@ -96,8 +96,20 @@ _runner_cache: dict[str, tuple] = {}
 _cache_lock = threading.Lock()
 
 
+# Réactivité de la dictée (curseur dans les Paramètres) : (titre, secondes de parole entre deux textes provisoires, secondes relues, fils de calcul au plus)
+PRESETS = {1: ("Économe", 1.2, 10.0, 2), 2: ("Équilibré", 0.6, 8.0, 3), 3: ("Réactif", 0.3, 6.0, 4), 4: ("Très réactif", 0.15, 5.0, 4)}
+DEFAULT_REACTIVITY = 3
+
+
+def reactivity() -> int:
+    from . import db
+    v = db.kv_get("dictation_reactivity")
+    return int(v) if v and v.isdigit() and int(v) in PRESETS else DEFAULT_REACTIVITY
+
+
 def threads() -> int:
-    return max(2, min(4, (os.cpu_count() or 4) - 1))  # au-delà de 4 fils le gain est faible (mesuré : ×55 à 4 fils, ×65 à 8)
+    """Fils de calcul : au plus ceux du réglage de réactivité, et toujours un coeur de libre (mesuré : ×21 à 1 fil, ×55 à 4, ×65 à 8)."""
+    return max(1, min(PRESETS[reactivity()][3], (os.cpu_count() or 4) - 1))
 
 
 def normalize(audio, target: float = 0.06):
@@ -127,8 +139,9 @@ def ensure_config(path: str) -> None:
 
 def load_runner(path: str):
     """Retourne « audio (numpy float32, 16 kHz) -> texte ». Le modèle chargé est gardé en mémoire quelques minutes après la dictée."""
+    key = f"{path}|{threads()}"  # un autre réglage de réactivité = un autre nombre de fils = un autre chargement
     with _cache_lock:
-        hit = _runner_cache.get(path)
+        hit = _runner_cache.get(key)
         if hit:
             hit[1].cancel()
     if hit:
@@ -165,17 +178,19 @@ def load_runner(path: str):
 
 
 def keep_runner(path: str, run, minutes: float = 3) -> None:
+    key = f"{path}|{threads()}"
+
     def drop():
         with _cache_lock:
-            _runner_cache.pop(path, None)
+            _runner_cache.pop(key, None)
     with _cache_lock:
-        old = _runner_cache.get(path)
+        old = _runner_cache.get(key)
         if old:
             old[1].cancel()
         t = threading.Timer(minutes * 60, drop)
         t.daemon = True
         t.start()
-        _runner_cache[path] = (run, t)
+        _runner_cache[key] = (run, t)
 
 
 class ParakeetSession(WhisperSession):
@@ -183,6 +198,7 @@ class ParakeetSession(WhisperSession):
 
     def __init__(self, mic=None, runner_factory=None) -> None:
         super().__init__("parakeet", mic=mic, runner_factory=runner_factory or load_runner)
+        _, self.PARTIAL_EVERY, self.PARTIAL_WINDOW, _ = PRESETS[reactivity()]  # le texte provisoire suit le curseur de réactivité
 
     def _model_path(self) -> str:
         return str(model_dir())

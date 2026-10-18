@@ -348,6 +348,8 @@ class WhisperSession:
     """Même interface que dictation.Session : `events` reçoit ready / partial / final / done / error, avec `loading` en plus pendant le chargement du modèle."""
     PAUSE = 0.8          # secondes de silence qui terminent une phrase
     PARTIAL_EVERY = 1.2  # secondes de parole nouvelle entre deux textes provisoires
+    PARTIAL_WINDOW = 10.0  # le texte provisoire ne relit que les dernières secondes : le coût ne grandit pas avec la phrase
+    SOFT_PAUSE = 0.3     # une phrase déjà longue (70 % de la fenêtre) se fige à cette courte pause, pour que le texte provisoire ne perde pas son début
     MAX_SEGMENT = 15.0   # une phrase très longue est coupée ici (les longs passages sans pause sont ceux où Whisper boucle le plus)
     MIN_SPEECH = 0.35    # moins que ça : du bruit, pas de la parole
 
@@ -413,8 +415,8 @@ class WhisperSession:
 
         def text_of(chunks, partial: bool = False) -> str:
             audio = np.concatenate(chunks).astype("float32")
-            if partial and len(audio) > SAMPLE_RATE * 10:
-                audio = audio[-SAMPLE_RATE * 10:]  # le texte provisoire ne reprend que les 10 dernières secondes : le coût ne grandit pas avec la phrase
+            if partial and len(audio) > SAMPLE_RATE * self.PARTIAL_WINDOW:
+                audio = audio[-int(SAMPLE_RATE * self.PARTIAL_WINDOW):]
             t0 = time.monotonic()
             raw = run(audio, fast=True) if partial and fast_ok else run(audio)
             txt = clean_text(raw)
@@ -461,7 +463,8 @@ class WhisperSession:
                 txt = text_of(buf, partial=True)
                 if txt:
                     self.events.put({"t": "partial", "text": txt})
-            if (speech_s and silent_s >= self.PAUSE) or len(buf) * block_s >= self.MAX_SEGMENT:
+            long_phrase = len(buf) * block_s >= self.PARTIAL_WINDOW * 0.7
+            if (speech_s and silent_s >= (self.SOFT_PAUSE if long_phrase and self.PARTIAL_WINDOW < self.MAX_SEGMENT else self.PAUSE)) or len(buf) * block_s >= self.MAX_SEGMENT:
                 finish_segment()
         # arrêt demandé : le dernier passage est transcrit puis tout est fini
         while True:  # blocs restants du micro

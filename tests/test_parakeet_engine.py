@@ -420,3 +420,97 @@ def test_downloaded_files_are_flushed_to_disk(server, monkeypatch):
     monkeypatch.setattr(whisper_engine.os, "fsync", lambda fd: (calls.append(fd), real(fd))[1])
     parakeet_engine.download()
     assert len(calls) == len(parakeet_engine.FILES)
+
+
+def test_reactivity_presets_drive_the_live_text(monkeypatch):
+    assert parakeet_engine.reactivity() == parakeet_engine.DEFAULT_REACTIVITY == 3
+    s = parakeet_engine.ParakeetSession(mic=FakeMic([]), runner_factory=lambda p: (lambda a: ""))
+    assert (s.PARTIAL_EVERY, s.PARTIAL_WINDOW) == (0.3, 6.0)
+    db.kv_set("dictation_reactivity", "4")
+    s = parakeet_engine.ParakeetSession(mic=FakeMic([]), runner_factory=lambda p: (lambda a: ""))
+    assert (s.PARTIAL_EVERY, s.PARTIAL_WINDOW) == (0.15, 5.0)
+    db.kv_set("dictation_reactivity", "1")
+    s = parakeet_engine.ParakeetSession(mic=FakeMic([]), runner_factory=lambda p: (lambda a: ""))
+    assert (s.PARTIAL_EVERY, s.PARTIAL_WINDOW) == (1.2, 10.0)
+    db.kv_set("dictation_reactivity", "9")  # valeur absurde : réglage par défaut
+    assert parakeet_engine.reactivity() == 3
+
+
+def test_threads_follow_the_reactivity_but_always_leave_a_core_free(monkeypatch):
+    monkeypatch.setattr(parakeet_engine.os, "cpu_count", lambda: 16)
+    db.kv_set("dictation_reactivity", "1")
+    assert parakeet_engine.threads() == 2
+    db.kv_set("dictation_reactivity", "4")
+    assert parakeet_engine.threads() == 4
+    monkeypatch.setattr(parakeet_engine.os, "cpu_count", lambda: 2)
+    assert parakeet_engine.threads() == 1
+
+
+def test_the_live_text_only_reads_the_last_seconds_of_the_window(monkeypatch):
+    monkeypatch.setattr(parakeet_engine, "keep_runner", lambda *a, **k: None)
+    lengths = []
+
+    def factory(path):
+        def run(audio, fast=False):
+            lengths.append(len(audio) / 16000)
+            return "mot"
+        run.needs_warmup = True
+        return run
+    s = parakeet_engine.ParakeetSession(mic=FakeMic([(0.3, "silence"), (12.0, "speech")]), runner_factory=factory)
+    s.start()
+    drain(s, {"ready"})
+    for _ in range(80):
+        threading.Event().wait(0.1)
+        if len(lengths) >= 25:
+            break
+    s.stop()
+    drain(s, {"done", "error"}, 30)
+    assert max(lengths[2:-1]) <= 6.05  # fenêtre de la réactivité 3, hors préchauffage et passage définitif
+
+
+def test_a_long_phrase_freezes_at_a_short_pause_but_a_short_one_waits(monkeypatch):
+    monkeypatch.setattr(parakeet_engine, "keep_runner", lambda *a, **k: None)
+
+    def run_script(script):
+        n = {"i": 0}
+
+        def factory(path):
+            def run(audio, fast=False):
+                n["i"] += 1
+                return f"texte{n['i']}"
+            run.needs_warmup = True
+            return run
+        s = parakeet_engine.ParakeetSession(mic=FakeMic(script), runner_factory=factory)
+        s.start()
+        evs = []
+        drain(s, {"ready"})
+        threading.Event().wait(3.0 + sum(d for d, _ in script) * 0.4)
+        s.stop()
+        evs = drain(s, {"done", "error"}, 30)
+        return [e for e in evs if e["t"] == "final"]
+    # 5 s de parole puis 0,4 s de silence puis 2 s de parole : la pause courte coupe, car la phrase dépasse 70 % de la fenêtre (4,2 s)
+    long_phrase = run_script([(0.3, "silence"), (5.0, "speech"), (0.4, "silence"), (2.0, "speech"), (1.5, "silence")])
+    short_phrase = run_script([(0.3, "silence"), (2.0, "speech"), (0.4, "silence"), (2.0, "speech"), (1.5, "silence")])
+    assert len(long_phrase) >= 2 and len(short_phrase) == 1
+
+
+async def test_settings_show_the_reactivity_slider_only_with_parakeet(user: User, monkeypatch) -> None:
+    from mailia.ui_settings import open_settings
+    monkeypatch.setattr(dictation, "supported", lambda: False)
+    monkeypatch.setattr(whisper_engine, "libs_ok", lambda: True)
+    monkeypatch.setattr(parakeet_engine, "libs_ok", lambda: True)
+    monkeypatch.setattr(whisper_engine, "input_devices", lambda: [])
+    monkeypatch.setattr(whisper_engine, "device_name", lambda device=None: "Micro")
+    db.kv_set("dictation_engine", "parakeet")
+
+    @ui.page("/settings")
+    def page() -> None:
+        open_settings(ui.element("div"), lambda acct: None)
+    await user.open("/settings")
+    user.find("Dictée vocale").click()
+    await user.should_see("Réactivité : Réactif")
+    (sl,) = user.find(marker="dictation-reactivity").elements
+    with user.client:
+        sl.set_value(4)
+    await asyncio.sleep(0.3)
+    assert db.kv_get("dictation_reactivity") == "4"

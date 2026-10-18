@@ -56,6 +56,18 @@ def _tab_dictation(host) -> None:
                 mod.set_chosen(e.value)
                 engine_section.refresh()
             ui.radio({k: f"{m.title} — {whisper_engine.human_mb(m.size)} ({m.hint})" for k, m in mod.MODELS.items()}, value=mod.chosen(), on_change=pick).props("dense").mark("dictation-models")
+        if current == "parakeet":
+            level = parakeet_engine.reactivity()
+            title = ui.label(f"Réactivité : {parakeet_engine.PRESETS[level][0]}").classes("text-body2 q-mt-md").style("font-weight:600")
+
+            def set_level(e) -> None:
+                db.kv_set("dictation_reactivity", str(int(e.value)))
+                title.set_text(f"Réactivité : {parakeet_engine.PRESETS[int(e.value)][0]}")
+            ui.slider(min=1, max=4, step=1, value=level, on_change=set_level).props("markers snap label-always").classes("w-full").style("max-width:420px").mark("dictation-reactivity")
+            with ui.row().classes("justify-between").style("max-width:420px"):
+                ui.label("Économe").classes("rmeta")
+                ui.label("Très réactif").classes("rmeta")
+            ui.label("Plus la dictée est réactive, plus le texte s'affiche tôt, mais plus le processeur travaille pendant que vous parlez. S'applique à la prochaine dictée.").classes("rmeta")
         key = mod.chosen()
         with ui.row().classes("items-center gap-3 q-mt-sm"):
             if mod.is_installed(key):

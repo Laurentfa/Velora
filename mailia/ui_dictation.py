@@ -94,7 +94,7 @@ class DictationMixin:
             return
         session = dictation.new_session()
         session.start()
-        self.dict_state = {"session": session, "target": target, "timer": ui.timer(0.2, self._dictation_pump),
+        self.dict_state = {"session": session, "target": target, "timer": ui.timer(0.1, self._dictation_pump),
                            "vocab": dictation_vocab.terms() if dictation.engine() in ("apple", "parakeet") else []}
         self._dict_paint(target, True, "Démarrage…")
         if target == "body":
