@@ -448,6 +448,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         """Brief du jour : une phrase, puis « À faire en priorité » et « À suivre », chaque point ouvrant son mail."""
         sm = b.get("summary") or {}
         by_id = {x["id"]: x for k in ("todo", "info", "noise") for x in b[k]}
+        # un point de la synthèse dont le mail n'est plus à traiter (lu, archivé, supprimé, reporté) disparaît tout de suite, sans attendre une nouvelle synthèse de l'IA
         now = datetime.now()
         with ui.element("div").classes("brief"):
             with ui.element("div").classes("brief-head"):
@@ -458,7 +459,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             if sm.get("intro", "").startswith("Synthèse indisponible"):
                 ui.button("Réessayer", icon="refresh", on_click=self.retry_brief).props("flat dense no-caps size=sm color=primary")
             for key, title, kind in (("urgent", "À faire en priorité", " hi"), ("waiting", "À suivre", "")):
-                pts = [p for p in (sm.get(key) or []) if p["id"].split("|", 1)[0] in sync.ACCOUNTS and (p["id"] not in by_id or keep(by_id[p["id"]]))]
+                pts = [p for p in (sm.get(key) or []) if p["id"].split("|", 1)[0] in sync.ACCOUNTS and p["id"] in by_id and keep(by_id[p["id"]])]
                 if not pts:
                     continue
                 ui.label(title).classes("brief-sec")
