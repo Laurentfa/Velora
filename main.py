@@ -189,7 +189,10 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                 self.side()
             with ui.column().classes("listcol gap-0"):
                 with ui.column().classes("lhead gap-1"):
-                    self.title = ui.label().classes("title")
+                    with ui.row().classes("items-center no-wrap gap-2"):
+                        self.title_icon = ui.html("", sanitize=False).style("display:none")  # icône devant le titre (brief du jour)
+                        self.title = ui.label().classes("title")
+                    self.subtitle = ui.label().classes("subtitle")  # sous le titre du brief : la date et ce qui attend
                     self.search_row = ui.row().classes("w-full items-center no-wrap gap-1")
                     with self.search_row:
                         self.search = ui.input(placeholder="Rechercher dans les mails…").props("dense outlined clearable debounce=300").classes("col")
@@ -429,6 +432,14 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self.title.set_text(name + (" · tous les dossiers" if self.search_everywhere() else "")
                             + (" · recherche sur le serveur…" if self.remote_busy else ""))
         self.search_row.set_visibility(self.view not in NOLIST_VIEWS)
+        brief = self.view == "brief"
+        self.title_icon.set_content(icons.svg("sparkle", 24) if brief else "")
+        self.title_icon.style("display:flex;color:var(--accent)" if brief else "display:none")
+        c = getattr(self, "counts", None) or {}
+        now = datetime.now()
+        self.subtitle.set_text(f"{JOURS_LONG[now.weekday()].capitalize()} {now.day} {MOIS[now.month - 1]} · {c.get('unread', 0)} non lus" + (f" · {c['todo']} à traiter" if c.get("todo") else "")
+                               if brief else "")
+        self.subtitle.set_visibility(brief)
 
     async def restore_open(self) -> None:
         """Fenêtre rechargée en cours de travail (moins de 10 minutes après la dernière ouverture d'un message) : on rouvre ce message."""
@@ -449,11 +460,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         sm = b.get("summary") or {}
         by_id = {x["id"]: x for k in ("todo", "info", "noise") for x in b[k]}
         # un point de la synthèse dont le mail n'est plus à traiter (lu, archivé, supprimé, reporté) disparaît tout de suite, sans attendre une nouvelle synthèse de l'IA
-        now = datetime.now()
         with ui.element("div").classes("brief"):
-            with ui.element("div").classes("brief-head"):
-                ui.label("✦ Brief du jour").classes("tag")
-                ui.label(f"{JOURS_LONG[now.weekday()].capitalize()} {now.day} {MOIS[now.month - 1]}").classes("brief-date")
             self.weather_card()
             ui.label(sm.get("intro", "")).classes("brief-intro")
             if sm.get("intro", "").startswith("Synthèse indisponible"):
@@ -1239,6 +1246,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self.hl = []  # remis plus bas par la liste de mails quand une recherche est en cours
         self.counts = queries.counts()
         if self.view == "brief":
+            self.refresh_title()  # les compteurs du sous-titre suivent ce que vous gérez
             self.brief = queries.brief()
             sig = ("b", self.account, self.brief["headline"], *[(x["id"], x["is_read"]) for k in ("todo", "info", "noise") for x in self.brief[k]])
         elif self.view == "drafts":

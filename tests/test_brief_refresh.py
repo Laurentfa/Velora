@@ -78,3 +78,26 @@ async def test_points_of_messages_still_to_handle_stay(user, box) -> None:
     await asyncio.sleep(0.5)
     await user.should_see("Point numéro 0")
     await user.should_see("Point numéro 1")
+
+
+async def test_the_brief_title_is_shown_once_with_its_icon_and_a_subtitle(user, box) -> None:
+    make_brief(["testbox|INBOX|1", "testbox|INBOX|2"])
+    await user.open("/")
+    b = box[-1]
+    await b.go("brief", "", "")
+    await asyncio.sleep(0.6)
+    assert b.title.text == "Brief du jour" and "sparkle" not in b.title_icon.content and "<svg" in b.title_icon.content  # l'icône est devant le titre du haut
+    assert b.subtitle.visible and "non lus" in b.subtitle.text and "à traiter" in b.subtitle.text
+    labels = [el for el in user.client.elements.values() if isinstance(el, ui.label)]
+    assert not [el for el in labels if "tag" in el.classes and "brief du jour" in el.text.lower()]  # plus de second titre dans la carte du brief
+    assert not [el for el in labels if "brief-date" in el.classes]  # la date est dans le sous-titre du haut
+
+
+async def test_the_icon_and_subtitle_disappear_in_other_views(user, box) -> None:
+    make_brief(["testbox|INBOX|1"])
+    await user.open("/")
+    b = box[-1]
+    await b.go("brief", "", "")
+    await b.go("inbox", "", "")
+    await asyncio.sleep(0.5)
+    assert not b.subtitle.visible and b.title_icon.content == ""
