@@ -10,6 +10,7 @@ import logging
 import time
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 from . import db
@@ -17,6 +18,8 @@ from . import db
 log = logging.getLogger("weather")
 ICONS = Path(__file__).parent / "weather_icons"
 GEO_URL = "https://geocoding-api.open-meteo.com/v1/search"
+AIR_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
+VERSION = 2  # change quand la forme du résumé change : une météo gardée par une version précédente est ignorée
 API_URL = "https://api.open-meteo.com/v1/forecast"
 FRESH = 30 * 60      # secondes : au-delà, on redemande la météo
 STALE_OK = 6 * 3600  # hors connexion : on montre la dernière météo connue si elle a moins de 6 h
@@ -99,14 +102,38 @@ def search(query: str) -> list[dict]:
 
 def fetch(lat: float, lon: float) -> dict:
     return _get(API_URL, {
-        "latitude": lat, "longitude": lon, "timezone": "auto", "forecast_days": 2, "wind_speed_unit": "kmh",
-        "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m,is_day",
+        "latitude": lat, "longitude": lon, "timezone": "auto", "forecast_days": 7, "wind_speed_unit": "kmh",
+        "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m,is_day,relative_humidity_2m,pressure_msl,cloud_cover,wind_direction_10m,visibility",
         "hourly": "temperature_2m,weather_code,precipitation_probability,is_day",
-        "daily": "temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset"})
+        "daily": "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,uv_index_max,wind_gusts_10m_max,"
+                 "sunshine_duration,sunrise,sunset"})
 
 
-def summarize(d: dict, hours: int = 6) -> dict:
-    """Les chiffres utiles pour la carte, à partir de la réponse d'Open-Meteo."""
+def fetch_air(lat: float, lon: float) -> dict | None:
+    """Qualité de l'air (service séparé d'Open-Meteo) ; facultative : None en cas d'échec."""
+    try:
+        return _get(AIR_URL, {"latitude": lat, "longitude": lon, "current": "european_aqi,pm2_5", "timezone": "auto"}).get("current")
+    except Exception as e:  # noqa: BLE001
+        log.info("qualité de l'air indisponible : %s", e)
+        return None
+
+
+JOURS = ("lun.", "mar.", "mer.", "jeu.", "ven.", "sam.", "dim.")
+UV_SCALE = ((3, "faible"), (6, "modéré"), (8, "élevé"), (11, "très élevé"), (99, "extrême"))
+AQI_SCALE = ((20, "très bon"), (40, "bon"), (60, "moyen"), (80, "médiocre"), (100, "mauvais"), (999, "très mauvais"))
+COMPASS = ("N", "NE", "E", "SE", "S", "SO", "O", "NO")
+
+
+def _scale(value: float, scale: tuple) -> str:
+    return next(label for limit, label in scale if value < limit)
+
+
+def compass(deg: float) -> str:
+    return COMPASS[int(((deg % 360) + 22.5) // 45) % 8]
+
+
+def summarize(d: dict, hours: int = 14, air: dict | None = None) -> dict:
+    """Les chiffres utiles pour la carte, à partir de la réponse d'Open-Meteo : le moment, les heures jusqu'à ce soir, les 7 jours, le détail."""
     cur = d["current"]
     label, icon = describe(cur["weather_code"], bool(cur.get("is_day", 1)))
     daily = d["daily"]
@@ -114,13 +141,29 @@ def summarize(d: dict, hours: int = 6) -> dict:
     h = d["hourly"]
     times = h["time"]
     start = next((i for i, t in enumerate(times) if t[:13] >= now_key), 0) + 1  # à partir de l'heure suivante
+    today = str(cur.get("time", ""))[:10]
     nxt = []
-    for i in range(start, min(start + hours, len(times))):
+    for i in range(start, len(times)):
+        if len(nxt) >= hours or (len(nxt) >= 6 and times[i][:10] == today and int(times[i][11:13]) > 22) or (len(nxt) >= 6 and times[i][:10] != today):
+            break  # jusqu'à ce soir (22 h), au moins 6 heures même tard dans la soirée
         _, ic = describe(h["weather_code"][i], bool(h.get("is_day", [1] * len(times))[i]))
         nxt.append({"hour": times[i][11:13] + " h", "temp": round(h["temperature_2m"][i]), "icon": ic, "rain": h["precipitation_probability"][i] or 0})
-    return {"temp": round(cur["temperature_2m"]), "feels": round(cur["apparent_temperature"]), "label": label, "icon": icon,
-            "wind": round(cur["wind_speed_10m"]), "tmin": round(daily["temperature_2m_min"][0]), "tmax": round(daily["temperature_2m_max"][0]),
-            "rain": daily["precipitation_probability_max"][0] or 0, "sunrise": str(daily["sunrise"][0])[11:16], "sunset": str(daily["sunset"][0])[11:16], "next": nxt}
+    days = []
+    for i, day in enumerate(daily["time"]):
+        dt = datetime.strptime(day, "%Y-%m-%d")
+        _, dic = describe(daily["weather_code"][i], True)
+        days.append({"label": "Aujourd'hui" if i == 0 else "Demain" if i == 1 else f"{JOURS[dt.weekday()]} {dt.day}", "icon": dic, "tmin": round(daily["temperature_2m_min"][i]),
+                     "tmax": round(daily["temperature_2m_max"][i]), "rain": daily["precipitation_probability_max"][i] or 0,
+                     "mm": round(daily["precipitation_sum"][i] or 0, 1)})
+    uv = daily["uv_index_max"][0] or 0
+    aqi = (air or {}).get("european_aqi")
+    return {"v": VERSION, "temp": round(cur["temperature_2m"]), "feels": round(cur["apparent_temperature"]), "label": label, "icon": icon,
+            "wind": round(cur["wind_speed_10m"]), "tmin": days[0]["tmin"], "tmax": days[0]["tmax"], "rain": days[0]["rain"],
+            "sunrise": str(daily["sunrise"][0])[11:16], "sunset": str(daily["sunset"][0])[11:16], "next": nxt, "days": days,
+            "details": {"mm": days[0]["mm"], "gust": round(daily["wind_gusts_10m_max"][0] or 0), "uv": round(uv), "uv_label": _scale(round(uv), UV_SCALE),
+                        "sun_h": round((daily["sunshine_duration"][0] or 0) / 3600, 1), "humidity": round(cur["relative_humidity_2m"]), "pressure": round(cur["pressure_msl"]),
+                        "clouds": round(cur["cloud_cover"]), "wind_dir": compass(cur["wind_direction_10m"]), "visibility_km": round((cur.get("visibility") or 0) / 1000),
+                        "aqi": round(aqi) if aqi is not None else None, "aqi_label": _scale(aqi, AQI_SCALE) if aqi is not None else ""}}
 
 
 def report(now: float | None = None) -> dict | None:
@@ -133,11 +176,11 @@ def report(now: float | None = None) -> dict | None:
         c = json.loads(db.kv_get("weather_cache") or "")
     except ValueError:
         c = None
-    same = bool(c) and c.get("lat") == p["lat"] and c.get("lon") == p["lon"]
+    same = bool(c) and c.get("lat") == p["lat"] and c.get("lon") == p["lon"] and c.get("summary", {}).get("v") == VERSION
     if same and now - c["at"] < FRESH:
         return c["summary"]
     try:
-        s = summarize(fetch(p["lat"], p["lon"]))
+        s = summarize(fetch(p["lat"], p["lon"]), air=fetch_air(p["lat"], p["lon"]))
     except Exception as e:  # noqa: BLE001 — pas de réseau, service indisponible ou réponse inattendue
         log.info("météo indisponible : %s", e)
         return c["summary"] if same and now - c["at"] < STALE_OK else None

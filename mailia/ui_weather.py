@@ -12,14 +12,28 @@ def card_html(s: dict, place_name: str) -> str:
     e = html.escape
     T = i18n.tr  # la carte suit la langue de l'interface (libellés du temps, « ressenti », « vent »…)
     img = lambda name, cls="": f'<img class="{cls}" src="{ICON.format(name)}" alt="">'
+    day_label = lambda x: T(x) if x in ("Aujourd'hui", "Demain") else " ".join([T(x.split(" ")[0]), *x.split(" ")[1:]])
     hours = "".join(f'<div class="wx-h"><span>{e(h["hour"])}</span>{img(h["icon"])}<b>{h["temp"]}°</b>'
                     f'<i>{img("raindrop")}{h["rain"]} %</i></div>' for h in s["next"])
+    days = "".join(f'<div class="wx-d"><span>{e(day_label(x["label"]))}</span>{img(x["icon"])}<b>{x["tmax"]}°</b><em>{x["tmin"]}°</em>'
+                   f'<i>{img("raindrop")}{x["rain"]} %</i></div>' for x in s.get("days", []))
+    d = s.get("details") or {}
+    cells = []
+    if d:
+        cells = [(T("Pluie aujourd'hui"), f'{str(d["mm"]).replace(".", ",")} mm'), (T("Rafales"), f'{d["gust"]} km/h'), (T("Vent (direction)"), d["wind_dir"]),
+                 (T("Indice UV"), f'{d["uv"]} · {T(d["uv_label"])}'), (T("Ensoleillement"), f'{str(d["sun_h"]).replace(".", ",")} h'), (T("Humidité"), f'{d["humidity"]} %'),
+                 (T("Pression"), f'{d["pressure"]} hPa'), (T("Nuages"), f'{d["clouds"]} %'), (T("Visibilité"), f'{d["visibility_km"]} km')]
+        if d.get("aqi") is not None:
+            cells.append((T("Qualité de l'air"), f'{d["aqi"]} · {T(d["aqi_label"])}'))
+    grid = "".join(f'<div><span>{e(k)}</span><b>{e(v)}</b></div>' for k, v in cells)
     return (f'<div class="wx"><div class="wx-main">{img(s["icon"], "wx-icon")}<div class="wx-temp">{s["temp"]}°</div>'
             f'<div class="wx-info"><div class="wx-label">{e(T(s["label"]))}</div><div class="wx-place">{e(place_name)}</div>'
             f'<div class="wx-sub">{T("Ressenti")} {s["feels"]}° · {T("min")} {s["tmin"]}° · {T("max")} {s["tmax"]}°</div>'
             f'<div class="wx-sub">{img("raindrop")}{s["rain"]} % · {T("vent")} {s["wind"]} km/h · {img("sunrise")}{e(s["sunrise"])} · {img("sunset")}{e(s["sunset"])}</div></div></div>'
             f'<div class="wx-hours">{hours}</div>'
-            f'<div class="wx-credit">{e(weather.ATTRIBUTION)} · {T("icônes Meteocons")}</div></div>')
+            + (f'<div class="wx-days">{days}</div>' if days else "")
+            + (f'<details class="wx-det"><summary>{e(T("Détails"))}</summary><div class="wx-grid">{grid}</div></details>' if grid else "")
+            + f'<div class="wx-credit">{e(weather.ATTRIBUTION)} · {T("icônes Meteocons")}</div></div>')
 
 
 class WeatherMixin:

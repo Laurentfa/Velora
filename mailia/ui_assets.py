@@ -173,6 +173,12 @@ body.compact .swrap:hover .rowact{opacity:1}
 .wx-hours{display:flex;gap:2px;margin-top:6px;border-top:1px solid var(--line);padding-top:6px;overflow-x:auto}
 .wx-h{display:flex;flex-direction:column;align-items:center;min-width:52px;flex:1;font-size:12px}.wx-h span{color:var(--muted)}.wx-h img{width:34px;height:34px}.wx-h b{font-size:13px}
 .wx-h i{font-style:normal;color:var(--muted);font-size:10px;display:flex;align-items:center}.wx-h i img{width:11px;height:11px}
+.wx-days{display:flex;gap:2px;margin-top:6px;border-top:1px solid var(--line);padding-top:6px;overflow-x:auto}
+.wx-d{display:flex;flex-direction:column;align-items:center;min-width:64px;flex:1;font-size:12px;border-radius:10px;padding:2px 0}.wx-d:first-child{background:rgba(255,255,255,.18)}
+.wx-d span{color:var(--muted);white-space:nowrap}.wx-d img{width:36px;height:36px}.wx-d b{font-size:13px}.wx-d em{font-style:normal;color:var(--muted);font-size:12px}
+.wx-d i{font-style:normal;color:var(--muted);font-size:10px;display:flex;align-items:center}.wx-d i img{width:11px;height:11px}
+.wx-det{margin-top:6px;border-top:1px solid var(--line);padding-top:4px;font-size:12px}.wx-det summary{cursor:pointer;color:var(--muted);padding:2px 0;user-select:none}
+.wx-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px 12px;padding:6px 0 2px}.wx-grid span{display:block;color:var(--muted);font-size:11px}.wx-grid b{font-size:13px}
 .wx-credit{font-size:10px;color:var(--muted);text-align:right;margin-top:2px;opacity:.8}
 .brief-date{font-size:12px;color:var(--muted)}
 .brief-intro{font-size:16px;font-weight:600;line-height:1.4;margin:10px 0 2px;letter-spacing:-.01em}
