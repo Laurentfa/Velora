@@ -437,10 +437,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         brief = self.view == "brief"
         self.title_icon.set_content(icons.svg("sparkle", 24) if brief else "")
         self.title_icon.style("display:flex;color:var(--accent)" if brief else "display:none")
-        c = getattr(self, "counts", None) or {}
         now = datetime.now()
-        self.subtitle.set_text(f"{JOURS_LONG[now.weekday()].capitalize()} {now.day} {MOIS[now.month - 1]} · {c.get('unread', 0)} non lus" + (f" · {c['todo']} à traiter" if c.get("todo") else "")
-                               if brief else "")
+        self.subtitle.set_text(f"{JOURS_LONG[now.weekday()].capitalize()} {now.day} {MOIS[now.month - 1]}" if brief else "")
         self.subtitle.set_visibility(brief)
         self.ephem.set_content(ui_weather.ephemeris_html(datetime.now().astimezone(), weather.cached_summary()) if brief else "")
         self.ephem.set_visibility(brief)

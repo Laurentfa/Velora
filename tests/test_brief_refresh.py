@@ -87,7 +87,7 @@ async def test_the_brief_title_is_shown_once_with_its_icon_and_a_subtitle(user, 
     await b.go("brief", "", "")
     await asyncio.sleep(0.6)
     assert b.title.text == "Brief du jour" and "sparkle" not in b.title_icon.content and "<svg" in b.title_icon.content  # l'icône est devant le titre du haut
-    assert b.subtitle.visible and "non lus" in b.subtitle.text and "à traiter" in b.subtitle.text
+    assert b.subtitle.visible and "non lus" not in b.subtitle.text and str(datetime.now().day) in b.subtitle.text
     labels = [el for el in user.client.elements.values() if isinstance(el, ui.label)]
     assert not [el for el in labels if "tag" in el.classes and "brief du jour" in el.text.lower()]  # plus de second titre dans la carte du brief
     assert not [el for el in labels if "brief-date" in el.classes]  # la date est dans le sous-titre du haut
