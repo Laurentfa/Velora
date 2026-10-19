@@ -29,7 +29,8 @@ def card_html(s: dict, place_name: str) -> str:
     return (f'<div class="wx"><div class="wx-main">{img(s["icon"], "wx-icon")}<div class="wx-temp">{s["temp"]}°</div>'
             f'<div class="wx-info"><div class="wx-label">{e(T(s["label"]))}</div><div class="wx-place">{e(place_name)}</div>'
             f'<div class="wx-sub">{T("Ressenti")} {s["feels"]}° · {T("min")} {s["tmin"]}° · {T("max")} {s["tmax"]}°</div>'
-            f'<div class="wx-sub">{img("raindrop")}{s["rain"]} % · {T("vent")} {s["wind"]} km/h · {img("sunrise")}{e(s["sunrise"])} · {img("sunset")}{e(s["sunset"])}</div></div></div>'
+            f'<div class="wx-sub">{img("raindrop")}{s["rain"]} % · {T("vent")} {s["wind"]} km/h</div>'
+            f'<div class="wx-sub">{img("sunrise")}{e(s["sunrise"])} · {img("sunset")}{e(s["sunset"])}</div></div></div>'
             f'<div class="wx-hours">{hours}</div>'
             + (f'<div class="wx-days">{days}</div>' if days else "")
             + (f'<details class="wx-det"><summary>{e(T("Détails"))}</summary><div class="wx-grid">{grid}</div></details>' if grid else "")
