@@ -65,7 +65,7 @@ from mailia.textutil import for_ai
 from mailia.ui_account import friendly_error
 from mailia.ui_apple import AppleWriterMixin
 from mailia.ui_assets import CSS, SWIPE_JS
-from mailia import apple_writer, icons
+from mailia import apple_writer, icons, weather
 from mailia.brand import logo_big, logo_img
 from mailia.ui_bulk import BulkMixin
 from mailia.ui_cleanup import CleanupMixin
@@ -82,6 +82,7 @@ from mailia.ui_search import SearchMixin
 from mailia.ui_settings import open_settings
 from mailia.ui_tasks import TasksMixin
 from mailia.ui_update import auto_check
+from mailia.ui_weather import WeatherMixin
 from mailia import ui_zoom
 
 perf.mark("modules chargés")
@@ -117,7 +118,7 @@ perf.install()
 
 
 
-class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin, AppleWriterMixin):
+class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin, AppleWriterMixin, WeatherMixin):
     """État et interface d'une fenêtre (chaque client a la sienne)."""
 
     def __init__(self) -> None:
@@ -452,6 +453,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             with ui.element("div").classes("brief-head"):
                 ui.label("✦ Brief du jour").classes("tag")
                 ui.label(f"{JOURS_LONG[now.weekday()].capitalize()} {now.day} {MOIS[now.month - 1]}").classes("brief-date")
+            self.weather_card()
             ui.label(sm.get("intro", "")).classes("brief-intro")
             if sm.get("intro", "").startswith("Synthèse indisponible"):
                 ui.button("Réessayer", icon="refresh", on_click=self.retry_brief).props("flat dense no-caps size=sm color=primary")
@@ -1970,6 +1972,7 @@ if not DB_ERROR:
     app.on_startup(lambda: background_tasks.create(sync_loop()))
     app.on_startup(lambda: background_tasks.create(outbox_loop()))
     app.on_startup(lambda: background_tasks.create(_start_api()))
+    app.add_static_files("/weather-icons", str(weather.ICONS))  # icônes météo animées (Meteocons, licence MIT)
     app.on_startup(apple_writer.refresh_async)  # Apple Intelligence prête ? vérifié en arrière-plan dès le démarrage
     app.on_shutdown(apiserver.runner.stop)
 # le serveur de l'interface n'accepte que les requêtes destinées à cette machine : une page web malveillante qui ferait pointer un nom de

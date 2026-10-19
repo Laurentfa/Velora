@@ -163,6 +163,17 @@ body.compact .swrap:hover .rowact{opacity:1}
 .brief{background:var(--ai-soft);border-radius:16px;padding:16px 18px 14px;margin:12px 12px 6px;width:calc(100% - 24px)}
 .brief-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
 .brief .tag{font-size:11px;font-weight:700;color:var(--ai);letter-spacing:.06em;text-transform:uppercase}
+.wx{border-radius:14px;padding:12px 14px 8px;margin:0 0 10px;background:linear-gradient(135deg,rgba(60,110,200,.26),rgba(60,110,200,.10));border:1px solid var(--line)}
+.wx img{filter:drop-shadow(0 1px 2px rgba(40,60,110,.35))}
+.wx-main{display:flex;align-items:center;gap:6px}
+.wx-icon{width:92px;height:92px;flex:none;margin:-6px 0 -6px -8px}
+.wx-temp{font-size:44px;font-weight:700;letter-spacing:-.03em;line-height:1;margin-right:10px}
+.wx-info{min-width:0}.wx-label{font-weight:600;font-size:15px}.wx-place{font-size:12px;color:var(--muted);margin-bottom:3px}
+.wx-sub{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:3px;flex-wrap:wrap}.wx-sub img{width:16px;height:16px;margin-left:4px}.wx-sub img:first-child{margin-left:0}
+.wx-hours{display:flex;gap:2px;margin-top:6px;border-top:1px solid var(--line);padding-top:6px;overflow-x:auto}
+.wx-h{display:flex;flex-direction:column;align-items:center;min-width:52px;flex:1;font-size:12px}.wx-h span{color:var(--muted)}.wx-h img{width:34px;height:34px}.wx-h b{font-size:13px}
+.wx-h i{font-style:normal;color:var(--muted);font-size:10px;display:flex;align-items:center}.wx-h i img{width:11px;height:11px}
+.wx-credit{font-size:10px;color:var(--muted);text-align:right;margin-top:2px;opacity:.8}
 .brief-date{font-size:12px;color:var(--muted)}
 .brief-intro{font-size:16px;font-weight:600;line-height:1.4;margin:10px 0 2px;letter-spacing:-.01em}
 .brief-sec{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);margin:16px 0 4px}

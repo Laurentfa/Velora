@@ -223,6 +223,8 @@ def test_the_builds_ship_the_translation_files():
     assert "mailia/locales" in (root / "build_mac.sh").read_text(encoding="utf-8")
     assert "mailia\\locales" in (root / "build_windows.bat").read_text(encoding="utf-8")
     assert (root / "mailia" / "locales" / "en.json").is_file()
+    assert "mailia/weather_icons" in (root / "build_mac.sh").read_text(encoding="utf-8")
+    assert "mailia\\weather_icons" in (root / "build_windows.bat").read_text(encoding="utf-8")
 
 
 def test_the_availability_check_never_blocks_the_screen(monkeypatch):

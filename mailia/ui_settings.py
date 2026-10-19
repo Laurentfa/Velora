@@ -14,6 +14,7 @@ from mailia.textutil import html_to_text
 from mailia.ui_account import delete_account_dialog, friendly_error, open_account
 from mailia.ui_common import CAT, SERVER_MODE, default_account, make_editor, open_folder, reveal
 from mailia.ui_lock import lock_screen_now
+from mailia.ui_weather import weather_settings
 from mailia.ui_update import panel as update_panel
 from mailia import ui_zoom
 
@@ -307,6 +308,8 @@ def _tab_aff(f) -> None:
               value=min((0, 5, 10, 20, 30), key=lambda v: abs(v - outgoing.undo_delay())), label="Délai pour annuler un envoi",
               on_change=lambda e: db.kv_set("undo_delay", str(e.value))).props("outlined dense stack-label").classes("w-full q-mt-sm")
     ui.label("Après « Envoyer », le message attend ce délai : le bouton « Annuler » le rappelle comme brouillon.").classes("text-caption text-grey")
+
+    weather_settings()
 
     ui.label("Signature").classes("text-subtitle2 q-mt-md")
     ui.switch("Ajouter ma signature à mes messages et à mes réponses").bind_value(f, "SIG_ON")
