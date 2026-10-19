@@ -491,3 +491,82 @@ def test_every_transcription_leaves_a_trace_for_the_settings_screen(monkeypatch)
 
 def test_fast_partials_are_off_because_they_favour_repetitions():
     assert whisper_engine.FAST_PARTIALS is False
+
+
+def test_whisper_warm_up_runs_once_not_twice(monkeypatch):
+    calls = []
+
+    def run(audio, fast=False):
+        calls.append(fast)
+        return ""
+    run.state = {"n": 4}
+    whisper_engine.warm_up(run)
+    assert calls == [False]  # deux calculs identiques doublaient l'attente du premier clic
+
+
+def test_a_fully_received_part_file_is_verified_not_requested_again(server, monkeypatch):
+    part = whisper_engine.model_path("tiny-test").with_name("ggml-test.bin.part")
+    part.write_bytes(PAYLOAD)  # reçu en entier, appli fermée avant la vérification
+    server.allow_range = False  # une requête « bytes=taille- » serait refusée : on ne doit pas la faire
+
+    def refuse(*a, **k):
+        raise AssertionError("aucune requête réseau attendue")
+    monkeypatch.setattr(whisper_engine.urllib.request, "urlopen", refuse)
+    whisper_engine.download("tiny-test")
+    assert whisper_engine.is_installed("tiny-test")
+
+
+def test_a_corrupted_whisper_model_is_detected_deleted_and_reported(server, monkeypatch):
+    tiny = whisper_engine.MODELS["tiny-test"]
+    whisper_engine.download("tiny-test")
+    whisper_engine.model_path("tiny-test").write_bytes(b"\0" * tiny.size)  # même taille, contenu vide
+
+    class Broken:
+        def __init__(self, *a, **k):
+            raise RuntimeError("bad model")
+    import sys
+    import types
+    fake = types.ModuleType("pywhispercpp.model")
+    fake.Model = Broken
+    monkeypatch.setitem(sys.modules, "pywhispercpp.model", fake)
+    with pytest.raises(RuntimeError, match="abîmé"):
+        whisper_engine._build_runner(str(whisper_engine.model_path("tiny-test")), None)
+    assert not whisper_engine.model_path("tiny-test").exists()
+
+
+def test_cancelling_during_the_model_load_never_opens_the_microphone(monkeypatch):
+    monkeypatch.setattr(whisper_engine, "keep_runner", lambda *a, **k: None)
+    opened = []
+
+    class Mic(FakeMic):
+        def open(self):
+            opened.append(1)
+    s_holder = {}
+
+    def factory(path):
+        s_holder["s"].kill()  # annulé pendant le chargement
+        return lambda a: ""
+    s = whisper_engine.WhisperSession("rapide", mic=Mic([]), runner_factory=factory)
+    s_holder["s"] = s
+    s.start()
+    ev = drain(s, {"done", "error"})
+    assert ev[-1]["t"] == "done" and not opened
+
+
+def test_a_microphone_that_goes_silent_is_reported(monkeypatch):
+    monkeypatch.setattr(whisper_engine, "NO_AUDIO_TIMEOUT", 0.6)
+
+    class DeadMic:
+        def open(self):
+            pass
+
+        def read(self, timeout=0.3):
+            threading.Event().wait(0.05)
+            return None
+
+        def close(self):
+            pass
+    s = whisper_engine.WhisperSession("rapide", mic=DeadMic(), runner_factory=lambda p: (lambda a: ""))
+    s.start()
+    ev = drain(s, {"error", "done"})
+    assert ev[-1]["t"] == "error" and "Plus aucun son" in ev[-1]["msg"]

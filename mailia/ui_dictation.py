@@ -104,11 +104,17 @@ class DictationMixin:
                 state["session"].stop()
                 self._dict_paint(target, True, "Fin de la dictée…")
             return
-        info = await run.io_bound(dictation.check)
-        if not info.get("available"):
-            return ui.notify(dictation.message("unavailable"), type="warning")
-        if not info.get("installed") and not await self._dictation_install():
+        if getattr(self, "_dict_starting", False):  # double clic pendant la vérification : une seule dictée
             return
+        self._dict_starting = True
+        try:
+            info = await run.io_bound(dictation.check)
+            if not info.get("available"):
+                return ui.notify(dictation.message("unavailable"), type="warning")
+            if not info.get("installed") and not await self._dictation_install():
+                return
+        finally:
+            self._dict_starting = False
         session = dictation.new_session()
         session.start()
         self.dict_state = {"session": session, "target": target, "timer": ui.timer(0.1, self._dictation_pump), "t0": time.monotonic(),
@@ -164,7 +170,10 @@ class DictationMixin:
                 self._dict_paint(target, True, "Démarrage : modèle et micro…")
                 state["loading"] = True
             elif kind == "slow":
-                ui.notify("Cet ordinateur transcrit lentement : le texte n'apparaîtra qu'aux pauses. Le modèle « Rapide » (Paramètres › Dictée vocale) ira plus vite.", type="warning", multi_line=True)
+                ui.notify("Cet ordinateur transcrit lentement : le texte n'apparaîtra qu'aux pauses. Baissez la réactivité (Paramètres › Dictée vocale) pour aller plus vite."
+                          if dictation.engine() == "parakeet" else
+                          "Cet ordinateur transcrit lentement : le texte n'apparaîtra qu'aux pauses. Le modèle « Rapide » (Paramètres › Dictée vocale) ira plus vite.",
+                          type="warning", multi_line=True)
             elif kind == "ready":
                 state["ready"] = True
                 self._dict_paint(target, True, "J'écoute… (clic sur le micro pour arrêter)")

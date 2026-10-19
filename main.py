@@ -65,7 +65,7 @@ from mailia.textutil import for_ai
 from mailia.ui_account import friendly_error
 from mailia.ui_apple import AppleWriterMixin
 from mailia.ui_assets import CSS, SWIPE_JS
-from mailia import icons
+from mailia import apple_writer, icons
 from mailia.brand import logo_big, logo_img
 from mailia.ui_bulk import BulkMixin
 from mailia.ui_cleanup import CleanupMixin
@@ -1970,6 +1970,7 @@ if not DB_ERROR:
     app.on_startup(lambda: background_tasks.create(sync_loop()))
     app.on_startup(lambda: background_tasks.create(outbox_loop()))
     app.on_startup(lambda: background_tasks.create(_start_api()))
+    app.on_startup(apple_writer.refresh_async)  # Apple Intelligence prête ? vérifié en arrière-plan dès le démarrage
     app.on_shutdown(apiserver.runner.stop)
 # le serveur de l'interface n'accepte que les requêtes destinées à cette machine : une page web malveillante qui ferait pointer un nom de
 # domaine vers 127.0.0.1 (« DNS rebinding ») est refusée. En mode serveur (téléphone), le jeton d'accès protège l'accès.

@@ -747,3 +747,39 @@ def test_a_microphone_that_fails_to_open_is_reported(monkeypatch):
     s.start()
     ev = drain(s, {"error"})[-1]
     assert "périphérique occupé" in ev["msg"]
+
+
+async def test_a_double_click_on_the_microphone_starts_one_session_only(user: User, box, monkeypatch) -> None:
+    starts = []
+
+    class Fake:
+        def __init__(self):
+            self.events = queue.Queue()
+            self.finished = False
+
+        def start(self):
+            starts.append(1)
+            self.events.put({"t": "ready"})
+
+        def stop(self):
+            self.events.put({"t": "done"})
+
+        def kill(self):
+            pass
+
+    def slow_check(locale="fr-FR"):
+        threading.Event().wait(0.4)
+        return {"available": True, "installed": True}
+    monkeypatch.setattr(dictation, "usable", lambda: True)
+    monkeypatch.setattr(dictation, "engine", lambda: "apple")
+    monkeypatch.setattr(dictation, "check", slow_check)
+    monkeypatch.setattr(dictation, "new_session", lambda: Fake())
+    await user.open("/")
+    b = box[-1]
+    b.new_message()
+    await asyncio.sleep(0.4)
+    click(user, "dictate-body")
+    await asyncio.sleep(0.05)
+    click(user, "dictate-body")  # deuxième clic pendant la vérification
+    await asyncio.sleep(1.2)
+    assert len(starts) == 1

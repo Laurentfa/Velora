@@ -223,3 +223,39 @@ def test_the_builds_ship_the_translation_files():
     assert "mailia/locales" in (root / "build_mac.sh").read_text(encoding="utf-8")
     assert "mailia\\locales" in (root / "build_windows.bat").read_text(encoding="utf-8")
     assert (root / "mailia" / "locales" / "en.json").is_file()
+
+
+def test_the_availability_check_never_blocks_the_screen(monkeypatch):
+    import threading
+    import time
+    started, release = threading.Event(), threading.Event()
+
+    def slow_probe():
+        started.set()
+        release.wait(3)
+        apple_writer._cache.update(at=time.monotonic(), ok=True)
+        return True
+    monkeypatch.setattr(apple_writer, "supported", lambda: True)
+    monkeypatch.setattr(apple_writer, "_probe", slow_probe)
+    monkeypatch.setitem(apple_writer._cache, "at", 0.0)
+    monkeypatch.setitem(apple_writer._cache, "ok", False)
+    t0 = time.monotonic()
+    assert apple_writer.available() is False  # pas encore su : réponse immédiate, boutons masqués
+    assert time.monotonic() - t0 < 0.5
+    assert started.wait(2)  # la vérification a démarré en arrière-plan
+    release.set()
+    for _ in range(40):
+        if apple_writer.available():
+            break
+        time.sleep(0.05)
+    assert apple_writer.available() is True
+
+
+def test_a_stale_answer_is_used_while_it_refreshes(monkeypatch):
+    import time
+    calls = []
+    monkeypatch.setattr(apple_writer, "supported", lambda: True)
+    monkeypatch.setattr(apple_writer, "refresh_async", lambda: calls.append(1))
+    monkeypatch.setitem(apple_writer._cache, "at", time.monotonic() - 500)
+    monkeypatch.setitem(apple_writer._cache, "ok", True)
+    assert apple_writer.available() is True and calls == [1]  # ancienne réponse servie, vérification relancée

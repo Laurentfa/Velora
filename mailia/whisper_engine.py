@@ -88,6 +88,10 @@ class DownloadError(Exception):
     pass
 
 
+class _AlreadyComplete(Exception):
+    pass
+
+
 def free_space() -> int:
     import shutil
     return shutil.disk_usage(models_dir()).free
@@ -123,6 +127,8 @@ def fetch_file(url: str, final: Path, size: int, sha256: str, on_bytes=None, can
         have = 0
     req = urllib.request.Request(url, headers={"User-Agent": "Velora", **({"Range": f"bytes={have}-"} if have else {})})
     try:
+        if have == size:  # reçu en entier mais jamais vérifié (appli fermée juste avant) : pas de nouvelle requête (« bytes=taille- » serait refusé), on vérifie
+            raise _AlreadyComplete()
         with urllib.request.urlopen(req, timeout=30) as resp:
             if have and resp.status != 206:  # le serveur ignore la reprise : on repart de zéro
                 have = 0
@@ -142,6 +148,8 @@ def fetch_file(url: str, final: Path, size: int, sha256: str, on_bytes=None, can
                 os.fsync(f.fileno())  # sur le disque pour de bon : après une coupure de courant, Windows peut sinon laisser un fichier de la bonne taille mais rempli de zéros
     except DownloadError:
         raise
+    except _AlreadyComplete:
+        pass
     except (OSError, ValueError) as e:
         raise DownloadError(f"Téléchargement impossible : {e}") from e
     if part.stat().st_size != size or _sha256(part) != sha256:
@@ -163,9 +171,10 @@ def download(key: str, progress=None, cancel: threading.Event | None = None) -> 
 # ---------------------------------------------------------------- transcription
 _PHANTOMS = ("sous-titrage", "sous-titres réalisés", "amara.org", "merci d'avoir regardé", "merci d'avoir regardé cette vidéo", "thanks for watching",
              "abonnez-vous", "n'hésitez pas à vous abonner")
-_runner_cache: dict[str, tuple] = {}
+_runner_cache: dict = {}
 _cache_lock = threading.Lock()
 _load_lock = threading.Lock()  # un seul chargement de modèle à la fois : un préchargement et un clic sur le micro ne le chargent pas deux fois
+NO_AUDIO_TIMEOUT = 6.0  # secondes sans aucun bloc du micro avant d'abandonner la dictée
 KEEP_MINUTES = 10  # un modèle chargé reste en mémoire ce temps après son dernier usage (le recharger prend plusieurs secondes)
 
 
@@ -189,7 +198,8 @@ def warm_up(run) -> float:
     if quiet is None:
         quiet = np.zeros(SAMPLE_RATE, dtype="float32")
     run(quiet)
-    run(quiet, fast=True)
+    if FAST_PARTIALS:  # un deuxième calcul identique doublerait l'attente (≈ 4 s de plus sur un PC moyen) sans rien préchauffer de plus
+        run(quiet, fast=True)
     took = time.monotonic() - t0
     log.info("dictée Whisper : préchauffage en %.1f s", took)
     return took
@@ -246,9 +256,25 @@ def load_runner(path: str, prompt: str | None = None):
         return run
 
 
+def _check_model_file(path: str, error: Exception) -> None:
+    """Le modèle ne se charge pas : le fichier est-il abîmé (taille et empreinte) ? Si oui, il est supprimé pour être retéléchargé, avec un message clair."""
+    m = next((x for x in MODELS.values() if model_path_of(x) == Path(path)), None)
+    if m is not None and (not Path(path).is_file() or Path(path).stat().st_size != m.size or _sha256(Path(path)) != m.sha256):
+        Path(path).unlink(missing_ok=True)
+        raise RuntimeError(f"Le fichier du modèle est abîmé : supprimé. Retéléchargez-le dans Paramètres › Dictée vocale. Détail : {error}") from error
+
+
+def model_path_of(m: Model) -> Path:
+    return models_dir() / m.file
+
+
 def _build_runner(path: str, prompt: str | None):
     from pywhispercpp.model import Model as WModel
-    model = WModel(path, n_threads=default_threads(), print_progress=False, print_realtime=False)
+    try:
+        model = WModel(path, n_threads=default_threads(), print_progress=False, print_realtime=False)
+    except Exception as e:  # noqa: BLE001
+        _check_model_file(path, e)
+        raise
     state = {"n": chosen_threads() or default_threads()}
 
     def run(audio, fast: bool = False) -> str:
@@ -430,6 +456,10 @@ class WhisperSession:
         run = self.runner_factory(path)
         warm_up(run)
         model_s = time.monotonic() - t
+        if self._stop.is_set():  # annulé pendant le chargement : on n'ouvre pas le micro pour le refermer aussitôt (le voyant du micro s'allumerait pour rien)
+            self._keep(path, run)
+            self.events.put({"t": "done"})
+            return
         t = time.monotonic()
         self.mic.open()
         mic_s = time.monotonic() - t
@@ -443,6 +473,7 @@ class WhisperSession:
         pre: list = []  # quelques blocs de silence juste avant la parole : le début d'un mot est souvent plus faible que le seuil
         speech_s = silent_s = since_partial = 0.0
         floor = 0.01
+        last_audio = time.monotonic()
 
         slow = {"n": 0, "off": False}
 
@@ -477,7 +508,10 @@ class WhisperSession:
         while not self._stop.is_set():
             block = self.mic.read()
             if block is None:
+                if time.monotonic() - last_audio > NO_AUDIO_TIMEOUT:  # le micro ne délivre plus rien (débranché, pris par une autre appli) : on le dit au lieu de rester muet
+                    raise OSError("Plus aucun son reçu du micro : est-il débranché ou utilisé par une autre application ?")
                 continue
+            last_audio = time.monotonic()
             rms = float((block.astype("float64") ** 2).mean() ** 0.5)
             floor = rms if rms < floor else min(0.02, floor + (rms - floor) * 0.002)
             voiced = rms > max(0.005, floor * 3)

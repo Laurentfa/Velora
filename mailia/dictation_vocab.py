@@ -18,7 +18,7 @@ def _tidy(term: str) -> str:
     """« Thomas LEROY » -> « Thomas Leroy » ; les sigles courts restent en majuscules."""
     out = []
     for w in term.split():
-        out.append(w.capitalize() if w.isupper() and len(w) > 4 else w[:1].upper() + w[1:] if w.isupper() and len(w) <= 4 and False else w)
+        out.append(w.capitalize() if w.isupper() and len(w) > 4 else w)
     return " ".join(out)
 
 

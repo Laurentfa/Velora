@@ -9,6 +9,7 @@ import json
 import platform
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -55,12 +56,10 @@ def enabled() -> bool:
     return (db.kv_get("apple_writer") or "1") == "1"
 
 
-def available(max_age: float = 60.0) -> bool:
-    """Apple Intelligence est-elle activée et prête sur ce Mac ? (le résultat est gardé une minute)"""
-    if not supported():
-        return False
-    if time.monotonic() - _cache["at"] < max_age:
-        return _cache["ok"]
+_checking = threading.Lock()
+
+
+def _probe() -> bool:
     try:
         out = subprocess.run([str(helper_path()), "--check"], capture_output=True, text=True, timeout=20).stdout
         ok = bool(json.loads(out.strip().splitlines()[-1]).get("available"))
@@ -68,6 +67,29 @@ def available(max_age: float = 60.0) -> bool:
         ok = False
     _cache.update(at=time.monotonic(), ok=ok)
     return ok
+
+
+def refresh_async() -> None:
+    """Vérifie en arrière-plan qu'Apple Intelligence est prête (un lancement du programme natif : de 0,3 à plusieurs secondes) sans faire attendre l'écran."""
+    if not supported() or not _checking.acquire(blocking=False):
+        return
+
+    def work() -> None:
+        try:
+            _probe()
+        finally:
+            _checking.release()
+    threading.Thread(target=work, daemon=True).start()
+
+
+def available(max_age: float = 60.0) -> bool:
+    """Apple Intelligence est-elle activée et prête sur ce Mac ? Réponse immédiate (la dernière connue) ; la vérification se refait en arrière-plan quand elle est
+    ancienne ou n'a jamais eu lieu : l'écran n'attend jamais le programme natif. Tant qu'on ne sait pas, les boutons sont masqués."""
+    if not supported():
+        return False
+    if time.monotonic() - _cache["at"] >= max_age:
+        refresh_async()
+    return _cache["ok"]
 
 
 class WriterError(Exception):

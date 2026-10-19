@@ -1,8 +1,7 @@
 """Reports, relances et tâches."""
-import asyncio
 from datetime import datetime, timedelta, timezone
 
-from nicegui import run, ui
+from nicegui import background_tasks, run, ui
 
 from mailia import ai, compose, config, db, sync
 
@@ -150,7 +149,7 @@ class TasksMixin:
                         "flat dense round size=sm color=negative").tooltip("Supprimer")
 
     def refresh_after_task(self) -> None:
-        asyncio.create_task(self.reload(force=True))
+        background_tasks.create(self.reload(force=True))  # garde une référence à la tâche (sinon elle peut être ramassée avant la fin)
 
     async def task_dialog(self, m: dict) -> None:
         with self.host, ui.dialog() as dlg, ui.card().style("width:520px;max-width:96vw"):
