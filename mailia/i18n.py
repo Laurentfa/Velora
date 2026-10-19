@@ -38,12 +38,12 @@ def system_language() -> str:
 
 
 def setting() -> str:
-    """Choix enregistré : « fr », « en » ou « auto »."""
+    """Choix enregistré : « fr », « en » ou « auto » (suivre le système). Sans choix enregistré : le français, quelle que soit la langue du système."""
     try:
         v = db.kv_get("ui_lang")
     except Exception:  # base pas encore créée (tout premier lancement)
         v = None
-    return v if v in AVAILABLE else "auto"
+    return v if v in AVAILABLE or v == "auto" else "fr"
 
 
 def language() -> str:

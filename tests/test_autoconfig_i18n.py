@@ -50,3 +50,17 @@ def test_exchange_announced_by_srv_record(monkeypatch):
     assert r["kind"] == "ews" and r["host"] == "mail.hebergeur.example" and r["found"]
     monkeypatch.setattr(autoconfig, "autodiscover_srv", lambda d: "")
     assert autoconfig.detect("marie@entreprise-exemple.fr")["kind"] == "imap"  # sans annonce : réglages IMAP supposés, comme avant
+
+
+def test_the_interface_is_french_by_default_even_on_an_english_system(monkeypatch):
+    from mailia import db, i18n
+    monkeypatch.setattr(i18n, "system_language", lambda: "en")
+    with db.conn() as c:
+        c.execute("DELETE FROM kv WHERE k='ui_lang'")
+    assert i18n.setting() == "fr" and i18n.language() == "fr" and i18n.client_script() == ""
+    db.kv_set("ui_lang", "auto")  # le choix explicite « automatique » suit toujours le système
+    assert i18n.language() == "en"
+    db.kv_set("ui_lang", "en")
+    assert i18n.language() == "en"
+    db.kv_set("ui_lang", "fr")
+    assert i18n.language() == "fr"
