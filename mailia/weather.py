@@ -188,5 +188,19 @@ def report(now: float | None = None) -> dict | None:
     return s
 
 
+def cached_summary(now: float | None = None) -> dict | None:
+    """La dernière météo gardée en mémoire (moins de 6 h), sans aucun appel réseau : pour les éléments qui n'ont pas à attendre (l'éphéméride)."""
+    p = place()
+    if not enabled() or not p:
+        return None
+    try:
+        c = json.loads(db.kv_get("weather_cache") or "")
+    except ValueError:
+        return None
+    now = time.time() if now is None else now
+    ok = c and c.get("lat") == p["lat"] and c.get("lon") == p["lon"] and c.get("summary", {}).get("v") == VERSION and now - c["at"] < STALE_OK
+    return c["summary"] if ok else None
+
+
 def place_label(p: dict) -> str:
     return ", ".join(x for x in (p.get("name"), p.get("region")) if x)

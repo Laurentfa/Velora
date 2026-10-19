@@ -3,7 +3,7 @@ import html
 
 from nicegui import background_tasks, run, ui
 
-from mailia import db, i18n, weather
+from mailia import db, ephemeris, i18n, weather
 
 ICON = "/weather-icons/{}.svg"
 
@@ -37,6 +37,19 @@ def card_html(s: dict, place_name: str) -> str:
             + f'<div class="wx-credit">{e(weather.ATTRIBUTION)} · {T("icônes Meteocons")}</div></div>')
 
 
+def ephemeris_html(now, summary: dict | None) -> str:
+    """Ligne sous la date du brief : phase de la lune (icône, nom, part éclairée), puis lever, coucher du soleil et durée du jour quand la météo est connue."""
+    T = i18n.tr
+    img = lambda name: f'<img src="{ICON.format(name)}" alt="">'
+    m = ephemeris.moon(now)
+    parts = [f'{img(m["icon"])}<span>{html.escape(T(m["name"]))} · {m["pct"]} %</span>']
+    if summary and summary.get("sunrise") and summary.get("sunset"):
+        length = ephemeris.day_length(summary["sunrise"], summary["sunset"])
+        parts.append(f'{img("sunrise")}<span>{html.escape(summary["sunrise"])}</span>{img("sunset")}<span>{html.escape(summary["sunset"])}'
+                     + (f' · {html.escape(T("jour"))} {html.escape(length)}' if length else "") + "</span>")
+    return '<div class="ephem">' + '<span class="sep">·</span>'.join(f'<span class="eph-i">{p}</span>' for p in parts) + "</div>"
+
+
 class WeatherMixin:
     def weather_card(self) -> None:
         """Dans le brief : la carte météo, remplie en arrière-plan (le brief ne l'attend pas) ; absente si désactivée, sans ville ou hors connexion."""
@@ -54,6 +67,7 @@ class WeatherMixin:
                 return
             with slot:
                 ui.html(card_html(s, weather.place_label(p)), sanitize=False).mark("weather-card")
+            self.refresh_title()  # l'éphéméride du haut reprend le lever et le coucher du soleil de cette météo
         except Exception:  # noqa: BLE001 — le brief a pu être redessiné entre-temps
             pass
 

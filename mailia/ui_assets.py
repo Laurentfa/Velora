@@ -85,6 +85,7 @@ body.resizing iframe{pointer-events:none}
 .listcol{background:var(--surface);border-right:1px solid var(--line);height:100vh;min-width:0;flex-wrap:nowrap}
 .lhead{box-sizing:border-box;height:120px;padding:14px 14px 0;border-bottom:1px solid var(--line);width:100%}
 .lhead .title{font-size:19px;font-weight:700;letter-spacing:-.02em}
+.ephem{display:flex;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:1px}.eph-i{display:inline-flex;align-items:center;gap:3px}.eph-i img{width:24px;height:24px;margin:-3px 0}.ephem .sep{margin:0 8px}
 .lhead .subtitle{font-size:13px;color:var(--muted);margin-top:2px}
 .rows{flex:1;width:100%;min-height:0}
 .rows .q-scrollarea__content,.rbody .q-scrollarea__content{width:100%;max-width:100%}

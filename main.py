@@ -82,6 +82,7 @@ from mailia.ui_search import SearchMixin
 from mailia.ui_settings import open_settings
 from mailia.ui_tasks import TasksMixin
 from mailia.ui_update import auto_check
+from mailia import ui_weather
 from mailia.ui_weather import WeatherMixin
 from mailia import ui_zoom
 
@@ -193,6 +194,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                         self.title_icon = ui.html("", sanitize=False).style("display:none")  # icône devant le titre (brief du jour)
                         self.title = ui.label().classes("title")
                     self.subtitle = ui.label().classes("subtitle")  # sous le titre du brief : la date et ce qui attend
+                    self.ephem = ui.html("", sanitize=False)  # puis l'éphéméride : lune, lever et coucher du soleil
                     self.search_row = ui.row().classes("w-full items-center no-wrap gap-1")
                     with self.search_row:
                         self.search = ui.input(placeholder="Rechercher dans les mails…").props("dense outlined clearable debounce=300").classes("col")
@@ -440,6 +442,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self.subtitle.set_text(f"{JOURS_LONG[now.weekday()].capitalize()} {now.day} {MOIS[now.month - 1]} · {c.get('unread', 0)} non lus" + (f" · {c['todo']} à traiter" if c.get("todo") else "")
                                if brief else "")
         self.subtitle.set_visibility(brief)
+        self.ephem.set_content(ui_weather.ephemeris_html(datetime.now().astimezone(), weather.cached_summary()) if brief else "")
+        self.ephem.set_visibility(brief)
 
     async def restore_open(self) -> None:
         """Fenêtre rechargée en cours de travail (moins de 10 minutes après la dernière ouverture d'un message) : on rouvre ce message."""
