@@ -91,6 +91,7 @@ class AgendaMixin:
             with ui.element("div").classes("ag-scroll"):
                 body = ui.html("", sanitize=False).mark("agenda-grid")
             note = ui.label("").classes("rmeta ag-note")
+            self.feed_panel()
         self._agenda_ui = (label, body, note)
         if not (src["exchange"] or src["google"]):
             body.set_content('<div class="ag-empty">' + html.escape(i18n.tr("Aucun agenda connecté : ajoutez Exchange ou Google Agenda dans les Paramètres.")) + "</div>")

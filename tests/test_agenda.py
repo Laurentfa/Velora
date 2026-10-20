@@ -108,3 +108,37 @@ async def test_adding_an_appointment_calls_the_chosen_agenda(user, box, monkeypa
     user.find(marker="agenda-save").click()
     await task
     assert calls == [("Déjeuner", datetime(2026, 10, 20, 14, 30), datetime(2026, 10, 20, 15, 30), "google")]
+
+
+RSS = """<?xml version="1.0"?><rss version="2.0" xmlns:media="http://search.yahoo.com/mrss/"><channel><title>Le Monde</title>
+<item><title>Titre un</title><link>https://exemple.fr/a</link><description>&lt;p&gt;Résumé &amp;amp; suite&lt;/p&gt;</description><pubDate>Tue, 20 Oct 2026 05:30:00 +0200</pubDate>
+<media:content url="https://img.exemple.fr/a.jpg"/></item><item><title>Lien dangereux</title><link>javascript:alert(1)</link></item></channel></rss>""".encode()
+
+
+def test_feed_parses_rss_and_skips_unsafe_links() -> None:
+    from mailia import feed
+    r = feed.parse(RSS)
+    assert r["title"] == "Le Monde" and len(r["items"]) == 1
+    it = r["items"][0]
+    assert it["title"] == "Titre un" and "<" not in it["summary"] and it["image"].startswith("https://") and it["when"]
+
+
+def test_feed_refuses_entities_and_non_feeds_and_http() -> None:
+    from mailia import feed
+    with pytest.raises(ValueError):
+        feed.parse(b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "b">]><rss><channel><title>&a;</title></channel></rss>')
+    with pytest.raises(ValueError):
+        feed.parse(b"<html></html>")
+    assert feed.valid("https://www.lemonde.fr/rss/une.xml") and not feed.valid("http://x.fr/a") and not feed.valid("file:///etc/passwd")
+
+
+async def test_feed_shows_under_the_agenda(user, box, monkeypatch) -> None:
+    from mailia import feed
+    make_brief(["testbox|INBOX|1"])
+    monkeypatch.setattr(feed, "fetch", lambda force=False: feed.parse(RSS))
+    await user.open("/")
+    b = box[-1]
+    await b.go("brief", "", "")
+    await asyncio.sleep(0.9)
+    await user.should_see("Rendez-vous test")
+    await user.should_see("Titre un")

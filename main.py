@@ -65,6 +65,7 @@ from mailia.textutil import for_ai
 from mailia.ui_account import friendly_error
 from mailia.ui_agenda import AgendaMixin
 from mailia.ui_apple import AppleWriterMixin
+from mailia.ui_feed import FeedMixin
 from mailia.ui_assets import CSS, SWIPE_JS
 from mailia import apple_writer, icons, weather
 from mailia.brand import logo_big, logo_img
@@ -120,7 +121,7 @@ perf.install()
 
 
 
-class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin, AppleWriterMixin, WeatherMixin, AgendaMixin):
+class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin, AppleWriterMixin, WeatherMixin, AgendaMixin, FeedMixin):
     """État et interface d'une fenêtre (chaque client a la sienne)."""
 
     def __init__(self) -> None:
