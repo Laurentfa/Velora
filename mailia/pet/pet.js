@@ -46,7 +46,13 @@
       return p;
     }
     var left = [], right = [], low = -1e9;
-    ROWS[k].forEach(function (q) { var l = tr(q[1], q[0], -1), r = tr(q[2], q[0], 1); left.push(l); right.push(r); low = Math.max(low, l[1], r[1]); });
+    ROWS[k].forEach(function (q) {
+      var l = tr(q[1], q[0], -1), r = tr(q[2], q[0], 1);
+      if (front) { // la patte penchée paraît plus épaisse à la hanche : on resserre le haut selon l'inclinaison
+        var g = 1 - .3 * b * Math.min(1, Math.abs(S.th - L.th0) / 35) * (1 - sstep((q[0] - L.y0) / 75)), cx = (l[0] + r[0]) / 2;
+        l[0] = cx + (l[0] - cx) * g; r[0] = cx + (r[0] - cx) * g;
+      }
+      left.push(l); right.push(r); low = Math.max(low, l[1], r[1]); });
     var fw = f != null ? f : (L.bot - 8 * fl - L.y0) / Math.max(10, low - L.y0);
     var sc = function (p) { return [p[0], L.y0 + (p[1] - L.y0) * fw]; };
     return {left: left.map(sc), right: right.map(sc)};
@@ -66,8 +72,8 @@
     var S = {};
     for (var k in LEGS) { S[k] = legShape(k, legState(LEGS[k], t), bl); P[k].setAttribute('d', pathOf(S[k])); }
     // entrejambe : tant que les deux pattes avant sont presque collées en haut, le poitrail les relie (sinon un petit trou apparaît quand elles se croisent)
-    var a = S.FF, b = S.FN, n = Math.min(a.left.length, b.left.length), kmax = -1, thr = 10 * bl;
-    for (var i = 0; i < n && i < 12; i++) { if (b.left[i][0] - a.right[i][0] < thr) kmax = i; else break; }
+    var a = S.FF, b = S.FN, n = Math.min(a.left.length, b.left.length), kmax = -1, thr = 6 * bl;
+    for (var i = 0; i < n && i < 12 && a.left[i][1] - LEGS.FF.y0 < 22; i++) { if (b.left[i][0] - a.right[i][0] < thr) kmax = i; else break; }
     if (kmax >= 1) {
       var pts = []; for (i = 0; i <= kmax; i++) pts.push(a.left[i], a.right[i], b.left[i], b.right[i]);
       var h = hull(pts); crotch.setAttribute('d', 'M' + h.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' L') + 'Z');
