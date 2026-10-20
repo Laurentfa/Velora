@@ -81,7 +81,7 @@ def fetch(first: date, days: int = 7, force: bool = False) -> dict:
             parts[name] = f.result()
         except Exception as e:  # noqa: BLE001 — une source en panne ne cache pas l'autre
             log.warning("agenda %s : %s", name, e)
-            errors.append(f"{'Exchange' if name == 'exchange' else 'Google Agenda'} : {e}")
+            errors.append(f"{'Exchange' if name == 'exchange' else 'Google Agenda'} : {str(e)[:160]}")
     tasks = _fetch_tasks(errors)
     res = {"events": _merge(parts), "tasks": tasks, "errors": errors}
     if not errors:
@@ -111,7 +111,7 @@ def _fetch_tasks(errors: list[str]) -> list[dict]:
                     seen[k] = {**t, "src": {name}, "refs": ref}
         except Exception as e:  # noqa: BLE001
             log.warning("tâches %s : %s", name, e)
-            errors.append(f"{'Exchange' if name == 'exchange' else 'Google Tasks'} : {e}")
+            errors.append(f"{'Exchange' if name == 'exchange' else 'Google Tasks'} : {str(e)[:160]}")
     return sorted(seen.values(), key=lambda t: (t["due"], t["title"]))
 
 

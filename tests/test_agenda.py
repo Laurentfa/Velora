@@ -248,3 +248,10 @@ async def test_a_task_can_be_completed_from_its_card(user, box, monkeypatch) -> 
     user.find(marker="agenda-done").click()
     await task
     assert done == ["Rendre le devis"]
+
+
+def test_exchange_calendar_and_task_fields_exist_in_exchangelib() -> None:
+    from exchangelib.items import CalendarItem, Task
+    cal, task = {f.name for f in CalendarItem.FIELDS}, {f.name for f in Task.FIELDS}
+    assert {"subject", "start", "end", "location", "is_all_day", "type", "is_meeting"} <= cal  # les noms de champs demandés à Exchange doivent exister
+    assert {"subject", "due_date", "status"} <= task

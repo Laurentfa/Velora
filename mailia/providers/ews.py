@@ -361,14 +361,14 @@ class EwsProvider:
         tz = self.account.default_timezone
         mk = lambda d: EWSDateTime(d.year, d.month, d.day, d.hour, d.minute, tzinfo=tz)
         out = []
-        for it in self.account.calendar.view(start=mk(start), end=mk(end)).only("subject", "start", "end", "location", "is_all_day", "calendar_item_type", "is_meeting"):
+        for it in self.account.calendar.view(start=mk(start), end=mk(end)).only("subject", "start", "end", "location", "is_all_day", "type", "is_meeting"):
             if not it.start or not it.end:
                 continue
             if it.is_all_day:
                 a, b = datetime(it.start.year, it.start.month, it.start.day), datetime(it.end.year, it.end.month, it.end.day)
             else:
                 a, b = (datetime.fromisoformat(x.isoformat()).astimezone().replace(tzinfo=None) for x in (it.start, it.end))
-            single = (it.calendar_item_type or "Single") == "Single" and not it.is_meeting  # séries et réunions avec invités : à modifier dans Outlook
+            single = (it.type or "Single") == "Single" and not it.is_meeting  # séries et réunions avec invités : à modifier dans Outlook
             out.append({"title": it.subject or "", "start": a, "end": b, "all_day": bool(it.is_all_day), "where": it.location or "",
                         "editable": single and not it.is_all_day, "ref": {"src": "exchange", "id": it.id, "ck": it.changekey}})
         return out
