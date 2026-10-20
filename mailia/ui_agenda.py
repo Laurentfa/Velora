@@ -21,7 +21,7 @@ def grid_html(first: date, data: dict, now: datetime) -> str:
     weekend = any(x["start"].weekday() >= 5 or (x["end"] - timedelta(seconds=1)).weekday() >= 5 for x in events if first <= x["start"].date() < first + timedelta(days=7))
     days = [first + timedelta(days=i) for i in range(7 if weekend else 5)]
     h0 = min([8] + [x["start"].hour for x in timed if x["start"].date() in days])
-    h1 = max([19] + [min(24, math.ceil((x["end"].hour * 60 + x["end"].minute) / 60) or 24) for x in timed if x["end"].date() in days])
+    h1 = max([20] + [min(24, math.ceil((x["end"].hour * 60 + x["end"].minute) / 60) or 24) for x in timed if x["end"].date() in days])
     height = (h1 - h0) * HOUR_PX
     head = "".join(f'<div class="ag-dh{" ag-today" if d == now.date() else ""}"><span>{e(T(JOURS[d.weekday()]))}</span> {d.day}</div>' for d in days)
     allday = ""
@@ -80,13 +80,14 @@ class AgendaMixin:
         src = agenda.sources()
         with ui.column().classes("agenda gap-0"):
             with ui.row().classes("ag-head items-center no-wrap gap-1"):
-                ui.icon("event", size="20px").style("color:var(--accent)")
-                label = ui.label("").classes("ag-title")
+                ui.icon("event", size="24px").style("color:var(--accent);margin-right:6px")
+                ui.label("Agenda").classes("ag-title")
                 ui.element("div").classes("col")
                 ui.button(icon="chevron_left", on_click=lambda: self._agenda_move(-1)).props("flat dense round size=sm").tooltip("Semaine précédente").mark("agenda-prev")
                 ui.button("Aujourd'hui", on_click=lambda: self._agenda_move(0)).props("flat dense no-caps size=sm").mark("agenda-today")
                 ui.button(icon="chevron_right", on_click=lambda: self._agenda_move(1)).props("flat dense round size=sm").tooltip("Semaine suivante").mark("agenda-next")
                 ui.button(icon="add", on_click=lambda: self.agenda_add(None)).props("flat dense round size=sm color=primary").tooltip("Ajouter un rendez-vous").mark("agenda-add")
+            label = ui.label("").classes("subtitle ag-sub")
             with ui.element("div").classes("ag-scroll"):
                 body = ui.html("", sanitize=False).mark("agenda-grid")
             note = ui.label("").classes("rmeta ag-note")
