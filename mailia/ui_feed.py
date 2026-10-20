@@ -37,7 +37,11 @@ class FeedMixin:
             slot.clear()
             now = datetime.now()
             with slot:
-                ui.label(data["title"] or "Actualités").classes("fd-head").mark("feed-title")
+                with ui.row().classes("fd-head items-center no-wrap gap-1"):
+                    ui.icon("newspaper", size="24px").style("color:var(--accent);margin-right:6px")
+                    ui.label("Les informations").classes("ag-title").mark("feed-title")
+                    ui.element("div").classes("col")
+                    ui.label((data["title"] or "").split(" - ")[0]).classes("rmeta fd-src")
                 for it in data["items"]:
                     with ui.element("div").classes("fd-item").on("click", lambda _, u=it["link"]: self.feed_open(u)).mark("feed-item"):
                         with ui.column().classes("gap-0 col"):
