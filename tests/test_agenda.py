@@ -102,7 +102,7 @@ async def test_adding_an_appointment_calls_the_chosen_agenda(user, box, monkeypa
     b = box[-1]
     await b.go("brief", "", "")
     await asyncio.sleep(0.6)
-    task = asyncio.create_task(b.agenda_slot({"day": "2026-10-20", "min": 14 * 60 + 30}))
+    task = asyncio.create_task(b.agenda_slot({"detail": {"day": "2026-10-20", "min": 14 * 60 + 30}}))
     await asyncio.sleep(0.5)
     user.find(marker="agenda-title").type("Déjeuner")
     user.find(marker="agenda-save").click()
@@ -209,7 +209,7 @@ async def test_clicking_an_event_opens_its_card_and_delete_asks_confirmation(use
     await b.go("brief", "", "")
     await asyncio.sleep(0.8)
     assert "e0" in b._agenda_reg
-    task = asyncio.create_task(b.agenda_item({"ref": "e0"}))
+    task = asyncio.create_task(b.agenda_item({"detail": {"ref": "e0"}}))
     await asyncio.sleep(0.4)
     user.find(marker="agenda-delete").click()
     await asyncio.sleep(0.3)
@@ -228,7 +228,7 @@ async def test_read_only_events_have_no_save_or_delete(user, box, monkeypatch) -
     b = box[-1]
     await b.go("brief", "", "")
     await asyncio.sleep(0.8)
-    asyncio.create_task(b.agenda_item({"ref": "e0"}))
+    asyncio.create_task(b.agenda_item({"detail": {"ref": "e0"}}))
     await asyncio.sleep(0.4)
     await user.should_see("Série hebdo")
     await user.should_not_see(marker="agenda-delete")
@@ -245,7 +245,7 @@ async def test_a_task_can_be_completed_from_its_card(user, box, monkeypatch) -> 
     b = box[-1]
     await b.go("brief", "", "")
     await asyncio.sleep(0.8)
-    task = asyncio.create_task(b.agenda_item({"ref": "t0"}))
+    task = asyncio.create_task(b.agenda_item({"detail": {"ref": "t0"}}))
     await asyncio.sleep(0.4)
     user.find(marker="agenda-done").click()
     await task

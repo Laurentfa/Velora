@@ -142,7 +142,7 @@ class AgendaMixin:
 
     async def agenda_slot(self, args: dict | None) -> None:
         """Clic sur un créneau libre de la grille."""
-        a = args or {}
+        a = (args or {}).get("detail") or args or {}  # l'événement du navigateur arrive sous « detail »
         try:
             d = date.fromisoformat(a["day"])
             start = datetime(d.year, d.month, d.day) + timedelta(minutes=int(a["min"]))
@@ -201,7 +201,8 @@ class AgendaMixin:
 
     async def agenda_item(self, args: dict | None) -> None:
         """Clic sur un rendez-vous ou une tâche : sa fiche (modifier, terminer, supprimer)."""
-        obj = (getattr(self, "_agenda_reg", {}) or {}).get(((args or {}).get("ref")) or "")
+        a = (args or {}).get("detail") or args or {}  # l'événement du navigateur arrive sous « detail »
+        obj = (getattr(self, "_agenda_reg", {}) or {}).get(a.get("ref") or "")
         if not obj:
             return
         if "due" in obj:
