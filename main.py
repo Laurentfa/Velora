@@ -66,6 +66,7 @@ from mailia.ui_account import friendly_error
 from mailia.ui_agenda import AgendaMixin
 from mailia.ui_apple import AppleWriterMixin
 from mailia.ui_feed import FeedMixin
+from mailia.ui_server_rules import ServerRulesMixin
 from mailia.ui_assets import CSS, SWIPE_JS
 from mailia import apple_writer, icons, weather
 from mailia.brand import logo_big, logo_img
@@ -121,7 +122,7 @@ perf.install()
 
 
 
-class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin, AppleWriterMixin, WeatherMixin, AgendaMixin, FeedMixin):
+class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin, AppleWriterMixin, WeatherMixin, AgendaMixin, FeedMixin, ServerRulesMixin):
     """État et interface d'une fenêtre (chaque client a la sienne)."""
 
     def __init__(self) -> None:
@@ -359,6 +360,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             if c.get("outbox") or self.view == "outbox":
                 item("outbox", "", "⏰", "En attente d'envoi", c.get("outbox", 0), bool(c.get("outbox")))
             item("tasks", "", "☑", "Tâches", c.get("tasks", 0))
+            if self.srules_accounts():
+                item("srules", "", "▽", "Règles de tri", 0)
             if c.get("snoozed") or self.view == "snoozed":
                 item("snoozed", "", "⏳", "Reportés", c.get("snoozed", 0))
             if c.get("followups") or self.view == "followups":
@@ -696,6 +699,9 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         if self.view == "tasks":
             self.tasks_view()
             return
+        if self.view == "srules":
+            self.server_rules_view()
+            return
         if self.view == "outbox":
             if not self.outbox:
                 ui.label("Aucun message en attente. Les messages programmés et ceux qui partent dans quelques secondes apparaissent ici.").classes("empty")
@@ -966,6 +972,9 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             if google_cal or (sync.ACCOUNTS.get(m["account"]) and sync.ACCOUNTS[m["account"]].kind == "ews"):
                 ui.button(icon="event", on_click=lambda: self.event_dialog(m)).props("flat round dense").tooltip(
                     "Ajouter un rendez-vous à Google Agenda" if google_cal else "Ajouter un rendez-vous à l'agenda Exchange")
+            if sync.ACCOUNTS.get(m["account"]) and sync.ACCOUNTS[m["account"]].kind == "ews" and sync.ACCOUNTS[m["account"]].password:
+                ui.button(icon="rule", on_click=lambda: self.srules_from_mail(m)).props("flat round dense").tooltip(
+                    "Créer une règle de tri sur le serveur à partir de ce message").mark("srules-from-mail")
             ui.button(icon="archive", on_click=lambda: self.act("archive")).props("flat round dense").tooltip("Archiver")
             ui.button(icon="drive_file_move", on_click=self.move_dialog).props("flat round dense").tooltip("Déplacer")
             ui.button(icon="mark_email_unread", on_click=lambda: self.act("unread")).props("flat round dense").tooltip("Marquer non lu")
@@ -1274,6 +1283,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         elif self.view == "followups":
             self.followups = db.followups_due()
             sig = ("f", *[(x["id"], x["due_at"]) for x in self.followups])
+        elif self.view == "srules":
+            sig = ("sr", self.srules_acct)
         elif self.view == "tasks":
             self.tasks = db.tasks_list(self.show_done)
             sig = ("t", self.show_done, *[(x["id"], x["done"], x["text"], x["due"]) for x in self.tasks])

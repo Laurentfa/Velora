@@ -25,12 +25,13 @@ _P = {
     "lines": ["M5 6.8h14", "M5 12h14", "M5 17.2h9"],
     "bell": ["M12 4a5.5 5.5 0 0 0-5.5 5.5c0 4.2-1.7 5.6-2.1 6.6h15.2c-.4-1-2.1-2.4-2.1-6.6A5.5 5.5 0 0 0 12 4z", "M10 19.2a2.2 2.2 0 0 0 4 0"],
     "people": ["M9.2 11.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4z", "M3.4 19.4a5.8 5.8 0 0 1 11.6 0", "M15.6 5.2a3.2 3.2 0 0 1 0 6", "M17.4 14.2a5.8 5.8 0 0 1 3.2 5.2"],
+    "rules": ["M4.2 5.4h15.6l-6 7.2v5.2l-3.6 1.8v-7z"],
     "broom": ["M19.6 4.4l-7.2 7.2", "M10.5 9.8l3.7 3.7c-1.1 2.8-3.5 4.8-7.2 5.3-.3-3.7 1.4-6.3 3.5-9z", "M9.4 14.6l1.9 1.9"],
 }
 
 # glyphes utilisés jusqu'ici dans la colonne de gauche -> icône
 GLYPHS = {"✉": "tray", "▸": "folder", "✦": "sparkle", "⚑": "flag", "●": "unread", "✎": "pencil", "⏰": "clock", "☑": "tasks", "⏳": "hourglass",
-          "↩": "reply", "☰": "lines", "ⓘ": "bell", "👥": "people", "⌫": "broom"}
+          "↩": "reply", "☰": "lines", "ⓘ": "bell", "👥": "people", "⌫": "broom", "▽": "rules"}
 ROLES = {"drafts": "doc", "sent": "plane", "junk": "junk", "trash": "trash", "archive": "archive", "inbox": "tray"}
 
 _cache: dict[tuple[str, int], str] = {}

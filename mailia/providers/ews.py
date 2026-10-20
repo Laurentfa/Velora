@@ -412,6 +412,26 @@ class EwsProvider:
     def task_delete(self, item_id: str) -> None:
         self._get_or_gone(self.account.tasks, item_id).delete()
 
+    # ----- règles de tri du serveur (voir server_rules.py) : requêtes EWS brutes, sur la session déjà authentifiée -----
+    def soap(self, body: str) -> bytes:
+        from .. import server_rules as sr
+        p = self.account.protocol
+        session = p.get_session()
+        try:
+            r = session.post(p.service_endpoint, data=sr.ENVELOPE.format(body=body).encode("utf-8"), headers={"Content-Type": "text/xml; charset=utf-8"}, timeout=60)
+        except Exception as e:  # noqa: BLE001
+            raise sr.RulesError(f"Serveur injoignable : {type(e).__name__}") from e
+        finally:
+            p.release_session(session)
+        if r.status_code == 401:
+            raise sr.AuthError("Identifiants refusés par le serveur.")
+        if r.status_code != 200:
+            raise sr.RulesError(f"Réponse HTTP {r.status_code} du serveur.")
+        return r.content
+
+    def rules_client(self):
+        return EwsRulesClient(self)
+
     def mark_verb(self, folder: str, uid: str, verb: int) -> None:
         """Pose sur le message d'origine la marque « répondu » (1) ou « transféré » (2), comme Outlook."""
         item = self._folder(folder).get(id=uid)
@@ -644,3 +664,24 @@ class EwsProvider:
         for _ in folders[0].get_streaming_events(sub_id, connection_timeout=max(1, timeout // 60)):
             return True
         return False
+
+
+class EwsRulesClient:
+    """Transport des règles de tri : ce que server_rules.make_plan / apply_plan attendent d'un client."""
+
+    def __init__(self, provider: "EwsProvider") -> None:
+        self.p = provider
+        self.mailbox = provider.account.primary_smtp_address
+
+    def folders(self) -> dict:
+        from .. import server_rules as sr
+        return sr.parse_folders(self.p.soap(sr.FIND_FOLDERS))
+
+    def inbox_rules(self, folders: dict | None = None) -> list[dict]:
+        from .. import server_rules as sr
+        folders = folders if folders is not None else self.folders()
+        return sr.parse_rules(self.p.soap(sr.GET_RULES.format(mailbox=self.mailbox)), folders)
+
+    def update_rules(self, operations: list[tuple]) -> None:
+        from .. import server_rules as sr
+        sr.parse_update_response(self.p.soap(sr.build_update(self.mailbox, operations)))

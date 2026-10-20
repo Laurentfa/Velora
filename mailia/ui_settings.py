@@ -573,7 +573,7 @@ def _tab_rules(cfgs, host) -> None:
         ui.separator().classes("q-mt-md")
         ui.label("Règles définies sur le serveur Exchange").classes("text-h6").style("font-weight:700")
         ui.label("Ce sont les règles d'Outlook, appliquées par le serveur même quand l'appli est fermée. Elles s'affichent ici en lecture seule : "
-                 "pour les modifier, utilisez Outlook.").classes("text-caption text-grey")
+                 "pour les créer, les tester et les modifier, ouvrez la vue « Règles de tri » dans la colonne de gauche.").classes("text-caption text-grey")
         srv = ui.column().classes("w-full gap-2")
 
         async def srv_load(acct: str) -> None:

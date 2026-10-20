@@ -103,10 +103,10 @@ CAT = {"action": "Action", "info": "Info", "newsletter": "Newsletter", "notifica
 
 VIEWS = {"brief": ("✦", "Brief du jour"), "inbox": ("✉", "Boîte de réception"), "todo": ("⚑", "À traiter"),
          "unread": ("●", "Non lus"), "noise": ("☰", "Newsletters & notifications"), "newsletter": ("☰", "Newsletters"), "notification": ("ⓘ", "Notifications"), "drafts": ("✎", "Brouillons"),
-         "outbox": ("⏰", "En attente d'envoi"), "snoozed": ("⏳", "Reportés"), "followups": ("↩", "À relancer"), "tasks": ("☑", "Tâches")}
+         "outbox": ("⏰", "En attente d'envoi"), "snoozed": ("⏳", "Reportés"), "followups": ("↩", "À relancer"), "tasks": ("☑", "Tâches"), "srules": ("▽", "Règles de tri")}
 
 
-NOLIST_VIEWS = {"brief", "drafts", "outbox", "snoozed", "followups", "tasks"}  # vues sans recherche ni liste de mails
+NOLIST_VIEWS = {"brief", "drafts", "outbox", "snoozed", "followups", "tasks", "srules"}  # vues sans recherche ni liste de mails
 
 
 JOURS, JOURS_LONG, MOIS, MOIS_COURTS = i18n.calendar_names()  # jours et mois dans la langue de l'interface
