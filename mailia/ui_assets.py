@@ -86,6 +86,15 @@ body.resizing iframe{pointer-events:none}
 .lhead{box-sizing:border-box;height:120px;padding:14px 14px 0;border-bottom:1px solid var(--line);width:100%}
 .lhead .title{font-size:19px;font-weight:700;letter-spacing:-.02em}
 .ephem{display:flex;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:1px}.eph-i{display:inline-flex;align-items:center;gap:3px}.eph-i img{width:24px;height:24px;margin:-3px 0}.ephem .sep{margin:0 8px}
+.agenda{width:100%;height:100vh;background:transparent;flex-wrap:nowrap}.ag-head{padding:14px 18px 8px;width:100%}.ag-title{font-size:19px;font-weight:700;letter-spacing:-.01em}
+.ag-scroll{flex:1;min-height:0;width:100%;overflow:auto;padding:0 18px 12px;scrollbar-width:none}.ag-scroll::-webkit-scrollbar{display:none}.ag-note{padding:4px 18px 10px;color:var(--danger,#d92d3a)}
+.ag-days,.ag-allday,.ag-grid{display:grid;width:100%}.ag-days{position:sticky;top:0;z-index:3;background:transparent;backdrop-filter:blur(6px)}.ag-dh{text-align:center;padding:6px 0;font-size:13px;color:var(--muted)}.ag-dh span{text-transform:capitalize}
+.ag-today{color:var(--accent);font-weight:700}.ag-adc{border-left:1px solid var(--line);padding:2px;min-height:4px}.ag-ad{font-size:11px;border-radius:5px;padding:1px 6px;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ag-hrs{position:relative}.ag-hr{font-size:10px;color:var(--muted);position:relative}.ag-hr span{position:absolute;top:-6px;right:6px}
+.ag-col{position:relative;border-left:1px solid var(--line);background-image:linear-gradient(var(--line) 1px,transparent 1px);background-size:100% 40px;cursor:pointer}.ag-col:hover{background-color:var(--hover)}
+.ag-ev{position:absolute;border-radius:6px;padding:2px 6px;font-size:11px;line-height:1.25;overflow:hidden;border-left:3px solid;cursor:default;box-sizing:border-box}.ag-ev b{font-weight:600}
+.ag-ex{background:rgba(54,121,255,.14);border-color:#3679ff;color:var(--text)}.ag-go{background:rgba(30,160,90,.15);border-color:#1ea05a;color:var(--text)}.ag-both{background:rgba(140,90,220,.15);border-color:#8c5adc;color:var(--text)}
+.ag-now{position:absolute;left:0;right:0;border-top:2px solid #d92d3a;pointer-events:none;z-index:2}.ag-empty{padding:40px 10px;text-align:center;color:var(--muted)}
 .lhead .subtitle{font-size:13px;color:var(--muted);margin-top:2px}
 .rows{flex:1;width:100%;min-height:0}
 .rows .q-scrollarea__content,.rbody .q-scrollarea__content{width:100%;max-width:100%}
@@ -420,6 +429,23 @@ SWIPE_JS = """<script>
   // Le repère fait partie du contenu : il survit si l'éditeur est redessiné (le curseur, lui, repartirait en début de texte) et un long silence ne change rien.
   // Même emplacement de départ que mailiaInsert (au-dessus de la signature et du message cité), mais le DOM est modifié directement : insertHTML supprimerait la marque.
   // mode : « start » (pose le repère), « partial », « final », « end » (retire le repère, le texte provisoire restant devient normal).
+  window.mailiaAgendaScroll = () => {
+    const sc = document.querySelector('.ag-scroll');
+    const t = document.querySelector('.ag-today');
+    if (!sc || sc.dataset.done) return;
+    sc.dataset.done = '1';
+    const now = document.querySelector('.ag-now');
+    if (now) sc.scrollTop = Math.max(0, now.offsetTop - 120);
+  };
+  document.addEventListener('click', e => {
+    const col = e.target.closest && e.target.closest('.ag-col');
+    if (!col || e.target.closest('.ag-ev')) return;
+    const r = col.getBoundingClientRect();
+    const rh = +col.dataset.rh, h0 = +col.dataset.h0;
+    const min = h0 * 60 + Math.floor((e.clientY - r.top) / (rh / 2)) * 30;
+    const root = document.querySelector('.root');
+    if (root) root.dispatchEvent(new CustomEvent('agslot', {detail: {day: col.dataset.day, min: min}}));
+  });
   window.mailiaLive = (htmlId, text, mode) => {
     const root = document.getElementById(htmlId);
     const c = root && root.querySelector('.q-editor__content');

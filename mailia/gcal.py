@@ -90,6 +90,32 @@ def create_event(title: str, start: datetime, end: datetime, location: str = "",
     return _call("POST", "/events", params={"sendUpdates": "none"}, json=ev).get("htmlLink", "")
 
 
+def list_events(start: datetime, end: datetime) -> list[dict]:
+    """Rendez-vous de l'agenda principal entre deux dates (heures locales naïves), séries dépliées. Lecture seule."""
+    aware = lambda d: d.astimezone().isoformat(timespec="seconds")
+    local = lambda s: datetime.fromisoformat(s).astimezone().replace(tzinfo=None)
+    out, token = [], None
+    for _ in range(4):  # 4 pages de 250 au plus
+        params = {"timeMin": aware(start), "timeMax": aware(end), "singleEvents": "true", "orderBy": "startTime", "maxResults": 250}
+        if token:
+            params["pageToken"] = token
+        d = _call("GET", "/events", params=params)
+        for e in d.get("items", []):
+            if e.get("status") == "cancelled":
+                continue
+            s, f = e.get("start") or {}, e.get("end") or {}
+            all_day = "date" in s
+            try:
+                a, b = (datetime.fromisoformat(s["date"]), datetime.fromisoformat(f["date"])) if all_day else (local(s["dateTime"]), local(f["dateTime"]))
+            except (KeyError, ValueError):
+                continue
+            out.append({"title": e.get("summary") or "", "start": a, "end": b, "all_day": all_day, "where": e.get("location") or ""})
+        token = d.get("nextPageToken")
+        if not token:
+            break
+    return out
+
+
 def test() -> tuple[bool, str]:
     """Vérifie la connexion : lit l'agenda principal (un seul rendez-vous demandé). (ok, message)"""
     try:

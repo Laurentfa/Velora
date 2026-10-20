@@ -63,6 +63,7 @@ from nicegui import app, background_tasks, native, run, ui
 from mailia import ai, aipolicy, apiserver, compose, config, db, folder_order, folder_tree, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, vault, wizard
 from mailia.textutil import for_ai
 from mailia.ui_account import friendly_error
+from mailia.ui_agenda import AgendaMixin
 from mailia.ui_apple import AppleWriterMixin
 from mailia.ui_assets import CSS, SWIPE_JS
 from mailia import apple_writer, icons, weather
@@ -119,7 +120,7 @@ perf.install()
 
 
 
-class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin, AppleWriterMixin, WeatherMixin):
+class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin, AppleWriterMixin, WeatherMixin, AgendaMixin):
     """État et interface d'une fenêtre (chaque client a la sienne)."""
 
     def __init__(self) -> None:
@@ -182,7 +183,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                 f"--w-side:{side_w}px;--w-list:{list_w}px").on(
                 "colresize", lambda e: self.save_cols(e.args), args=["detail"]).on(
                 "sidestate", lambda e: db.kv_set("side_hidden", "1" if (e.args or {}).get("detail", {}).get("hidden") else "0"),
-                args=["detail"]) as self.root:
+                args=["detail"]).on("agslot", lambda e: self.agenda_slot(e.args), args=["detail"]) as self.root:
             ui.element("div").classes("sidehot")
             ui.element("div").classes("resizer r1")
             ui.element("div").classes("resizer r2")
@@ -760,6 +761,9 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                 with ui.column().classes("rcontent gap-3"):
                     self.composer()
             return
+        if not m and self.view == "brief":
+            self.agenda_panel()  # le brief du jour : l'agenda de la semaine à la place de l'image d'attente ; il disparaît dès qu'on ouvre un mail ou qu'on écrit
+            return
         if not m:
             with ui.column().classes("placeholder items-center gap-4"):
                 ui.html(logo_big(), sanitize=False)
@@ -1202,6 +1206,12 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self.filters.clear()
         self.list_tools.refresh()
         self.search.set_value("")
+        if view == "brief":  # retour au brief : l'agenda remplace le mail ouvert
+            self.cur, self.thread = None, []
+            self.root.classes(remove="reading")
+            self.reader.refresh()
+        elif not self.cur and not self.new:  # on quitte le brief sans mail ouvert : l'agenda cède la place à l'image d'attente
+            self.reader.refresh()
         db.kv_set("ui_open", "")  # on change de vue volontairement : rien à rouvrir
         self.remember_view()
         self.refresh_title()

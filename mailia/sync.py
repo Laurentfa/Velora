@@ -486,11 +486,11 @@ def respond_meeting(m: dict, action: str) -> None:
                               info.get("location") or "", "Invitation reçue par e-mail", tentative=(action == "tentative"))
 
 
-def create_event(account: str, title: str, start, end, location: str = "", body: str = "") -> None:
+def create_event(account: str, title: str, start, end, location: str = "", body: str = "", backend: str = "") -> None:
     if _dry():
         log.warning("ÉVÉNEMENT SIMULÉ : %s %s -> %s", title, start, end)
         return
-    if config.calendar_backend() == "google":
+    if (backend or config.calendar_backend()) == "google":
         from . import gcal
         gcal.create_event(title, start, end, location, body)
         return

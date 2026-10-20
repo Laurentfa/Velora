@@ -355,6 +355,22 @@ class EwsProvider:
         CalendarItem(account=self.account, folder=self.account.calendar, subject=title, start=mk(start), end=mk(end),
                      location=location or None, body=body or None).save()
 
+    def calendar_events(self, start: datetime, end: datetime) -> list[dict]:
+        """Rendez-vous de l'agenda entre deux dates (heures locales naïves), occurrences des séries comprises. Lecture seule."""
+        from exchangelib import EWSDateTime
+        tz = self.account.default_timezone
+        mk = lambda d: EWSDateTime(d.year, d.month, d.day, d.hour, d.minute, tzinfo=tz)
+        out = []
+        for it in self.account.calendar.view(start=mk(start), end=mk(end)).only("subject", "start", "end", "location", "is_all_day"):
+            if not it.start or not it.end:
+                continue
+            if it.is_all_day:
+                a, b = datetime(it.start.year, it.start.month, it.start.day), datetime(it.end.year, it.end.month, it.end.day)
+            else:
+                a, b = (datetime.fromisoformat(x.isoformat()).astimezone().replace(tzinfo=None) for x in (it.start, it.end))
+            out.append({"title": it.subject or "", "start": a, "end": b, "all_day": bool(it.is_all_day), "where": it.location or ""})
+        return out
+
     def mark_verb(self, folder: str, uid: str, verb: int) -> None:
         """Pose sur le message d'origine la marque « répondu » (1) ou « transféré » (2), comme Outlook."""
         item = self._folder(folder).get(id=uid)
