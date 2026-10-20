@@ -6,7 +6,7 @@ from datetime import datetime
 from nicegui import background_tasks, run, ui
 
 from mailia import db, feed
-from mailia.ui_common import SERVER_MODE
+from mailia.ui_common import SERVER_MODE, log
 
 
 def stamp(when: datetime | None, now: datetime) -> str:
@@ -27,10 +27,17 @@ class FeedMixin:
     async def _feed_fill(self, slot) -> None:
         try:
             data = await run.io_bound(feed.fetch)
-        except (OSError, ValueError):
+        except Exception as e:  # noqa: BLE001 — réseau, flux invalide, site qui refuse : on le dit au lieu de faire disparaître la zone
+            log.warning("flux RSS : %s %s", type(e).__name__, str(e)[:200])
             try:
-                slot.delete()
-            except Exception:  # noqa: BLE001
+                slot.clear()
+                with slot:
+                    with ui.row().classes("fd-head items-center no-wrap gap-1"):
+                        ui.icon("newspaper", size="24px").style("color:var(--accent);margin-right:6px")
+                        ui.label("Les informations").classes("ag-title")
+                    ui.label("Flux indisponible pour le moment.").classes("rmeta").mark("feed-error")
+                    ui.button("Réessayer", on_click=lambda: (feed._cache.clear(), background_tasks.create(self._feed_fill(slot)))).props("flat dense no-caps size=sm")
+            except Exception:  # noqa: BLE001 — le panneau a pu être fermé entre-temps
                 pass
             return
         try:

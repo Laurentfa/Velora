@@ -162,7 +162,8 @@ def test_grid_shows_tasks_on_their_day_and_overdue_on_today() -> None:
                                                   {"title": "Hors semaine", "due": date(2026, 11, 20), "src": {"google"}}]}
     h = ui_agenda.grid_html(date(2026, 10, 19), data, datetime(2026, 10, 20, 9))
     assert "Rendre le devis" in h and "Tâche oubliée" in h and "ag-late" in h and "Hors semaine" not in h and h.count("ag-task") >= 2
-    assert "1 tâche en retard" in h and "<details" in h and "15/10" in h  # les retards tiennent en une seule ligne repliable
+    assert "1 tâche en retard" in h and "<details" in h and "15/10" in h
+    assert h.count("ag-dh") >= 5 and "<span>mar.</span> 20" in h  # l'en-tête des jours reste en place  # les retards tiennent en une seule ligne repliable
 
 
 def test_merge_keeps_every_reference_and_editable_needs_all_sources() -> None:
@@ -256,3 +257,34 @@ def test_exchange_calendar_and_task_fields_exist_in_exchangelib() -> None:
     cal, task = {f.name for f in CalendarItem.FIELDS}, {f.name for f in Task.FIELDS}
     assert {"subject", "start", "end", "location", "is_all_day", "type", "is_meeting"} <= cal  # les noms de champs demandés à Exchange doivent exister
     assert {"subject", "due_date", "status"} <= task
+
+
+async def test_feed_survives_the_panel_being_rebuilt_while_loading(user, box, monkeypatch) -> None:
+    import time
+    from mailia import feed
+    make_brief(["testbox|INBOX|1"])
+
+    def slow(force=False):
+        time.sleep(0.5)
+        return feed.parse(RSS)
+    monkeypatch.setattr(feed, "fetch", slow)
+    await user.open("/")
+    b = box[-1]
+    await b.go("brief", "", "")
+    await asyncio.sleep(0.2)
+    b.reader.refresh()  # le brief se redessine pendant que le flux se charge
+    await asyncio.sleep(0.2)
+    b.reader.refresh()
+    await asyncio.sleep(1.6)
+    await user.should_see("Titre un")
+
+
+async def test_feed_failure_is_shown_not_hidden(user, box, monkeypatch) -> None:
+    from mailia import feed
+    make_brief(["testbox|INBOX|1"])
+    monkeypatch.setattr(feed, "fetch", lambda force=False: (_ for _ in ()).throw(OSError("réseau coupé")))
+    await user.open("/")
+    b = box[-1]
+    await b.go("brief", "", "")
+    await asyncio.sleep(0.9)
+    await user.should_see("Flux indisponible pour le moment.")
