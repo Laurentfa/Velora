@@ -101,11 +101,11 @@
     el('path', {d: CAT, fill: '#000'}, el('g', {'clip-path': 'url(#vpBody)'}, bodyG));
     // assis et couché : silhouettes posées au sol et centrées comme le chat qui marche
     sg = el('g', {opacity: 0}, flip);
-    el('path', {d: SIT, fill: '#000', transform: 'matrix(10,0,0,-10,-4074.9753,3582.7838)'}, el('g', {transform: 'translate(120,' + (262 - 156.5 * 1.5) + ') scale(1.5) translate(-5,0)'}, sg));
+    el('path', {d: SIT, fill: '#000', transform: 'matrix(10,0,0,-10,-4074.9753,3582.7838)'}, el('g', {transform: 'translate(120,' + (262 - 156.5 * 1.95) + ') scale(1.95) translate(-5,0)'}, sg));
     lg = el('g', {opacity: 0}, flip);
     el('path', {d: LIE, fill: '#000'}, lg);
     var bb = {x: 62.18, y: 178.69, width: 389.16, height: 218.47}; // dimensions mesurées une fois pour toutes : sur un calque masqué, la mesure du navigateur renverrait 0
-    lg.setAttribute('transform', 'translate(' + (40 - bb.x * .42) + ',' + (262 - (bb.y + bb.height) * .42) + ') scale(.42)');
+    lg.setAttribute('transform', 'translate(' + (40 - bb.x * .546) + ',' + (262 - (bb.y + bb.height) * .546) + ') scale(.546)');
     GR = {walk: wg, sit: sg, lie: lg};
     svg.addEventListener('click', function () { go('sit'); say('Prrr…'); });
     bub = document.createElement('div');
