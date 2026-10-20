@@ -20,7 +20,7 @@
     FN: {y0: 198, H: [268, 198], K: [285, 220], A: [303, 242], u0: .65, bot: 262, th0: 41.6, dx: 0}
   };
   var bl = 0, x = 40, dir = 1, state = 'walk', want = 'walk', until = 0, phase = 0, last = 0, target = null, fade = {walk: 1, sit: 0, lie: 0, stretch: 0};
-  var DUR = {walk: [6000, 10000], sit: [5000, 8000], lie: [8000, 13000], stretch: [2500, 3500]};
+  var DUR = {walk: [5000, 8000], sit: [5000, 8000], lie: [8000, 13000], stretch: [2500, 3500]};
 
   function el(t, a, p) { var e = document.createElementNS(NS, t); for (var k in a) e.setAttribute(k, a[k]); if (p) p.appendChild(e); return e; }
   function rad(d) { return d * Math.PI / 180; }
@@ -138,10 +138,10 @@
   function choose(from) {
     var r = Math.random();
     if (reduce) return from === 'sit' ? 'lie' : 'sit'; // mouvement réduit demandé au système : le chat ne marche pas
-    if (from === 'walk') return cfg.mood === 'calm' ? (r < .5 ? 'sit' : r < .95 ? 'lie' : 'stretch') : (r < .4 ? 'sit' : r < .7 ? 'lie' : 'stretch');
+    if (from === 'walk') return cfg.mood === 'calm' ? (r < .3 ? 'sit' : r < .9 ? 'lie' : 'stretch') : (r < .25 ? 'sit' : r < .75 ? 'lie' : 'stretch');
     if (from === 'stretch') return 'walk';
     if (from === 'lie') return r < .5 ? 'stretch' : 'walk';
-    return r < .3 ? 'lie' : 'walk';
+    return r < .6 ? 'lie' : 'walk';
   }
   function tick(now) {
     raf = requestAnimationFrame(tick);
