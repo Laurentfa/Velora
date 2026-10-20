@@ -65,6 +65,7 @@ from mailia.textutil import for_ai
 from mailia.ui_account import friendly_error
 from mailia.ui_agenda import AgendaMixin
 from mailia.ui_apple import AppleWriterMixin
+from mailia import ui_pet
 from mailia.ui_feed import FeedMixin
 from mailia.ui_server_rules import ServerRulesMixin
 from mailia.ui_assets import CSS, SWIPE_JS
@@ -211,6 +212,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                 rows_area.on("scroll", self.rows_scrolled, args=["verticalPosition", "verticalContainerSize", "verticalSize"], throttle=0.3)
             with ui.column().classes("readercol gap-0"):
                 self.reader()
+        ui_pet.apply()
+        ui.timer(1.0, ui_pet.apply, once=True)  # au cas où le script du chat finit de se charger après la page
         ui.run_javascript("mailiaSideInit(%s, %s)" % (
             "true" if db.kv_get("side_hidden") == "1" else "false", "true" if db.kv_get("side_auto") == "1" else "false"))
         self.host = ui.element("div")  # support stable des fenêtres (jamais rafraîchi)
@@ -1826,6 +1829,7 @@ async def index_page() -> None:
         perf.mark("page demandée par la fenêtre")
     ui.colors(primary="#0a66e8", secondary="#4a9bff", accent="#0a66e8")
     ui.add_head_html(SWIPE_JS)
+    ui.add_head_html('<script src="/pet/pet.js?v=1" defer></script>')  # chat de compagnie (désactivé par défaut)
     if (script := i18n.client_script()):
         ui.add_head_html(script)  # interface dans une autre langue que le français
     ui.dark_mode({"light": False, "dark": True}.get(db.kv_get("theme") or ""))  # clair / sombre, sinon suit le système
@@ -2006,6 +2010,7 @@ if not DB_ERROR:
     app.on_startup(lambda: background_tasks.create(outbox_loop()))
     app.on_startup(lambda: background_tasks.create(_start_api()))
     app.add_static_files("/weather-icons", str(weather.ICONS))  # icônes météo animées (Meteocons, licence MIT)
+    app.add_static_files("/pet", str(ui_pet.DIR))  # chat de compagnie
     app.on_startup(apple_writer.refresh_async)  # Apple Intelligence prête ? vérifié en arrière-plan dès le démarrage
     app.on_shutdown(apiserver.runner.stop)
 # le serveur de l'interface n'accepte que les requêtes destinées à cette machine : une page web malveillante qui ferait pointer un nom de

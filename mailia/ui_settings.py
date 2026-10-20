@@ -15,6 +15,7 @@ from mailia.ui_account import delete_account_dialog, friendly_error, open_accoun
 from mailia.ui_common import CAT, SERVER_MODE, default_account, make_editor, open_folder, reveal
 from mailia.ui_lock import lock_screen_now
 from mailia.ui_feed import feed_settings
+from mailia.ui_pet import pet_settings
 from mailia.ui_weather import weather_settings
 from mailia.ui_update import panel as update_panel
 from mailia import ui_zoom
@@ -312,6 +313,7 @@ def _tab_aff(f) -> None:
 
     weather_settings()
     feed_settings()
+    pet_settings()
 
     ui.label("Signature").classes("text-subtitle2 q-mt-md")
     ui.switch("Ajouter ma signature à mes messages et à mes réponses").bind_value(f, "SIG_ON")

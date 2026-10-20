@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 NG=$(.venv/bin/python -c "import nicegui,os;print(os.path.dirname(nicegui.__file__))")
 .venv/bin/pyinstaller main.py --name "Velora" --windowed --noconfirm --clean \
   --icon assets/icon.icns --osx-bundle-identifier fr.lfauvel.mailia \
-  --add-data "$NG:nicegui" --add-data "mailia/locales:mailia/locales" --add-data "mailia/weather_icons:mailia/weather_icons" \
+  --add-data "$NG:nicegui" --add-data "mailia/locales:mailia/locales" --add-data "mailia/weather_icons:mailia/weather_icons" --add-data "mailia/pet:mailia/pet" \
   --collect-all exchangelib --collect-all webview --collect-all keyring --collect-all mammoth --collect-all openpyxl --collect-all pptx --collect-all pillow_heif --collect-all pypdf --collect-all zeroconf --collect-all segno --collect-all sqlcipher3 --collect-all dns --collect-all pywhispercpp --collect-all sounddevice --collect-all onnx_asr --collect-all onnxruntime --hidden-import LocalAuthentication --collect-submodules mailia \
   --collect-data tzdata
 # Numérisation : macOS exige de déclarer l'usage du réseau local et des services Bonjour recherchés (scanners AirScan)

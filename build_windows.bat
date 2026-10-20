@@ -4,7 +4,7 @@ REM Pre-requis : Python 3.11+ installe, puis :  py -m venv .venv  &&  .venv\Scri
 for /f %%i in ('.venv\Scripts\python -c "import nicegui,os;print(os.path.dirname(nicegui.__file__))"') do set NG=%%i
 .venv\Scripts\pyinstaller main.py --name "Velora" --windowed --noconfirm --clean ^
   --icon assets\icon.ico ^
-  --add-data "%NG%;nicegui" --add-data "mailia\locales;mailia\locales" --add-data "mailia\weather_icons;mailia\weather_icons" ^
+  --add-data "%NG%;nicegui" --add-data "mailia\locales;mailia\locales" --add-data "mailia\weather_icons;mailia\weather_icons" --add-data "mailia\pet;mailia\pet" ^
   --collect-all exchangelib --collect-all webview --collect-all keyring --collect-all mammoth --collect-all openpyxl --collect-all pptx --collect-all pillow_heif --collect-all pypdf --collect-all zeroconf --collect-all segno --collect-all sqlcipher3 --collect-all dns --collect-all pywhispercpp --collect-all sounddevice --collect-all onnx_asr --collect-all onnxruntime --collect-submodules mailia ^
   --collect-data tzdata
 echo Termine : dist\Velora\Velora.exe
