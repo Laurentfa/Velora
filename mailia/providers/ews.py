@@ -371,6 +371,14 @@ class EwsProvider:
             out.append({"title": it.subject or "", "start": a, "end": b, "all_day": bool(it.is_all_day), "where": it.location or ""})
         return out
 
+    def tasks(self) -> list[dict]:
+        """Tâches Exchange non terminées qui ont une échéance. Lecture seule."""
+        out = []
+        for t in self.account.tasks.filter(is_complete=False).only("subject", "due_date", "status"):
+            if t.due_date and t.status != "Completed":
+                out.append({"title": t.subject or "", "due": datetime(t.due_date.year, t.due_date.month, t.due_date.day).date()})
+        return out
+
     def mark_verb(self, folder: str, uid: str, verb: int) -> None:
         """Pose sur le message d'origine la marque « répondu » (1) ou « transféré » (2), comme Outlook."""
         item = self._folder(folder).get(id=uid)

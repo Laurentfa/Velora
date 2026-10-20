@@ -39,6 +39,15 @@ def _exchange(start: datetime, end: datetime) -> list[dict]:
     return out
 
 
+def _exchange_tasks() -> list[dict]:
+    from . import sync
+    out = []
+    for key, cfg in sync.ACCOUNTS.items():
+        if cfg.kind == "ews" and cfg.password:
+            out += sync.provider(key).tasks()
+    return out
+
+
 def _merge(parts: dict[str, list[dict]]) -> list[dict]:
     seen: dict[tuple, dict] = {}
     for src, events in parts.items():
@@ -70,11 +79,35 @@ def fetch(first: date, days: int = 7, force: bool = False) -> dict:
         except Exception as e:  # noqa: BLE001 — une source en panne ne cache pas l'autre
             log.warning("agenda %s : %s", name, e)
             errors.append(f"{'Exchange' if name == 'exchange' else 'Google Agenda'} : {e}")
-    res = {"events": _merge(parts), "errors": errors}
+    tasks = _fetch_tasks(errors)
+    res = {"events": _merge(parts), "tasks": tasks, "errors": errors}
     if not errors:
         with _lock:
             _cache[key] = (time.monotonic(), res)
     return res
+
+
+def _fetch_tasks(errors: list[str]) -> list[dict]:
+    """Tâches Exchange et Google avec échéance (les deux sources en parallèle ; une panne n'empêche pas l'autre). Une même tâche présente des deux côtés n'apparaît qu'une fois."""
+    src = sources()
+    jobs = {name: fn for name, fn in (("exchange", _exchange_tasks), ("google", gcal.list_tasks)) if src[name]}
+    if not jobs:
+        return []
+    with ThreadPoolExecutor(max_workers=len(jobs)) as ex:
+        futures = {name: ex.submit(fn) for name, fn in jobs.items()}
+    seen: dict[tuple, dict] = {}
+    for name, f in futures.items():
+        try:
+            for t in f.result():
+                k = (t["title"].strip().lower(), t["due"])
+                if k in seen:
+                    seen[k]["src"].add(name)
+                else:
+                    seen[k] = {**t, "src": {name}}
+        except Exception as e:  # noqa: BLE001
+            log.warning("tâches %s : %s", name, e)
+            errors.append(f"{'Exchange' if name == 'exchange' else 'Google Tasks'} : {e}")
+    return sorted(seen.values(), key=lambda t: (t["due"], t["title"]))
 
 
 def invalidate() -> None:

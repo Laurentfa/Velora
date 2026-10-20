@@ -29,7 +29,7 @@ def connected() -> bool:
 
 def connect(email: str = "", open_browser=None, cancel=None) -> None:
     """Ouvre le navigateur pour autoriser l'accès à l'agenda ; mémorise le jeton de renouvellement (trousseau si activé). Bloquant."""
-    kw = {"scope": oauth.CALENDAR_SCOPE, "cancel": cancel}
+    kw = {"scope": oauth.CALENDAR_SCOPE + " " + oauth.TASKS_SCOPE, "cancel": cancel}
     if open_browser:
         kw["open_browser"] = open_browser
     packed = oauth.authorize("google", email, **kw)
@@ -40,13 +40,15 @@ def disconnect() -> None:
     config.forget_env("GCAL_REFRESH_TOKEN")
 
 
-def _token() -> str:
+def _token(scope: str = oauth.CALENDAR_SCOPE) -> str:
     refresh = config.env("GCAL_REFRESH_TOKEN")
     if not refresh:
         raise GCalError("Google Agenda n'est pas connecté (Paramètres › Agenda).")
     try:
-        access, new = oauth.refresh_access("google", refresh, oauth.CALENDAR_SCOPE)
+        access, new = oauth.refresh_access("google", refresh, scope)
     except oauth.OAuthError as e:
+        if scope == oauth.TASKS_SCOPE:
+            raise GCalError("Google n'a pas encore l'autorisation de lire vos tâches : reconnectez Google Agenda (Paramètres › Agenda › Se connecter).") from e
         raise GCalError(str(e)) from e
     if new != refresh:
         config.write_env({"GCAL_REFRESH_TOKEN": new})
@@ -113,6 +115,39 @@ def list_events(start: datetime, end: datetime) -> list[dict]:
         token = d.get("nextPageToken")
         if not token:
             break
+    return out
+
+
+TASKS_API = "https://tasks.googleapis.com/tasks/v1"
+
+
+def _tasks_call(path: str, **params) -> dict:
+    try:
+        r = httpx.get(TASKS_API + path, params=params, headers={"Authorization": f"Bearer {_token(oauth.TASKS_SCOPE)}"}, timeout=30)
+    except httpx.HTTPError as e:
+        raise GCalError(f"Google Tasks injoignable : {type(e).__name__}") from e
+    if r.status_code == 403 and ("has not been used" in r.text or "accessNotConfigured" in r.text or "SERVICE_DISABLED" in r.text):
+        raise GCalError("L'API Google Tasks n'est pas activée dans votre projet Google Cloud (activez « Google Tasks API »).")
+    if r.status_code in (401, 403):
+        raise GCalError("Google a refusé la lecture des tâches : reconnectez Google Agenda (Paramètres › Agenda › Se connecter).")
+    if r.status_code >= 300:
+        raise GCalError(f"Google Tasks a répondu une erreur (code {r.status_code}).")
+    return r.json()
+
+
+def list_tasks() -> list[dict]:
+    """Tâches Google non terminées qui ont une échéance (listes de tâches réunies) : [{"title", "due": date}]. Lecture seule."""
+    from datetime import date
+    out = []
+    for lst in _tasks_call("/users/@me/lists", maxResults=20).get("items", []):
+        d = _tasks_call(f"/lists/{lst['id']}/tasks", showCompleted="false", showHidden="false", maxResults=100)
+        for t in d.get("items", []):
+            if t.get("status") == "completed" or not t.get("due"):
+                continue
+            try:
+                out.append({"title": t.get("title") or "", "due": date.fromisoformat(t["due"][:10])})
+            except ValueError:
+                continue
     return out
 
 

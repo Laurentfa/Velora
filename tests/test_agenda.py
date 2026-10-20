@@ -142,3 +142,23 @@ async def test_feed_shows_under_the_agenda(user, box, monkeypatch) -> None:
     await asyncio.sleep(0.9)
     await user.should_see("Rendez-vous test")
     await user.should_see("Titre un")
+
+
+def test_tasks_from_both_sources_are_merged_and_failures_reported(monkeypatch) -> None:
+    monkeypatch.setattr(agenda, "sources", lambda: {"exchange": True, "google": True})
+    monkeypatch.setattr(agenda, "_exchange_tasks", lambda: [{"title": "Payer", "due": date(2026, 10, 21)}])
+    monkeypatch.setattr(agenda.gcal, "list_tasks", lambda: [{"title": "payer", "due": date(2026, 10, 21)}, {"title": "Appeler", "due": date(2026, 10, 22)}])
+    errs: list = []
+    got = agenda._fetch_tasks(errs)
+    assert [(t["title"].lower(), sorted(t["src"])) for t in got] == [("payer", ["exchange", "google"]), ("appeler", ["google"])] and not errs
+    monkeypatch.setattr(agenda.gcal, "list_tasks", lambda: (_ for _ in ()).throw(RuntimeError("non autorisé")))
+    errs = []
+    assert len(agenda._fetch_tasks(errs)) == 1 and "Google Tasks" in errs[0]
+
+
+def test_grid_shows_tasks_on_their_day_and_overdue_on_today() -> None:
+    data = {"errors": [], "events": [], "tasks": [{"title": "Rendre le devis", "due": date(2026, 10, 22), "src": {"google"}},
+                                                  {"title": "Tâche oubliée", "due": date(2026, 10, 15), "src": {"exchange"}},
+                                                  {"title": "Hors semaine", "due": date(2026, 11, 20), "src": {"google"}}]}
+    h = ui_agenda.grid_html(date(2026, 10, 19), data, datetime(2026, 10, 20, 9))
+    assert "Rendre le devis" in h and "Tâche oubliée" in h and "ag-late" in h and "Hors semaine" not in h and h.count("ag-task") >= 2

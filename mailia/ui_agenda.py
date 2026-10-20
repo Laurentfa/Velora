@@ -24,13 +24,17 @@ def grid_html(first: date, data: dict, now: datetime) -> str:
     h1 = max([20] + [min(24, math.ceil((x["end"].hour * 60 + x["end"].minute) / 60) or 24) for x in timed if x["end"].date() in days])
     height = (h1 - h0) * HOUR_PX
     head = "".join(f'<div class="ag-dh{" ag-today" if d == now.date() else ""}"><span>{e(T(JOURS[d.weekday()]))}</span> {d.day}</div>' for d in days)
+    today = now.date()
+    tasks = [t for t in data.get("tasks") or [] if t["due"] in days or (today in days and t["due"] < today)]
     allday = ""
-    if any(x["all_day"] for x in events):
+    if any(x["all_day"] for x in events) or tasks:
         cells = []
         for d in days:
             ds = datetime(d.year, d.month, d.day)
             chips = "".join(f'<div class="ag-ad ag-{_cls(x)}" title="{e(x["title"])}">{e(x["title"] or T("(sans titre)"))}</div>'
                             for x in events if x["all_day"] and x["start"] < ds + timedelta(days=1) and x["end"] > ds)
+            chips += "".join(f'<div class="ag-ad ag-task ag-{_cls(t)}{" ag-late" if t["due"] < today else ""}" title="{e(T("Tâche"))} · {e(t["title"])}">{e(t["title"] or T("(sans titre)"))}</div>'
+                             for t in tasks if (t["due"] == d or (d == today and t["due"] < today)))  # une tâche en retard reste visible sur aujourd'hui
             cells.append(f'<div class="ag-adc">{chips}</div>')
         allday = '<div class="ag-allday"><div></div>' + "".join(cells) + "</div>"
     hours = "".join(f'<div class="ag-hr" style="height:{HOUR_PX}px"><span>{h}</span></div>' for h in range(h0, h1))
