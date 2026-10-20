@@ -55,6 +55,17 @@ def _token(scope: str = oauth.CALENDAR_SCOPE) -> str:
     return access
 
 
+def update_event(event_id: str, title: str, start: datetime, end: datetime, location: str = "") -> None:
+    """Modifie un rendez-vous (personne n'est prévenu)."""
+    aware = lambda d: (d if d.tzinfo else d.astimezone()).isoformat(timespec="seconds")
+    _call("PATCH", f"/events/{event_id}", params={"sendUpdates": "none"},
+          json={"summary": title, "location": location, "start": {"dateTime": aware(start)}, "end": {"dateTime": aware(end)}})
+
+
+def delete_event(event_id: str) -> None:
+    _call("DELETE", f"/events/{event_id}", params={"sendUpdates": "none"})
+
+
 def _error(r: httpx.Response) -> GCalError:
     try:
         msg = (r.json().get("error") or {}).get("message") or ""
@@ -111,7 +122,9 @@ def list_events(start: datetime, end: datetime) -> list[dict]:
                 a, b = (datetime.fromisoformat(s["date"]), datetime.fromisoformat(f["date"])) if all_day else (local(s["dateTime"]), local(f["dateTime"]))
             except (KeyError, ValueError):
                 continue
-            out.append({"title": e.get("summary") or "", "start": a, "end": b, "all_day": all_day, "where": e.get("location") or ""})
+            mine = e.get("eventType", "default") == "default" and not e.get("recurringEventId") and not e.get("attendees")  # séries, invitations, anniversaires : pas modifiables ici
+            out.append({"title": e.get("summary") or "", "start": a, "end": b, "all_day": all_day, "where": e.get("location") or "",
+                        "editable": mine and not all_day, "ref": {"src": "google", "id": e.get("id", "")}})
         token = d.get("nextPageToken")
         if not token:
             break
@@ -121,9 +134,9 @@ def list_events(start: datetime, end: datetime) -> list[dict]:
 TASKS_API = "https://tasks.googleapis.com/tasks/v1"
 
 
-def _tasks_call(path: str, **params) -> dict:
+def _tasks_call(path: str, method: str = "GET", body: dict | None = None, **params) -> dict:
     try:
-        r = httpx.get(TASKS_API + path, params=params, headers={"Authorization": f"Bearer {_token(oauth.TASKS_SCOPE)}"}, timeout=30)
+        r = httpx.request(method, TASKS_API + path, params=params or None, json=body, headers={"Authorization": f"Bearer {_token(oauth.TASKS_SCOPE)}"}, timeout=30)
     except httpx.HTTPError as e:
         raise GCalError(f"Google Tasks injoignable : {type(e).__name__}") from e
     if r.status_code == 403 and ("has not been used" in r.text or "accessNotConfigured" in r.text or "SERVICE_DISABLED" in r.text):
@@ -132,7 +145,7 @@ def _tasks_call(path: str, **params) -> dict:
         raise GCalError("Google a refusé la lecture des tâches : reconnectez Google Agenda (Paramètres › Agenda › Se connecter).")
     if r.status_code >= 300:
         raise GCalError(f"Google Tasks a répondu une erreur (code {r.status_code}).")
-    return r.json()
+    return r.json() if r.content else {}
 
 
 def list_tasks() -> list[dict]:
@@ -145,10 +158,22 @@ def list_tasks() -> list[dict]:
             if t.get("status") == "completed" or not t.get("due"):
                 continue
             try:
-                out.append({"title": t.get("title") or "", "due": date.fromisoformat(t["due"][:10])})
+                out.append({"title": t.get("title") or "", "due": date.fromisoformat(t["due"][:10]), "ref": {"src": "google", "list": lst["id"], "id": t["id"]}})
             except ValueError:
                 continue
     return out
+
+
+def task_update(ref: dict, title: str, due) -> None:
+    _tasks_call(f"/lists/{ref['list']}/tasks/{ref['id']}", "PATCH", {"title": title, "due": f"{due:%Y-%m-%d}T00:00:00.000Z"})
+
+
+def task_complete(ref: dict) -> None:
+    _tasks_call(f"/lists/{ref['list']}/tasks/{ref['id']}", "PATCH", {"status": "completed"})
+
+
+def task_delete(ref: dict) -> None:
+    _tasks_call(f"/lists/{ref['list']}/tasks/{ref['id']}", "DELETE")
 
 
 def test() -> tuple[bool, str]:

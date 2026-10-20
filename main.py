@@ -184,7 +184,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                 f"--w-side:{side_w}px;--w-list:{list_w}px").on(
                 "colresize", lambda e: self.save_cols(e.args), args=["detail"]).on(
                 "sidestate", lambda e: db.kv_set("side_hidden", "1" if (e.args or {}).get("detail", {}).get("hidden") else "0"),
-                args=["detail"]).on("agslot", lambda e: self.agenda_slot(e.args), args=["detail"]) as self.root:
+                args=["detail"]).on("agslot", lambda e: self.agenda_slot(e.args), args=["detail"]).on("agitem", lambda e: self.agenda_item(e.args), args=["detail"]) as self.root:
             ui.element("div").classes("sidehot")
             ui.element("div").classes("resizer r1")
             ui.element("div").classes("resizer r2")

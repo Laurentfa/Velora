@@ -361,23 +361,56 @@ class EwsProvider:
         tz = self.account.default_timezone
         mk = lambda d: EWSDateTime(d.year, d.month, d.day, d.hour, d.minute, tzinfo=tz)
         out = []
-        for it in self.account.calendar.view(start=mk(start), end=mk(end)).only("subject", "start", "end", "location", "is_all_day"):
+        for it in self.account.calendar.view(start=mk(start), end=mk(end)).only("subject", "start", "end", "location", "is_all_day", "calendar_item_type", "is_meeting"):
             if not it.start or not it.end:
                 continue
             if it.is_all_day:
                 a, b = datetime(it.start.year, it.start.month, it.start.day), datetime(it.end.year, it.end.month, it.end.day)
             else:
                 a, b = (datetime.fromisoformat(x.isoformat()).astimezone().replace(tzinfo=None) for x in (it.start, it.end))
-            out.append({"title": it.subject or "", "start": a, "end": b, "all_day": bool(it.is_all_day), "where": it.location or ""})
+            single = (it.calendar_item_type or "Single") == "Single" and not it.is_meeting  # séries et réunions avec invités : à modifier dans Outlook
+            out.append({"title": it.subject or "", "start": a, "end": b, "all_day": bool(it.is_all_day), "where": it.location or "",
+                        "editable": single and not it.is_all_day, "ref": {"src": "exchange", "id": it.id, "ck": it.changekey}})
         return out
+
+    def calendar_update(self, item_id: str, title: str, start: datetime, end: datetime, location: str = "") -> None:
+        """Modifie un rendez-vous sans invité (personne n'est prévenu)."""
+        from exchangelib import EWSDateTime
+        tz = self.account.default_timezone
+        mk = lambda d: EWSDateTime(d.year, d.month, d.day, d.hour, d.minute, tzinfo=tz)
+        item = self._get_or_gone(self.account.calendar, item_id)
+        item.subject, item.start, item.end, item.location = title, mk(start), mk(end), location or None
+        item.save(update_fields=["subject", "start", "end", "location"])
+
+    def calendar_delete(self, item_id: str) -> None:
+        self._get_or_gone(self.account.calendar, item_id).delete()
+
+    @staticmethod
+    def _get_or_gone(folder, item_id: str):
+        try:
+            return folder.get(id=item_id)
+        except ErrorItemNotFound as e:
+            raise RuntimeError("Cet élément n'existe plus sur le serveur : rafraîchissez l'agenda.") from e
 
     def tasks(self) -> list[dict]:
         """Tâches Exchange non terminées qui ont une échéance. Lecture seule."""
         out = []
         for t in self.account.tasks.filter(is_complete=False).only("subject", "due_date", "status"):
             if t.due_date and t.status != "Completed":
-                out.append({"title": t.subject or "", "due": datetime(t.due_date.year, t.due_date.month, t.due_date.day).date()})
+                out.append({"title": t.subject or "", "due": datetime(t.due_date.year, t.due_date.month, t.due_date.day).date(), "ref": {"src": "exchange", "id": t.id, "ck": t.changekey}})
         return out
+
+    def task_update(self, item_id: str, title: str, due) -> None:
+        from exchangelib import EWSDate
+        t = self._get_or_gone(self.account.tasks, item_id)
+        t.subject, t.due_date = title, EWSDate(due.year, due.month, due.day)
+        t.save(update_fields=["subject", "due_date"])
+
+    def task_complete(self, item_id: str) -> None:
+        self._get_or_gone(self.account.tasks, item_id).complete()
+
+    def task_delete(self, item_id: str) -> None:
+        self._get_or_gone(self.account.tasks, item_id).delete()
 
     def mark_verb(self, folder: str, uid: str, verb: int) -> None:
         """Pose sur le message d'origine la marque « répondu » (1) ou « transféré » (2), comme Outlook."""

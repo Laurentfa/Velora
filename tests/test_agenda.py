@@ -162,3 +162,89 @@ def test_grid_shows_tasks_on_their_day_and_overdue_on_today() -> None:
                                                   {"title": "Hors semaine", "due": date(2026, 11, 20), "src": {"google"}}]}
     h = ui_agenda.grid_html(date(2026, 10, 19), data, datetime(2026, 10, 20, 9))
     assert "Rendre le devis" in h and "Tâche oubliée" in h and "ag-late" in h and "Hors semaine" not in h and h.count("ag-task") >= 2
+
+
+def test_merge_keeps_every_reference_and_editable_needs_all_sources() -> None:
+    a, b = datetime(2026, 10, 20, 9), datetime(2026, 10, 20, 10)
+    base = {"title": "Point", "start": a, "end": b, "all_day": False, "where": ""}
+    m = agenda._merge({"exchange": [{**base, "editable": True, "ref": {"src": "exchange", "account": "x", "id": "E1"}}],
+                       "google": [{**base, "editable": False, "ref": {"src": "google", "id": "G1"}}]})
+    assert len(m) == 1 and [r["id"] for r in m[0]["refs"]] == ["E1", "G1"] and m[0]["editable"] is False
+
+
+def test_changes_are_applied_to_every_agenda_and_errors_reported(monkeypatch) -> None:
+    calls = []
+
+    class Prov:
+        def calendar_update(self, i, *a): calls.append(("ews-up", i, a[0]))
+        def calendar_delete(self, i): raise RuntimeError("serveur refuse")
+        def task_complete(self, i): calls.append(("ews-done", i))
+
+    monkeypatch.setattr(sync, "provider", lambda key: Prov())
+    monkeypatch.setattr(agenda.gcal, "update_event", lambda i, *a: calls.append(("g-up", i, a[0])))
+    monkeypatch.setattr(agenda.gcal, "delete_event", lambda i: calls.append(("g-del", i)))
+    monkeypatch.setattr(agenda.gcal, "task_complete", lambda r: calls.append(("g-done", r["id"])))
+    monkeypatch.setattr(sync, "_dry", lambda: False)
+    refs = [{"src": "exchange", "account": "x", "id": "E1"}, {"src": "google", "id": "G1"}]
+    ev = {"title": "Point", "refs": refs}
+    agenda.update_event(ev, "Nouveau", datetime(2026, 10, 20, 9), datetime(2026, 10, 20, 10), "")
+    agenda.complete_task({"title": "T", "refs": [{"src": "exchange", "account": "x", "id": "T1"}, {"src": "google", "list": "L", "id": "T2"}]})
+    with pytest.raises(RuntimeError, match="serveur refuse"):
+        agenda.delete_event(ev)
+    assert ("ews-up", "E1", "Nouveau") in calls and ("g-up", "G1", "Nouveau") in calls and ("g-del", "G1") in calls  # Google est supprimé malgré l'échec d'Exchange
+    assert ("ews-done", "T1") in calls and ("g-done", "T2") in calls
+
+
+async def test_clicking_an_event_opens_its_card_and_delete_asks_confirmation(user, box, monkeypatch) -> None:
+    make_brief(["testbox|INBOX|1"])
+    got = []
+    monkeypatch.setattr(agenda, "delete_event", lambda ev: got.append(ev["title"]))
+    monkeypatch.setattr(agenda, "fetch", lambda first, days=7, force=False: {"errors": [], "tasks": [], "events": [{
+        "title": "Rdv modifiable", "start": datetime.combine(first, datetime.min.time()).replace(hour=9), "end": datetime.combine(first, datetime.min.time()).replace(hour=10),
+        "all_day": False, "where": "", "src": {"google"}, "refs": [{"src": "google", "id": "G1"}], "editable": True}]})
+    await user.open("/")
+    b = box[-1]
+    await b.go("brief", "", "")
+    await asyncio.sleep(0.8)
+    assert "e0" in b._agenda_reg
+    task = asyncio.create_task(b.agenda_item({"ref": "e0"}))
+    await asyncio.sleep(0.4)
+    user.find(marker="agenda-delete").click()
+    await asyncio.sleep(0.3)
+    assert not got  # pas de suppression avant la confirmation
+    user.find(marker="agenda-confirm").click()
+    await task
+    assert got == ["Rdv modifiable"]
+
+
+async def test_read_only_events_have_no_save_or_delete(user, box, monkeypatch) -> None:
+    make_brief(["testbox|INBOX|1"])
+    monkeypatch.setattr(agenda, "fetch", lambda first, days=7, force=False: {"errors": [], "tasks": [], "events": [{
+        "title": "Série hebdo", "start": datetime.combine(first, datetime.min.time()).replace(hour=9), "end": datetime.combine(first, datetime.min.time()).replace(hour=10),
+        "all_day": False, "where": "", "src": {"exchange"}, "refs": [{"src": "exchange", "account": "x", "id": "E1"}], "editable": False}]})
+    await user.open("/")
+    b = box[-1]
+    await b.go("brief", "", "")
+    await asyncio.sleep(0.8)
+    asyncio.create_task(b.agenda_item({"ref": "e0"}))
+    await asyncio.sleep(0.4)
+    await user.should_see("Série hebdo")
+    await user.should_not_see(marker="agenda-delete")
+    await user.should_not_see(marker="agenda-save")
+
+
+async def test_a_task_can_be_completed_from_its_card(user, box, monkeypatch) -> None:
+    make_brief(["testbox|INBOX|1"])
+    done = []
+    monkeypatch.setattr(agenda, "complete_task", lambda t: done.append(t["title"]))
+    monkeypatch.setattr(agenda, "fetch", lambda first, days=7, force=False: {"errors": [], "events": [], "tasks": [
+        {"title": "Rendre le devis", "due": first, "src": {"google"}, "refs": [{"src": "google", "list": "L", "id": "T"}]}]})
+    await user.open("/")
+    b = box[-1]
+    await b.go("brief", "", "")
+    await asyncio.sleep(0.8)
+    task = asyncio.create_task(b.agenda_item({"ref": "t0"}))
+    await asyncio.sleep(0.4)
+    user.find(marker="agenda-done").click()
+    await task
+    assert done == ["Rendre le devis"]

@@ -89,10 +89,10 @@ body.resizing iframe{pointer-events:none}
 .agenda{width:100%;height:100vh;background:transparent;flex-wrap:nowrap}.ag-head{padding:14px 18px 0;width:100%}.ag-sub{padding:2px 18px 6px}.ag-title{font-size:19px;font-weight:700;letter-spacing:-.01em}
 .ag-scroll{flex:1 1 56%;min-height:200px;width:100%;overflow:auto;padding:0 18px 12px;scrollbar-width:none}.ag-scroll::-webkit-scrollbar{display:none}.ag-note{padding:4px 18px 10px;color:var(--danger,#d92d3a)}
 .ag-days,.ag-allday,.ag-grid{display:grid;width:100%}.ag-days{position:sticky;top:0;z-index:3;background:transparent;backdrop-filter:blur(6px)}.ag-dh{text-align:center;padding:6px 0;font-size:13px;color:var(--muted)}.ag-dh span{text-transform:capitalize}
-.ag-today{color:var(--accent);font-weight:700}.ag-adc{border-left:1px solid var(--line);padding:2px;min-height:4px}.ag-ad{font-size:11px;border-radius:5px;padding:1px 6px;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ag-today{color:var(--accent);font-weight:700}.ag-adc{border-left:1px solid var(--line);padding:2px;min-height:4px}.ag-ad{cursor:pointer;font-size:11px;border-radius:5px;padding:1px 6px;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ag-hrs{position:relative}.ag-hr{font-size:10px;color:var(--muted);position:relative}.ag-hr span{position:absolute;top:-6px;right:6px}
 .ag-col{position:relative;border-left:1px solid var(--line);background-image:linear-gradient(var(--line) 1px,transparent 1px);background-size:100% 40px;cursor:pointer}.ag-col:hover{background-color:var(--hover)}
-.ag-ev{position:absolute;border-radius:6px;padding:2px 6px;font-size:11px;line-height:1.25;overflow:hidden;border-left:3px solid;cursor:default;box-sizing:border-box}.ag-ev b{font-weight:600}
+.ag-ev{position:absolute;border-radius:6px;padding:2px 6px;font-size:11px;line-height:1.25;overflow:hidden;border-left:3px solid;cursor:pointer;box-sizing:border-box}.ag-ev b{font-weight:600}
 .ag-ex{background:rgba(54,121,255,.14);border-color:#3679ff;color:var(--text)}.ag-go{background:rgba(30,160,90,.15);border-color:#1ea05a;color:var(--text)}.ag-both{background:rgba(140,90,220,.15);border-color:#8c5adc;color:var(--text)}
 .ag-task{background:transparent!important;border:1px solid;border-radius:5px}.ag-task::before{content:'';display:inline-block;width:8px;height:8px;border:1.5px solid currentColor;border-radius:50%;margin-right:5px;vertical-align:-1px}.ag-task.ag-ex{color:#3679ff;border-color:#3679ff}.ag-task.ag-go{color:#1ea05a;border-color:#1ea05a}.ag-task.ag-both{color:#8c5adc;border-color:#8c5adc}.ag-task.ag-late{color:#d92d3a;border-color:#d92d3a}
 .ag-now{position:absolute;left:0;right:0;border-top:2px solid #d92d3a;pointer-events:none;z-index:2}.ag-empty{padding:40px 10px;text-align:center;color:var(--muted)}
@@ -442,6 +442,12 @@ SWIPE_JS = """<script>
     if (now) sc.scrollTop = Math.max(0, now.offsetTop - 120);
   };
   document.addEventListener('click', e => {
+    const it = e.target.closest && e.target.closest('[data-ref]');
+    if (it) {
+      const rt = document.querySelector('.root');
+      if (rt) rt.dispatchEvent(new CustomEvent('agitem', {detail: {ref: it.dataset.ref}}));
+      return;
+    }
     const col = e.target.closest && e.target.closest('.ag-col');
     if (!col || e.target.closest('.ag-ev')) return;
     const r = col.getBoundingClientRect();

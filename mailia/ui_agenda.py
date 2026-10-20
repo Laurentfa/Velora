@@ -13,9 +13,16 @@ from mailia.ui_common import JOURS, MOIS_COURTS
 HOUR_PX = 40
 
 
-def grid_html(first: date, data: dict, now: datetime) -> str:
+def grid_html(first: date, data: dict, now: datetime, reg: dict | None = None) -> str:
     """Grille horaire de la semaine : colonnes de jours, rendez-vous placés à l'heure, journées entières en bandeau."""
     e, T = html.escape, i18n.tr
+
+    def ref(kind: str, obj: dict) -> str:  # repère cliquable : le clic ouvre la fiche (modifier, terminer, supprimer)
+        if reg is None:
+            return ""
+        key = f"{kind}{len(reg)}"
+        reg[key] = obj
+        return f' data-ref="{key}"'
     events = data["events"]
     timed = [x for x in events if not x["all_day"]]
     weekend = any(x["start"].weekday() >= 5 or (x["end"] - timedelta(seconds=1)).weekday() >= 5 for x in events if first <= x["start"].date() < first + timedelta(days=7))
@@ -31,9 +38,9 @@ def grid_html(first: date, data: dict, now: datetime) -> str:
         cells = []
         for d in days:
             ds = datetime(d.year, d.month, d.day)
-            chips = "".join(f'<div class="ag-ad ag-{_cls(x)}" title="{e(x["title"])}">{e(x["title"] or T("(sans titre)"))}</div>'
+            chips = "".join(f'<div class="ag-ad ag-{_cls(x)}"{ref("e", x)} title="{e(x["title"])}">{e(x["title"] or T("(sans titre)"))}</div>'
                             for x in events if x["all_day"] and x["start"] < ds + timedelta(days=1) and x["end"] > ds)
-            chips += "".join(f'<div class="ag-ad ag-task ag-{_cls(t)}{" ag-late" if t["due"] < today else ""}" title="{e(T("Tâche"))} · {e(t["title"])}">{e(t["title"] or T("(sans titre)"))}</div>'
+            chips += "".join(f'<div class="ag-ad ag-task ag-{_cls(t)}{" ag-late" if t["due"] < today else ""}"{ref("t", t)} title="{e(T("Tâche"))} · {e(t["title"])}">{e(t["title"] or T("(sans titre)"))}</div>'
                              for t in tasks if (t["due"] == d or (d == today and t["due"] < today)))  # une tâche en retard reste visible sur aujourd'hui
             cells.append(f'<div class="ag-adc">{chips}</div>')
         allday = '<div class="ag-allday"><div></div>' + "".join(cells) + "</div>"
@@ -41,17 +48,19 @@ def grid_html(first: date, data: dict, now: datetime) -> str:
     cols = []
     for d in days:
         ds, de = datetime(d.year, d.month, d.day), datetime(d.year, d.month, d.day) + timedelta(days=1)
-        day_events = []
+        day_events, ev_of = [], {}
         for x in timed:
             if x["start"] < de and x["end"] > ds:
-                day_events.append({**x, "start": max(x["start"], ds), "end": min(x["end"], de)})
+                clipped = {**x, "start": max(x["start"], ds), "end": min(x["end"], de)}
+                ev_of[id(clipped)] = x  # la fiche s'ouvre sur le rendez-vous entier, pas sur sa part du jour
+                day_events.append(clipped)
         blocks = []
         for x, col, n in agenda.lanes(day_events):
             top = ((x["start"] - ds).total_seconds() / 3600 - h0) * HOUR_PX
             hgt = max(18, (x["end"] - x["start"]).total_seconds() / 3600 * HOUR_PX - 2)
             tip = f'{x["start"]:%H:%M} – {x["end"]:%H:%M} · {x["title"]}' + (f' · {x["where"]}' if x["where"] else "")
             blocks.append(f'<div class="ag-ev ag-{_cls(x)}" style="top:{top:.0f}px;height:{hgt:.0f}px;left:calc({col} * 100% / {n} + 2px);width:calc(100% / {n} - 4px)" '
-                          f'title="{e(tip)}"><b>{x["start"]:%H:%M}</b> {e(x["title"] or T("(sans titre)"))}</div>')
+                          f'{ref("e", ev_of[id(x)])} title="{e(tip)}"><b>{x["start"]:%H:%M}</b> {e(x["title"] or T("(sans titre)"))}</div>')
         line = ""
         if d == now.date() and h0 <= now.hour + now.minute / 60 <= h1:
             line = f'<div class="ag-now" style="top:{(now.hour + now.minute / 60 - h0) * HOUR_PX:.0f}px"></div>'
@@ -97,6 +106,7 @@ class AgendaMixin:
             note = ui.label("").classes("rmeta ag-note")
             self.feed_panel()
         self._agenda_ui = (label, body, note)
+        self._agenda_reg = {}
         if not (src["exchange"] or src["google"]):
             body.set_content('<div class="ag-empty">' + html.escape(i18n.tr("Aucun agenda connecté : ajoutez Exchange ou Google Agenda dans les Paramètres.")) + "</div>")
             note.set_text("")
@@ -117,7 +127,9 @@ class AgendaMixin:
         try:
             label.set_text(range_label(first))
             data = await run.io_bound(agenda.fetch, first, 7, force)
-            body.set_content(grid_html(first, data, datetime.now()))
+            reg: dict = {}
+            body.set_content(grid_html(first, data, datetime.now(), reg))
+            self._agenda_reg = reg
             note.set_text(" · ".join(data["errors"]))
             ui.run_javascript("mailiaAgendaScroll()")
         except Exception:  # noqa: BLE001 — le panneau a pu être fermé entre-temps
@@ -171,3 +183,96 @@ class AgendaMixin:
         agenda.invalidate()
         ui.notify("Rendez-vous ajouté à l'agenda", type="positive")
         await self._agenda_fill(force=True)
+
+    async def _agenda_confirm(self, text: str) -> bool:
+        with self.host, ui.dialog() as dlg, ui.card().style("width:min(420px,92vw)"):
+            ui.label(text).classes("text-body1")
+            with ui.row().classes("justify-end w-full gap-2"):
+                ui.button("Annuler", on_click=lambda: dlg.submit(False)).props("flat no-caps")
+                ui.button("Supprimer", on_click=lambda: dlg.submit(True)).props("unelevated no-caps color=negative").mark("agenda-confirm")
+        ok = await dlg
+        dlg.delete()
+        return bool(ok)
+
+    async def agenda_item(self, args: dict | None) -> None:
+        """Clic sur un rendez-vous ou une tâche : sa fiche (modifier, terminer, supprimer)."""
+        obj = (getattr(self, "_agenda_reg", {}) or {}).get(((args or {}).get("ref")) or "")
+        if not obj:
+            return
+        if "due" in obj:
+            await self._agenda_task(obj)
+        else:
+            await self._agenda_event(obj)
+
+    async def _agenda_run(self, fn, *a, done: str) -> None:
+        try:
+            await run.io_bound(fn, *a)
+        except Exception as e:  # noqa: BLE001
+            ui.notify(f"Opération impossible : {e}", type="negative", multi_line=True)
+        else:
+            ui.notify(done, type="positive")
+        await self._agenda_fill(force=True)
+
+    async def _agenda_event(self, ev: dict) -> None:
+        names = {"exchange": "Exchange", "google": "Google Agenda"}
+        where_txt = " + ".join(names[k] for k in ("exchange", "google") if k in ev["src"])
+        with self.host, ui.dialog() as dlg, ui.card().style("width:min(480px,92vw)"):
+            ui.label("Rendez-vous").classes("text-h6")
+            title = ui.input("Titre", value=ev["title"]).props("outlined dense stack-label").classes("w-full").mark("agenda-title")
+            with ui.row().classes("w-full no-wrap gap-2"):
+                begin = ui.input("Début", value=f"{ev['start']:%Y-%m-%dT%H:%M}").props("outlined dense stack-label type=datetime-local").classes("col")
+                end = ui.input("Fin", value=f"{ev['end']:%Y-%m-%dT%H:%M}").props("outlined dense stack-label type=datetime-local").classes("col")
+            where = ui.input("Lieu (facultatif)", value=ev["where"]).props("outlined dense stack-label").classes("w-full")
+            if not ev["editable"]:
+                for w in (title, begin, end, where):
+                    w.props("readonly")
+            ui.label(where_txt + (i18n.tr(" · modifié aux deux endroits") if ev["editable"] and len(ev["src"]) > 1 else "")).classes("rmeta")
+            if not ev["editable"]:
+                ui.label("Ce rendez-vous fait partie d'une série, d'une réunion avec invités, d'une journée entière ou d'un anniversaire : modifiez-le dans votre application d'agenda.").classes("text-caption text-grey")
+            with ui.row().classes("justify-end w-full gap-2"):
+                if ev["editable"]:
+                    ui.button("Supprimer", on_click=lambda: dlg.submit("delete")).props("flat no-caps color=negative").mark("agenda-delete")
+                ui.button("Fermer" if not ev["editable"] else "Annuler", on_click=lambda: dlg.submit(None)).props("flat no-caps")
+                if ev["editable"]:
+                    ui.button("Enregistrer", on_click=lambda: dlg.submit((title.value, begin.value, end.value, where.value))).props("unelevated no-caps color=primary").mark("agenda-save")
+        r = await dlg
+        dlg.delete()
+        if r == "delete":
+            if await self._agenda_confirm("Supprimer ce rendez-vous ? Personne n'est prévenu."):
+                await self._agenda_run(agenda.delete_event, ev, done="Rendez-vous supprimé")
+        elif r:
+            try:
+                a, b = datetime.fromisoformat(r[1]), datetime.fromisoformat(r[2])
+            except ValueError:
+                return ui.notify("Dates invalides.", type="warning")
+            if b <= a or not (r[0] or "").strip():
+                return ui.notify("Indiquez un titre, et une fin postérieure au début.", type="warning")
+            await self._agenda_run(agenda.update_event, ev, r[0].strip(), a, b, r[3] or "", done="Rendez-vous modifié")
+
+    async def _agenda_task(self, t: dict) -> None:
+        names = {"exchange": "Exchange", "google": "Google Tasks"}
+        with self.host, ui.dialog() as dlg, ui.card().style("width:min(440px,92vw)"):
+            ui.label("Tâche").classes("text-h6")
+            title = ui.input("Titre", value=t["title"]).props("outlined dense stack-label").classes("w-full").mark("agenda-title")
+            due = ui.input("Échéance", value=f"{t['due']:%Y-%m-%d}").props("outlined dense stack-label type=date").classes("w-full")
+            ui.label(" + ".join(names[k] for k in ("exchange", "google") if k in t["src"])).classes("rmeta")
+            with ui.row().classes("justify-end w-full gap-2"):
+                ui.button("Supprimer", on_click=lambda: dlg.submit("delete")).props("flat no-caps color=negative").mark("agenda-delete")
+                ui.button("Annuler", on_click=lambda: dlg.submit(None)).props("flat no-caps")
+                ui.button("Terminée", on_click=lambda: dlg.submit("done")).props("flat no-caps color=primary").mark("agenda-done")
+                ui.button("Enregistrer", on_click=lambda: dlg.submit((title.value, due.value))).props("unelevated no-caps color=primary").mark("agenda-save")
+        r = await dlg
+        dlg.delete()
+        if r == "delete":
+            if await self._agenda_confirm("Supprimer cette tâche ?"):
+                await self._agenda_run(agenda.delete_task, t, done="Tâche supprimée")
+        elif r == "done":
+            await self._agenda_run(agenda.complete_task, t, done="Tâche terminée")
+        elif r:
+            try:
+                d = date.fromisoformat(r[1])
+            except ValueError:
+                return ui.notify("Date invalide.", type="warning")
+            if not (r[0] or "").strip():
+                return ui.notify("Indiquez un titre.", type="warning")
+            await self._agenda_run(agenda.update_task, t, r[0].strip(), d, done="Tâche modifiée")

@@ -118,7 +118,7 @@ class _Catcher(BaseHTTPRequestHandler):
 
 
 CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events"  # créer et modifier des rendez-vous, rien d'autre
-TASKS_SCOPE = "https://www.googleapis.com/auth/tasks.readonly"  # lire les tâches Google (affichage dans l'agenda du brief), sans pouvoir les modifier
+TASKS_SCOPE = "https://www.googleapis.com/auth/tasks"  # lire, terminer, modifier et supprimer les tâches Google (agenda du brief)
 
 
 def authorize(provider: str, email: str = "", open_browser=webbrowser.open, timeout: float = 300, cancel: threading.Event | None = None,

@@ -35,7 +35,7 @@ def _exchange(start: datetime, end: datetime) -> list[dict]:
     out = []
     for key, cfg in sync.ACCOUNTS.items():
         if cfg.kind == "ews" and cfg.password:
-            out += sync.provider(key).calendar_events(start, end)
+            out += [{**e, "ref": {**e["ref"], "account": key}} for e in sync.provider(key).calendar_events(start, end)]
     return out
 
 
@@ -44,7 +44,7 @@ def _exchange_tasks() -> list[dict]:
     out = []
     for key, cfg in sync.ACCOUNTS.items():
         if cfg.kind == "ews" and cfg.password:
-            out += sync.provider(key).tasks()
+            out += [{**t, "ref": {**t["ref"], "account": key}} for t in sync.provider(key).tasks()]
     return out
 
 
@@ -53,10 +53,13 @@ def _merge(parts: dict[str, list[dict]]) -> list[dict]:
     for src, events in parts.items():
         for e in events:
             k = (e["title"].strip().lower(), e["start"], e["end"])
+            ref = [e["ref"]] if e.get("ref") else []
             if k in seen:
                 seen[k]["src"].add(src)
+                seen[k]["refs"] += ref
+                seen[k]["editable"] = seen[k]["editable"] and e.get("editable", False)
             else:
-                seen[k] = {**e, "src": {src}}
+                seen[k] = {**e, "src": {src}, "refs": ref, "editable": e.get("editable", False)}
     return sorted(seen.values(), key=lambda e: (e["start"], e["end"], e["title"]))
 
 
@@ -100,10 +103,12 @@ def _fetch_tasks(errors: list[str]) -> list[dict]:
         try:
             for t in f.result():
                 k = (t["title"].strip().lower(), t["due"])
+                ref = [t["ref"]] if t.get("ref") else []
                 if k in seen:
                     seen[k]["src"].add(name)
+                    seen[k]["refs"] += ref
                 else:
-                    seen[k] = {**t, "src": {name}}
+                    seen[k] = {**t, "src": {name}, "refs": ref}
         except Exception as e:  # noqa: BLE001
             log.warning("tâches %s : %s", name, e)
             errors.append(f"{'Exchange' if name == 'exchange' else 'Google Tasks'} : {e}")
@@ -138,3 +143,56 @@ def lanes(events: list[dict]) -> list[tuple[dict, int, int]]:
         n = max(placed[i][1] for i in g) + 1
         out += [(placed[i][0], placed[i][1], n) for i in g]
     return out
+
+
+# ---------- modifier, terminer, supprimer (une opération par agenda où le rendez-vous ou la tâche existe) ----------
+def _dry() -> bool:
+    from . import sync
+    return sync._dry()
+
+
+def _each(refs: list[dict], ews_fn, google_fn) -> None:
+    """Applique l'opération à chaque exemplaire (Exchange et/ou Google) ; la première erreur est remontée après avoir tout essayé."""
+    from . import sync
+    errors = []
+    for r in refs:
+        try:
+            if r["src"] == "exchange":
+                ews_fn(sync.provider(r["account"]), r)
+            else:
+                google_fn(r)
+        except Exception as e:  # noqa: BLE001
+            errors.append(str(e))
+    invalidate()
+    if errors:
+        raise RuntimeError(" ; ".join(errors))
+
+
+def update_event(ev: dict, title: str, start, end, where: str = "") -> None:
+    if _dry():
+        return log.warning("MODIFICATION D'ÉVÉNEMENT SIMULÉE : %s", title)
+    _each(ev["refs"], lambda p, r: p.calendar_update(r["id"], title, start, end, where), lambda r: gcal.update_event(r["id"], title, start, end, where))
+
+
+def delete_event(ev: dict) -> None:
+    if _dry():
+        return log.warning("SUPPRESSION D'ÉVÉNEMENT SIMULÉE : %s", ev["title"])
+    _each(ev["refs"], lambda p, r: p.calendar_delete(r["id"]), lambda r: gcal.delete_event(r["id"]))
+
+
+def update_task(t: dict, title: str, due) -> None:
+    if _dry():
+        return log.warning("MODIFICATION DE TÂCHE SIMULÉE : %s", title)
+    _each(t["refs"], lambda p, r: p.task_update(r["id"], title, due), lambda r: gcal.task_update(r, title, due))
+
+
+def complete_task(t: dict) -> None:
+    if _dry():
+        return log.warning("TÂCHE TERMINÉE SIMULÉE : %s", t["title"])
+    _each(t["refs"], lambda p, r: p.task_complete(r["id"]), lambda r: gcal.task_complete(r))
+
+
+def delete_task(t: dict) -> None:
+    if _dry():
+        return log.warning("SUPPRESSION DE TÂCHE SIMULÉE : %s", t["title"])
+    _each(t["refs"], lambda p, r: p.task_delete(r["id"]), lambda r: gcal.task_delete(r))
