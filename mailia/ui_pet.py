@@ -10,6 +10,14 @@ DIR = Path(__file__).parent / "pet"
 MOODS = {"calm": "Calme (il dort et se repose beaucoup)", "normal": "Normal", "lively": "Vif (il se promène davantage)"}
 
 
+def version() -> int:
+    """Empreinte du script (date de modification) : change à chaque mise à jour, pour que la fenêtre ne garde pas l'ancienne version en cache."""
+    try:
+        return int((DIR / "pet.js").stat().st_mtime)
+    except OSError:
+        return 0
+
+
 def config() -> dict:
     """Réglages du chat tels que le script de la page les attend."""
     try:

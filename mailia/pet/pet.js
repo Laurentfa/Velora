@@ -81,7 +81,8 @@
     sg = el('g', {opacity: 0}, flip);
     el('path', {d: SIT, fill: '#000', transform: 'matrix(10,0,0,-10,-4074.9753,3582.7838)'}, el('g', {transform: 'translate(120,' + (262 - 156.5 * 1.7) + ') scale(1.7) translate(-5,0)'}, sg));
     lg = el('g', {opacity: 0}, flip);
-    var lp = el('path', {d: LIE, fill: '#000'}, lg), bb = lp.getBBox();
+    el('path', {d: LIE, fill: '#000'}, lg);
+    var bb = {x: 62.18, y: 178.69, width: 389.16, height: 218.47}; // dimensions mesurées une fois pour toutes : sur un calque masqué, la mesure du navigateur renverrait 0
     lg.setAttribute('transform', 'translate(' + (40 - bb.x * .8) + ',' + (262 - (bb.y + bb.height) * .8) + ') scale(.8)');
     // étirement : le chat qui marche, pattes avant tendues, arrière allongé
     tg = el('g', {opacity: 0}, flip);
@@ -157,6 +158,7 @@
   }
   window.veloraPet = {
     set: function (c) { for (var a in c) cfg[a] = c[a]; cfg.size = Math.max(.3, Math.min(.9, +cfg.size || .5)); apply(); },
-    say: function (t) { if (built) say(t); }
+    say: function (t) { if (built) say(t); },
+    pose: function (p) { if (built && GR[p]) go(p); }
   };
 })();

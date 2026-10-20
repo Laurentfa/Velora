@@ -25,6 +25,7 @@ def test_the_pet_is_off_by_default_and_settings_are_clamped() -> None:
 def test_the_script_is_valid_and_self_contained(tmp_path) -> None:
     js = (ui_pet.DIR / "pet.js").read_text(encoding="utf-8")
     assert "window.veloraPet" in js and "prefers-reduced-motion" in js and "fetch(" not in js and "XMLHttpRequest" not in js and "eval(" not in js  # aucun réseau
+    assert "getBBox" not in js  # sur un calque masqué la mesure renvoie 0 : le chat couché sortait de l'écran
     node = shutil.which("node")
     if node:
         r = subprocess.run([node, "--check", str(ui_pet.DIR / "pet.js")], capture_output=True, text=True)
@@ -58,6 +59,7 @@ console.log('OK', frames);
 def test_the_builds_ship_the_pet_script() -> None:
     assert "mailia/pet" in (ROOT / "build_mac.sh").read_text(encoding="utf-8")
     assert "mailia\\pet" in (ROOT / "build_windows.bat").read_text(encoding="utf-8")
+    assert ui_pet.version() > 0
     assert "/pet/pet.js" in (ROOT / "main.py").read_text(encoding="utf-8") and '"/pet"' in (ROOT / "main.py").read_text(encoding="utf-8")
 
 

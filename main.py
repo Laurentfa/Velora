@@ -1829,7 +1829,7 @@ async def index_page() -> None:
         perf.mark("page demandée par la fenêtre")
     ui.colors(primary="#0a66e8", secondary="#4a9bff", accent="#0a66e8")
     ui.add_head_html(SWIPE_JS)
-    ui.add_head_html('<script src="/pet/pet.js?v=1" defer></script>')  # chat de compagnie (désactivé par défaut)
+    ui.add_head_html(f'<script src="/pet/pet.js?v={ui_pet.version()}" defer></script>')  # chat de compagnie (désactivé par défaut)
     if (script := i18n.client_script()):
         ui.add_head_html(script)  # interface dans une autre langue que le français
     ui.dark_mode({"light": False, "dark": True}.get(db.kv_get("theme") or ""))  # clair / sombre, sinon suit le système
