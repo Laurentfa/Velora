@@ -162,6 +162,7 @@ def test_grid_shows_tasks_on_their_day_and_overdue_on_today() -> None:
                                                   {"title": "Hors semaine", "due": date(2026, 11, 20), "src": {"google"}}]}
     h = ui_agenda.grid_html(date(2026, 10, 19), data, datetime(2026, 10, 20, 9))
     assert "Rendre le devis" in h and "Tâche oubliée" in h and "ag-late" in h and "Hors semaine" not in h and h.count("ag-task") >= 2
+    assert "1 tâche en retard" in h and "<details" in h and "15/10" in h  # les retards tiennent en une seule ligne repliable
 
 
 def test_merge_keeps_every_reference_and_editable_needs_all_sources() -> None:

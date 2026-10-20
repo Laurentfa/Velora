@@ -40,8 +40,13 @@ def grid_html(first: date, data: dict, now: datetime, reg: dict | None = None) -
             ds = datetime(d.year, d.month, d.day)
             chips = "".join(f'<div class="ag-ad ag-{_cls(x)}"{ref("e", x)} title="{e(x["title"])}">{e(x["title"] or T("(sans titre)"))}</div>'
                             for x in events if x["all_day"] and x["start"] < ds + timedelta(days=1) and x["end"] > ds)
-            chips += "".join(f'<div class="ag-ad ag-task ag-{_cls(t)}{" ag-late" if t["due"] < today else ""}"{ref("t", t)} title="{e(T("Tâche"))} · {e(t["title"])}">{e(t["title"] or T("(sans titre)"))}</div>'
-                             for t in tasks if (t["due"] == d or (d == today and t["due"] < today)))  # une tâche en retard reste visible sur aujourd'hui
+            chips += "".join(f'<div class="ag-ad ag-task ag-{_cls(t)}"{ref("t", t)} title="{e(T("Tâche"))} · {e(t["title"])}">{e(t["title"] or T("(sans titre)"))}</div>'
+                             for t in tasks if t["due"] == d)
+            late = [t for t in tasks if t["due"] < today] if d == today else []  # les retards sont groupés sur aujourd'hui, en une ligne qui se déplie
+            if late:
+                head = T("1 tâche en retard") if len(late) == 1 else T("{0} tâches en retard").format(len(late))
+                rows = "".join(f'<div class="ag-ad ag-task ag-{_cls(t)} ag-late"{ref("t", t)} title="{e(T("Tâche"))} · {e(t["title"])}">{e(t["title"] or T("(sans titre)"))} · {t["due"]:%d/%m}</div>' for t in late)
+                chips += f'<details class="ag-lates"><summary class="ag-ad ag-task ag-late">{e(head)}</summary>{rows}</details>'
             cells.append(f'<div class="ag-adc">{chips}</div>')
         allday = '<div class="ag-allday"><div></div>' + "".join(cells) + "</div>"
     hours = "".join(f'<div class="ag-hr" style="height:{HOUR_PX}px"><span>{h}</span></div>' for h in range(h0, h1))
