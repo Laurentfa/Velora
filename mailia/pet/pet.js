@@ -89,8 +89,8 @@
     host = document.createElement('div');
     host.id = 'velora-pet';
     host.setAttribute('aria-hidden', 'true');
-    host.style.cssText = 'position:fixed;left:0;bottom:0;width:255px;height:214px;z-index:2400;pointer-events:none;transform-origin:0 100%;will-change:transform;display:none';
-    svg = el('svg', {viewBox: '24 -20 340 286', style: 'width:255px;height:214px;overflow:visible'}, host);
+    host.style.cssText = 'position:fixed;left:0;bottom:0;width:255px;height:252px;z-index:2400;pointer-events:none;transform-origin:0 100%;will-change:transform;display:none';
+    svg = el('svg', {viewBox: '24 -70 340 336', style: 'width:255px;height:252px;overflow:visible'}, host);
     var defs = el('defs', {}, svg);
     var cp = el('clipPath', {id: 'vpBody'}, defs); el('polygon', {points: '0,0 402,0 402,198 165,198 165,192 0,192'}, cp);
     flip = el('g', {}, svg);
@@ -119,7 +119,7 @@
   function say(t) {
     bub.textContent = t;
     bub.style.left = (x + 120 * cfg.size) + 'px';
-    bub.style.bottom = (214 * cfg.size + 4) + 'px';
+    bub.style.bottom = (252 * cfg.size + 4) + 'px';
     bub.style.opacity = 1;
     setTimeout(function () { bub.style.opacity = 0; }, 1500);
   }
