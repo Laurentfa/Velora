@@ -1175,19 +1175,20 @@ SWIPE_JS = """<script>
 # On relance la connexion, puis, si elle ne revient pas, on recharge la page (le message ouvert est rouvert au rechargement).
 WATCHDOG_JS = """<script>
 (function () {
-  var down = 0;
-  function kick() { var s = window.socket; if (!s || s.connected) return; try { if (s.io && s.io.engine) s.io.engine.close(); s.connect(); } catch (e) {} }
-  setInterval(function () {
-    var s = window.socket;
-    if (!s) return;
-    if (s.connected) { down = 0; return; }
-    var now = Date.now();
-    if (!down) { down = now; return; }
-    var d = now - down;
-    if (d > 6000 && d <= 25000) kick();
-    else if (d > 25000 && document.visibilityState === 'visible') { down = now; location.reload(); }
-  }, 3000);
-  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') kick(); });
+  var bad = 0;
+  function kick() { var s = window.socket; if (!s) return; try { if (s.io && s.io.engine) s.io.engine.close(); s.connect(); } catch (e) {} }
+  function check() {
+    var cid = window.clientId;
+    if (!cid) return;
+    fetch('/_velora/alive/' + cid, {cache: 'no-store'}).then(function (r) { return r.json(); }).then(function (j) {
+      if (j.ok) { bad = 0; return; }
+      bad += 1;
+      if (bad === 2) kick();                 // le serveur ne voit plus la fenêtre : on relance la liaison
+      else if (bad >= 4) { bad = 0; location.reload(); }  // elle ne revient pas : on recharge la page
+    }).catch(function () {});
+  }
+  setInterval(check, 8000);
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { kick(); setTimeout(check, 1500); } });
   window.addEventListener('online', kick);
 })();
 </script>"""

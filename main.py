@@ -2013,6 +2013,13 @@ if not DB_ERROR:
     app.on_startup(lambda: background_tasks.create(_start_api()))
     app.add_static_files("/weather-icons", str(weather.ICONS))  # icônes météo animées (Meteocons, licence MIT)
     app.add_static_files("/pet", str(ui_pet.DIR))  # chat de compagnie
+
+    @app.get("/_velora/alive/{cid}")
+    def _alive(cid: str) -> dict:
+        """Le serveur voit-il encore cette fenêtre connectée ? (la page le demande régulièrement : voir WATCHDOG_JS)"""
+        from nicegui import Client
+        c = Client.instances.get(cid)
+        return {"ok": bool(c and c.has_socket_connection)}
     app.on_startup(apple_writer.refresh_async)  # Apple Intelligence prête ? vérifié en arrière-plan dès le démarrage
     app.on_shutdown(apiserver.runner.stop)
 # le serveur de l'interface n'accepte que les requêtes destinées à cette machine : une page web malveillante qui ferait pointer un nom de
