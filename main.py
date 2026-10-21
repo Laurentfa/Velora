@@ -68,7 +68,7 @@ from mailia.ui_apple import AppleWriterMixin
 from mailia import ui_pet
 from mailia.ui_feed import FeedMixin
 from mailia.ui_server_rules import ServerRulesMixin
-from mailia.ui_assets import CSS, SWIPE_JS
+from mailia.ui_assets import CSS, SWIPE_JS, WATCHDOG_JS
 from mailia import apple_writer, icons, weather
 from mailia.brand import logo_big, logo_img
 from mailia.ui_bulk import BulkMixin
@@ -1830,6 +1830,7 @@ async def index_page() -> None:
         perf.mark("page demandée par la fenêtre")
     ui.colors(primary="#0a66e8", secondary="#4a9bff", accent="#0a66e8")
     ui.add_head_html(SWIPE_JS)
+    ui.add_head_html(WATCHDOG_JS)
     ui.add_head_html(f'<script src="/pet/pet.js?v={ui_pet.version()}" defer></script>')  # chat de compagnie (désactivé par défaut)
     if (script := i18n.client_script()):
         ui.add_head_html(script)  # interface dans une autre langue que le français

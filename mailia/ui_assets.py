@@ -1169,3 +1169,25 @@ SWIPE_JS = """<script>
   }, {passive: false, capture: true});
 })();
 </script>"""
+
+
+# Garde-fou : après une veille ou une fenêtre masquée, la page peut rester coupée du serveur (les clics ne font alors plus rien).
+# On relance la connexion, puis, si elle ne revient pas, on recharge la page (le message ouvert est rouvert au rechargement).
+WATCHDOG_JS = """<script>
+(function () {
+  var down = 0;
+  function kick() { var s = window.socket; if (!s || s.connected) return; try { if (s.io && s.io.engine) s.io.engine.close(); s.connect(); } catch (e) {} }
+  setInterval(function () {
+    var s = window.socket;
+    if (!s) return;
+    if (s.connected) { down = 0; return; }
+    var now = Date.now();
+    if (!down) { down = now; return; }
+    var d = now - down;
+    if (d > 6000 && d <= 25000) kick();
+    else if (d > 25000 && document.visibilityState === 'visible') { down = now; location.reload(); }
+  }, 3000);
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') kick(); });
+  window.addEventListener('online', kick);
+})();
+</script>"""
