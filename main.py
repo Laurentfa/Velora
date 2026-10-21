@@ -544,9 +544,10 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                         if use_ai and m["category"]:
                             ui.label(CAT.get(m["category"], m["category"])).classes("badge")
                         ui.label(label_of(m["account"])).classes("badge acc")
-                        if self.q.strip() and m["folder"] != (self.folder if self.view == "folder" else "INBOX"):  # résultat venu d'un autre dossier : on dit lequel
+                        if self.q.strip() and not (self.view == "folder" and m["folder"] == self.folder):  # recherche : on dit dans quel dossier se trouve chaque résultat, boîte de réception comprise
                             path = self._folder_paths.get((m["account"], m["folder"]), "")
-                            ui.label(path.rsplit("/", 1)[-1] or m["folder"]).classes("badge").tooltip(path or m["folder"])
+                            name = "Boîte de réception" if m["folder"] == "INBOX" else (path.rsplit("/", 1)[-1] or m["folder"])
+                            ui.label(name).classes("badge").tooltip(path or m["folder"])
                         if m["folder"] == "INBOX" and security.quick_row(m):
                             ui.label("⚠ Suspect").classes("badge p3").tooltip("Ce message ressemble à une tentative d'hameçonnage")
                         with ui.element("div").classes("rowact"):  # à droite de la ligne des badges ; « click.stop » : ne pas ouvrir le message
