@@ -1184,11 +1184,13 @@ WATCHDOG_JS = """<script>
       if (j.ok) { bad = 0; return; }
       bad += 1;
       if (bad === 2) kick();                 // le serveur ne voit plus la fenêtre : on relance la liaison
-      else if (bad >= 4) { bad = 0; location.reload(); }  // elle ne revient pas : on recharge la page
+      else if (bad >= 3) { bad = 0; location.reload(); }  // elle ne revient pas : on recharge la page
     }).catch(function () {});
   }
   setInterval(check, 8000);
-  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { kick(); setTimeout(check, 1500); } });
+  function wake() { kick(); bad = 1; setTimeout(check, 1200); setTimeout(check, 4000); }  // retour de la fenêtre : on vérifie tout de suite, sans attendre le contrôle périodique
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') wake(); });
+  window.addEventListener('focus', wake);
   window.addEventListener('online', kick);
 })();
 </script>"""

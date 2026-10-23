@@ -2036,6 +2036,12 @@ if __name__ in {"__main__", "__mp_main__"}:
     if multiprocessing.current_process().name == "MainProcess":
         _cleanup_stale()
     logs.setup()
+    if sys.platform == "darwin":  # macOS met en veille (« App Nap ») une appli dont la fenêtre est masquée : minuteries gelées, connexion perdue au retour
+        try:
+            from Foundation import NSProcessInfo
+            _ACTIVITY = NSProcessInfo.processInfo().beginActivityWithOptions_reason_(0x00EFFFFF, "Velora : synchronisation et connexion de la fenêtre")  # NSActivityUserInitiatedAllowingIdleSystemSleep
+        except Exception as e:  # noqa: BLE001
+            log.info("App Nap : non désactivé (%s)", type(e).__name__)
     app.native.start_args["func"] = _native_context_menu  # s'exécute dans le processus de la fenêtre native
     app.native.start_args.update(_webview_args())
     _conn = {}  # moment de la dernière déconnexion de la fenêtre : de quoi expliquer un rechargement dans le journal
