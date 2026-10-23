@@ -61,12 +61,17 @@ class OutboxMixin:
                     pass
             follow = ui.select({0: "Non", 2: "Dans 2 jours", 3: "Dans 3 jours", 5: "Dans 5 jours", 7: "Dans 1 semaine", 14: "Dans 2 semaines"},
                                value=0, label="Me rappeler si je n'ai pas de réponse").props("outlined dense stack-label").classes("w-full")
+            replying = bool(m) and not self.new  # une réponse : on peut ranger la conversation d'origine en même temps
+            arch = None
+            if replying:
+                arch = ui.checkbox("Archiver la conversation après l'envoi", value=db.kv_get("send_archive") == "1").props("dense").mark("send-archive")
+
             def confirm() -> None:
-                dlg.submit({"when": when.value, "custom": custom.value, "follow": int(follow.value or 0)})
+                dlg.submit({"when": when.value, "custom": custom.value, "follow": int(follow.value or 0), "archive": bool(arch and arch.value)})
 
             with ui.row().classes("justify-end w-full gap-2 q-mt-sm"):
                 ui.button("Annuler", on_click=lambda: dlg.submit(None)).props("flat no-caps")
-                go = ui.button(on_click=confirm).props("unelevated no-caps color=primary")
+                go = ui.button(on_click=confirm).props("unelevated no-caps color=primary").mark("send-go")
                 go.bind_text_from(when, "value", backward=lambda v: ("Envoyer quand même" if warns else "Envoyer") if v == "now" else "Programmer l'envoi")
         choice = await dlg
         if not choice:
@@ -85,6 +90,8 @@ class OutboxMixin:
             at = opts[choice["when"]]
         oid = outgoing.queue(account, d["to"], d["cc"], d.get("bcc", ""), d["subject"], d["html"], d["files"], at, draft_id=d.get("id"),
                              reply_to=d.get("reply_to"), followup_days=choice["follow"], importance=d.get("importance", 1))
+        if replying:
+            db.kv_set("send_archive", "1" if choice["archive"] else "0")  # le choix est repris la prochaine fois
         self.close_compose()
         self._watch[oid] = d["subject"] or "(sans objet)"
         with self.host:  # le bouton cliqué a disparu avec l'éditeur : on repart d'un élément stable
@@ -95,6 +102,9 @@ class OutboxMixin:
                     ui.notify("Envoi en cours…", type="positive")
             else:
                 ui.notify(f"Message programmé : {fr(at)}", type="positive")
+        if replying and choice["archive"]:
+            await self.swipe_act(m, "archive")  # archive toute la conversation, comme le bouton Archiver de la liste
+            return
         await self.reload(force=True)
 
     def show_undo(self, oid: str, delay: int) -> None:
