@@ -1,6 +1,7 @@
 import atexit
 import json
 import threading
+import logging
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -143,7 +144,15 @@ def conn():
                 close_shared()  # connexion inutilisable : la prochaine utilisation en rouvre une
             raise
         finally:
-            perf.record("base : une utilisation", time.perf_counter() - t)
+            used = time.perf_counter() - t
+            perf.record("base : une utilisation", used)
+            if used > 0.5:  # utilisation longue : on note qui s'en servait, pour savoir quoi accélérer
+                try:
+                    import traceback
+                    who = [f"{f.filename.rsplit('/', 1)[-1]}:{f.lineno} {f.name}" for f in traceback.extract_stack()[:-2] if not f.filename.endswith(("db.py", "contextlib.py"))][-3:]
+                    logging.getLogger("mailia").info("base : utilisation de %.1f s par %s", used, " > ".join(who))
+                except Exception:  # noqa: BLE001
+                    pass
 
 
 def exclusive(fn):

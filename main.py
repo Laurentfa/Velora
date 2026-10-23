@@ -1270,10 +1270,10 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
 
     async def reload(self, force: bool = False) -> None:
         self.hl = []  # remis plus bas par la liste de mails quand une recherche est en cours
-        self.counts = queries.counts()
+        self.counts = await run.io_bound(queries.counts)  # hors du fil de l'interface (voir tick)
         if self.view == "brief":
             self.refresh_title()  # les compteurs du sous-titre suivent ce que vous gérez
-            self.brief = queries.brief()
+            self.brief = await run.io_bound(queries.brief)
             sig = ("b", self.account, self.brief["headline"], *[(x["id"], x["is_read"]) for k in ("todo", "info", "noise") for x in self.brief[k]])
         elif self.view == "drafts":
             self.drafts = db.drafts_list(local_only=True)
@@ -1381,7 +1381,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         return True
 
     async def tick(self) -> None:
-        v = queries.version()
+        v = await run.io_bound(queries.version)  # hors du fil de l'interface : si une synchro occupe la base, la fenêtre n'attend pas
         if v != self.ver:
             # le dessin de la liste fige la fenêtre pendant sa durée : sur un ordinateur lent (1,5 s), l'analyse IA du retard de mails la
             # redessinait toutes les 3 s. Les redessins venus de l'arrière-plan sont donc espacés de 6 fois la durée d'un dessin.
