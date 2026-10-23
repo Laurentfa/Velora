@@ -401,6 +401,12 @@ def plan(live: list[dict], desired: list[dict], folders: dict) -> dict:
     if ops:
         warnings.append("Exchange demande de retirer les règles propres à Outlook (« blob » du poste) pour accepter une modification : les règles que seul Outlook sait lire "
                         "peuvent disparaître. Une sauvegarde de toutes les règles est faite avant l'envoi.")
+        local = [r["name"] for r in live if r.get("not_supported")]
+        if local:  # règles que le serveur ne sait pas appliquer : elles ne tournent que sur le poste, donc ce sont elles qui risquent de disparaître
+            warnings.append("Règles qui ne fonctionnent que sur le poste (Outlook) : " + ", ".join(f"« {n} »" for n in local) + ". Elles risquent de disparaître.")
+        else:
+            warnings.append("Aucune règle propre au poste n'apparaît dans la liste du serveur. Celles qui n'existeraient que dans Outlook n'y figurent pas : "
+                            "si vous en avez créé (alerte sonore, fichier local…), elles risquent de disparaître.")
     return {"ops": ops, "summary": summary, "warnings": warnings}
 
 

@@ -228,3 +228,14 @@ async def test_creating_a_rule_from_a_mail_prefills_the_sender(user, box) -> Non
     await user.should_see("Créer « boutique.fr »")
     user.find(marker="srules-confirm").click()
     await task
+
+
+def test_the_blob_warning_names_the_rules_that_only_run_on_the_workstation() -> None:
+    r = live()
+    d = sr.desired_from(r)
+    d[0]["enabled"] = False
+    w = sr.plan(r, d, FOLDERS)["warnings"]
+    assert any("Aucune règle propre au poste" in x for x in w)  # aucune règle locale détectée : on explique quand même le risque
+    r[1]["not_supported"] = True
+    w = sr.plan(r, d, FOLDERS)["warnings"]
+    assert any("ne fonctionnent que sur le poste" in x and "« Gestis »" in x for x in w)

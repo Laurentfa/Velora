@@ -158,6 +158,10 @@ class ServerRulesMixin:
                             ui.label("Aucun mail arrivé dans ce dossier ces 30 jours : la règle ne sert peut-être plus.").classes("rmeta").style("color:var(--warn,#c77700)")
                         else:
                             ui.label(f"{count} mails arrivés dans ce dossier ces 30 jours.").classes("rmeta")
+                    if r.get("not_supported"):
+                        with ui.row().classes("items-center no-wrap gap-1"):
+                            ui.icon("computer", size="16px").style("color:var(--warn,#c77700)")
+                            ui.label("Règle propre au poste : le serveur ne l'applique pas, elle ne fonctionne que dans Outlook sur l'ordinateur où elle est créée.").classes("rmeta").style("color:var(--warn,#c77700)")
                     if not sr.editable(r):
                         ui.label("Cette règle comporte des critères ou des actions que Velora ne sait pas modifier : vous pouvez la renommer, l'activer, la déplacer ou la supprimer.").classes("rmeta")
                     with ui.row().classes("items-center gap-1"):

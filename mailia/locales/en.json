@@ -1295,6 +1295,7 @@
 "Règle appliquée à {0} mail(s).": "Rule applied to {0} email(s).",
 "Règle en double dans le brouillon.": "Duplicate rule in the draft.",
 "Règle enregistrée : elle s'applique aux nouveaux mails.": "Rule saved: it applies to new emails.",
+"Règle propre au poste : le serveur ne l'applique pas, elle ne fonctionne que dans Outlook sur l'ordinateur où elle est créée.": "Workstation-only rule: the server does not apply it; it only works in Outlook on the computer where it was created.",
 "Règles appliquées par le serveur, même quand Velora est fermé. Chaque changement est montré avant d'être enregistré, et une sauvegarde est faite.": "Rules applied by the server, even when Velora is closed. Each change is shown before it is saved, and a backup is made.",
 "Règles de tri": "Sorting rules",
 "Règles de tri automatiques": "Automatic sorting rules",
