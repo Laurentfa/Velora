@@ -64,6 +64,7 @@ jobs:
         with:
           name: velora-${{ runner.os }}
           path: dist/release/*
+          retention-days: 3
   publier:
     needs: construire
     runs-on: ubuntu-latest
