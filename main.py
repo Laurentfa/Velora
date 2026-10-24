@@ -997,6 +997,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                     if self.preview_kind(a["name"]):
                         ui.button(icon="visibility", on_click=lambda _, a=a: self.preview(a)).props(
                             "flat dense round size=sm color=grey-8").tooltip(f"Aperçu de {a['name']}")
+                self.attachments_zip_button(atts)
         sg = self.suggestions.get(m["id"])
         if use_ai and sg:
             with ui.row().classes("gap-1 items-center q-mt-xs"):
@@ -1160,6 +1161,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                                 if self.preview_kind(a["name"]):
                                     ui.button(icon="visibility", on_click=lambda _, a=a, x=x: self.preview(a, x)).props(
                                         "flat dense round size=sm color=grey-8").tooltip(f"Aperçu de {a['name']}")
+                            self.attachments_zip_button(atts, x)
 
     async def retry_details(self, mid: str) -> None:
         """Relit sur le serveur le contenu d'un message qu'on n'avait pas pu charger."""

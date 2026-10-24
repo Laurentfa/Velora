@@ -3,6 +3,8 @@ import base64
 import json
 import os
 import re
+import zipfile
+from io import BytesIO
 from pathlib import Path
 
 from nicegui import app, run, ui
@@ -101,6 +103,53 @@ class FilesMixin:
         path.write_bytes(data)
         ui.notify(f"Enregistré dans Téléchargements : {path.name}", type="positive")
         reveal(path)
+
+    @staticmethod
+    def zip_bundle(files: list[tuple[str, bytes]]) -> bytes:
+        """Archive zip des pièces jointes ; deux fichiers de même nom sont distingués (« nom (1).ext »), un nom dangereux (chemin) est assaini."""
+        used: set[str] = set()
+        out = BytesIO()
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+            for name, data in files:
+                name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", os.path.basename(name or "")).strip(". ") or "piece-jointe"
+                base, n = name, 1
+                while name.lower() in used:
+                    name = f"{Path(base).stem} ({n}){Path(base).suffix}"
+                    n += 1
+                used.add(name.lower())
+                z.writestr(name, data)
+        return out.getvalue()
+
+    async def download_all(self, atts: list[dict], msg: dict | None = None) -> None:
+        """Toutes les pièces jointes du message dans un seul fichier zip, enregistré dans Téléchargements."""
+        m = msg or self.cur
+        risky = [a["name"] for a in atts if security.risky_attachment(a.get("name", ""))]
+        if risky:  # comme pour un fichier seul : confirmation avant d'enregistrer ce qui s'exécute ou contient des macros
+            with self.host, ui.dialog() as dlg, ui.card().style("width:480px;max-width:96vw"):
+                ui.label("Des fichiers sont dangereux").classes("text-h6")
+                ui.label("Ces pièces jointes peuvent s'exécuter ou contenir des macros : " + ", ".join(risky[:6]) + ("…" if len(risky) > 6 else "") + ".").classes("text-body2")
+                ui.label("Les enregistrer ne les exécute pas, mais ne les ouvrez pas sans être certain de leur origine.").classes("text-caption text-grey")
+                with ui.row().classes("justify-end w-full gap-2"):
+                    ui.button("Annuler", on_click=lambda: dlg.submit(False)).props("flat no-caps")
+                    ui.button("Enregistrer quand même", on_click=lambda: dlg.submit(True)).props("unelevated no-caps color=negative")
+            if not await dlg:
+                return
+        ui.notify("Préparation de l'archive…")
+        try:
+            files = []
+            for a in atts:
+                data, name = await run.io_bound(sync.fetch_attachment, m, a)
+                files.append((name or a.get("name", ""), data))
+            blob = await run.io_bound(self.zip_bundle, files)
+        except Exception as e:  # noqa: BLE001
+            return ui.notify(f"Téléchargement impossible : {e}", type="negative", multi_line=True)
+        title = re.sub(r"^(re|tr|fwd?)\s*:\s*", "", (m.get("subject") or "").strip(), flags=re.I)[:60].strip() or "pieces-jointes"
+        self._save_download(f"{title}.zip", blob)
+
+    def attachments_zip_button(self, atts: list[dict], msg: dict | None = None) -> None:
+        if len(atts) > 1:
+            ui.button(f"Tout télécharger ({len(atts)}, zip)", icon="folder_zip", on_click=lambda _: self.download_all(atts, msg)).props(
+                "flat dense no-caps size=sm color=primary").mark("att-zip")
 
     PREVIEW = {"image": {"png", "jpg", "jpeg", "gif", "webp", "bmp"}, "pdf": {"pdf"},
                "rich": {"docx", "docm", "xlsx", "xlsm", "pptx", "pptm", "heic", "heif", "svg", "zip"},
