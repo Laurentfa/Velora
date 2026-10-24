@@ -31,3 +31,4 @@ jobs:
         with:
           name: velora-${{ matrix.os }}
           path: dist/
+          retention-days: 7
