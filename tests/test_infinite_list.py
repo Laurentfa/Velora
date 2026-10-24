@@ -1,5 +1,4 @@
 """Boîte de réception : pas de bouton « Afficher plus », la liste se prolonge en descendant ; le bouton reste dans les dossiers."""
-import asyncio
 import types
 from datetime import datetime, timedelta, timezone
 
@@ -35,6 +34,7 @@ async def test_inbox_has_no_show_more_button_and_loads_the_rest_when_scrolling(u
     await user.should_see("Sujet numéro 0")
     await user.should_not_see("Afficher plus")
     b = box[-1]
+    await wait_until(lambda: len(b.rows) == 80 and len(b._row_els) == 80)
     assert len(b.rows) == 80 and len(b._row_els) == 80
     first = b._row_els["testbox|INBOX|0"]
     await b.rows_scrolled(scroll(near_bottom=False))
@@ -51,6 +51,7 @@ async def test_inbox_has_no_show_more_button_and_loads_the_rest_when_scrolling(u
 async def test_nothing_more_to_load_when_the_whole_list_is_shown(user: User, box) -> None:
     await user.open("/")
     b = box[-1]
+    await wait_until(lambda: len(b.rows) == 80)  # la première page est chargée en arrière-plan : on attend qu'elle soit là avant de défiler
     await b.rows_scrolled(scroll(True))
     await wait_until(lambda: len(b.rows) == 130)
     assert len(b.rows) == 130
