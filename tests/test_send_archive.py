@@ -32,7 +32,6 @@ async def _reply_dialog(box, monkeypatch, tick: bool):
     await b.open("testbox|INBOX|1")
     b.draft.update(to="alice@example.com", html="<p>Merci, c'est fait.</p>")
     task = asyncio.create_task(b.send())
-    await asyncio.sleep(0.8)
     return b, task, calls
 
 

@@ -46,3 +46,14 @@ def add_message(mid="testbox|INBOX|1", account="testbox", sender="alice@example.
         c.execute(f"INSERT OR REPLACE INTO messages({cols}) VALUES({','.join('?' * len(row))})", list(row.values()))
         c.execute("INSERT INTO fts(id,subject,sender,body) VALUES(?,?,?,?)", (mid, subject, sender, body))
     return mid
+
+
+async def wait_until(cond, timeout: float = 15.0, step: float = 0.05) -> None:
+    """Attend que la condition devienne vraie (au plus `timeout` secondes) : une attente fixe échoue sur une machine lente (serveur Windows de la CI)."""
+    import asyncio
+    import time
+    end = time.monotonic() + timeout
+    while not cond():
+        if time.monotonic() > end:
+            raise AssertionError("condition jamais remplie après %.0f s" % timeout)
+        await asyncio.sleep(step)

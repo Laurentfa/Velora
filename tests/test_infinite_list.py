@@ -9,7 +9,7 @@ from nicegui.testing import User
 
 import main
 from mailia import db, sync
-from tests.conftest import add_message
+from tests.conftest import add_message, wait_until
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ async def test_inbox_has_no_show_more_button_and_loads_the_rest_when_scrolling(u
     await b.rows_scrolled(scroll(near_bottom=False))
     assert len(b.rows) == 80  # loin du bas : rien ne se charge
     await b.rows_scrolled(scroll(near_bottom=True))
-    await asyncio.sleep(0.4)
+    await wait_until(lambda: len(b.rows) == 130 and len(b._row_els) == 130)
     assert len(b.rows) == 130 and len(b._row_els) == 130
     assert b._row_els["testbox|INBOX|0"] is first  # les lignes déjà affichées n'ont pas été redessinées : les nouvelles sont ajoutées à la suite
     await user.should_see("Sujet numéro 129")
@@ -52,7 +52,7 @@ async def test_nothing_more_to_load_when_the_whole_list_is_shown(user: User, box
     await user.open("/")
     b = box[-1]
     await b.rows_scrolled(scroll(True))
-    await asyncio.sleep(0.3)
+    await wait_until(lambda: len(b.rows) == 130)
     assert len(b.rows) == 130
     limit = b.limit
     await b.rows_scrolled(scroll(True))  # déjà tout chargé : pas de nouvelle demande
@@ -68,7 +68,7 @@ async def test_a_folder_keeps_the_button(user: User, box) -> None:
     await user.open("/")
     b = box[-1]
     await b.go("folder", "testbox", "Archive")
-    await asyncio.sleep(0.4)
+    await wait_until(lambda: b.view == "folder" and len(b.rows) == 80)
     assert not b.auto_more()
     await user.should_see("Afficher plus")  # hors boîte de réception, le bouton reste
     await b.rows_scrolled(scroll(True))
