@@ -61,7 +61,8 @@ os.environ.setdefault("NICEGUI_STORAGE_PATH", str(_config.DATA_DIR / ".nicegui")
 from nicegui import app, background_tasks, native, run, ui
 
 from mailia import ai, aipolicy, apiserver, compose, config, db, folder_order, folder_tree, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, vault, wizard
-from mailia.textutil import for_ai
+from html import escape as html_escape
+from mailia.textutil import for_ai, split_links
 from mailia.ui_account import friendly_error
 from mailia.ui_agenda import AgendaMixin
 from mailia.ui_apple import AppleWriterMixin
@@ -562,6 +563,20 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                                 "Mettre la conversation à la corbeille" if n > 1 else "Mettre à la corbeille")
             self.row_menu(m, unread)
 
+    def mail_text(self, text: str, classes: str) -> None:
+        """Texte brut d'un message : les adresses web sont cliquables (la destination est montrée et confirmée avant l'ouverture, voir open_link)."""
+        parts = split_links(text)
+        if not any(k == "link" for k, _ in parts):
+            return self.marked(text, classes)
+        with ui.element("div").classes(classes):
+            for kind, chunk in parts:
+                if kind == "text":
+                    ui.html(search.highlight_html(chunk, self.hl) if self.hl else html_escape(chunk), sanitize=False, tag="span")
+                else:
+                    href = chunk if chunk.lower().startswith("http") else "https://" + chunk
+                    shown = search.highlight_html(chunk, self.hl) if self.hl else html_escape(chunk)
+                    ui.html(f'<a href="#" class="maillink">{shown}</a>', sanitize=False, tag="span").on("click.prevent", lambda _, u=href: self.open_link(u))
+
     def marked(self, text: str, classes: str) -> None:
         """Texte d'une ligne de la liste ; pendant une recherche, les mots cherchés sont surlignés en jaune."""
         if self.hl and search._spans(text, self.hl):
@@ -848,12 +863,12 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             if trim:  # dans une conversation : on masque les citations répétées
                 short = for_ai(text, 20000)
                 cut = len(short) < len(text) * 0.9
-                self.marked(text if (x["id"] in self.full or not cut) else short, "mailbody")
+                self.mail_text(text if (x["id"] in self.full or not cut) else short, "mailbody")
                 if cut:
                     ui.button("Masquer le message cité" if x["id"] in self.full else "Afficher le message complet",
                               on_click=lambda _, i=x["id"]: self.toggle_full(i)).props("flat dense no-caps size=sm")
             else:
-                self.marked(text, "mailbody")
+                self.mail_text(text, "mailbody")
             if html:
                 ui.button("Afficher la mise en forme", icon="auto_awesome_mosaic",
                           on_click=lambda _, i=x["id"]: self.toggle_plain(i)).props("flat dense no-caps size=sm")

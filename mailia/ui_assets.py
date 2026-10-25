@@ -152,6 +152,7 @@ body.compact .swrap:hover .rowact{opacity:1}
 .ctxm{position:fixed;z-index:10000;min-width:200px;padding:6px;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:12px;box-shadow:0 12px 36px rgba(10,30,70,.25);font-size:14px}
 .ctxit{padding:7px 12px;border-radius:8px;cursor:pointer;user-select:none}.ctxit:hover{background:var(--accent-soft);color:var(--accent)}
 .ctxsep{height:1px;background:var(--line);margin:5px 4px}
+.maillink{color:var(--accent,#2563eb);text-decoration:underline;cursor:pointer;word-break:break-all}
 .mailbody{white-space:pre-wrap;word-break:break-word;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px;line-height:1.55;width:100%}
 .composer{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;width:100%;margin-bottom:14px}
 .composer.dropping{outline:2px dashed var(--accent);outline-offset:-7px;background:var(--accent-soft)}

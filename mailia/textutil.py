@@ -60,3 +60,29 @@ def for_ai(body: str, limit: int = 6000) -> str:
             continue
         kept.append(line)
     return normalize("\n".join(kept))[:limit]
+
+
+_URL = re.compile(r"(?:https?://|www\.)[^\s<>\"']+", re.I)
+_TRAIL = ".,;:!?)]}»›\u201d"
+
+
+def split_links(text: str) -> list[tuple[str, str]]:
+    """Découpe un texte brut en morceaux ("text", …) et ("link", url) : les adresses web (http, https, www.) deviennent cliquables.
+    La ponctuation qui suit l'adresse (point, virgule, parenthèse fermante…) reste dans le texte."""
+    out: list[tuple[str, str]] = []
+    pos = 0
+    for m in _URL.finditer(text or ""):
+        url = m.group(0)
+        while url and url[-1] in _TRAIL:
+            if url[-1] == ")" and url.count("(") >= url.count(")"):  # parenthèse qui fait partie de l'adresse
+                break
+            url = url[:-1]
+        if len(url) < 8:
+            continue
+        if m.start() > pos:
+            out.append(("text", text[pos:m.start()]))
+        out.append(("link", url))
+        pos = m.start() + len(url)
+    if pos < len(text or ""):
+        out.append(("text", text[pos:]))
+    return out
