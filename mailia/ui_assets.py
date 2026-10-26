@@ -1071,6 +1071,7 @@ SWIPE_JS = """<script>
       menu.style.top = Math.max(4, Math.min(y, innerHeight - r.height - 4)) + 'px';
     };
     window.mailiaCtx = show;
+    window.mailiaCtxClose = close;
     document.addEventListener('contextmenu', e => {
       const t = e.target;
       if (!t.closest || !t.closest('.rbody') || t.closest('input,textarea,[contenteditable="true"],.q-editor,.composer')) return;
@@ -1091,6 +1092,7 @@ SWIPE_JS = """<script>
     if (!d || !d.mailia) return;
     for (const f of document.querySelectorAll('iframe.mailframe')) {
       if (f.contentWindow !== e.source) continue;
+      if (d.closemenu) window.mailiaCtxClose();
       if (d.menu) {
         const b = f.getBoundingClientRect();
         window.mailiaCtx(b.left + d.x, b.top + d.y, {sel: d.sel, link: d.link, all: () => f.contentWindow.postMessage({mailia: 1, all: 1}, '*')});

@@ -58,6 +58,8 @@ document.addEventListener('contextmenu', e => {
   post({menu: 1, x: e.clientX, y: e.clientY, sel: String(getSelection()), link: a ? a.href : ''});
 });
 addEventListener('message', e => { if (e.data && e.data.mailia && e.data.all) document.execCommand('selectAll'); });
+// un clic, une touche ou un défilement dans le message referme le menu du clic droit (affiché par la page, hors de ce cadre)
+for (const t of ['mousedown', 'wheel', 'keydown']) document.addEventListener(t, e => { if (t !== 'mousedown' || e.button === 0) post({closemenu: 1}); }, {passive: true});
 """
 
 
