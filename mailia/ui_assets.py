@@ -1176,22 +1176,28 @@ SWIPE_JS = """<script>
 # On relance la connexion, puis, si elle ne revient pas, on recharge la page (le message ouvert est rouvert au rechargement).
 WATCHDOG_JS = """<script>
 (function () {
-  var bad = 0;
-  function kick() { var s = window.socket; if (!s) return; try { if (s.io && s.io.engine) s.io.engine.close(); s.connect(); } catch (e) {} }
-  function check() {
+  var bad = 0, busy = false;
+  function kick(force) { var s = window.socket; if (!s || (s.connected && !force)) return; try { if (s.io && s.io.engine) s.io.engine.close(); else s.connect(); } catch (e) {} }
+  function probe() {
     var cid = window.clientId;
-    if (!cid) return;
-    fetch('/_velora/alive/' + cid, {cache: 'no-store'}).then(function (r) { return r.json(); }).then(function (j) {
-      if (j.ok) { bad = 0; return; }
+    if (!cid || busy) return;
+    busy = true;
+    var t0 = Date.now();
+    fetch('/_velora/ping/' + cid, {cache: 'no-store'}).then(function (r) { return r.json(); }).then(function (j) {
+      return new Promise(function (res) { setTimeout(function () { res(j.ok && (window.__vpong || 0) >= t0); }, 2500); });  // la réponse doit arriver par la liaison de la fenêtre
+    }).catch(function () { return false; }).then(function (ok) {
+      busy = false;
+      if (ok) { bad = 0; return; }
       bad += 1;
-      if (bad === 2) kick();                 // le serveur ne voit plus la fenêtre : on relance la liaison
+      try { fetch('/_velora/mute/' + cid + '?n=' + bad + '&hidden=' + (document.visibilityState === 'visible' ? 0 : 1), {cache: 'no-store'}); } catch (e) {}
+      if (bad === 2) kick(true);              // liaison muette : on la refait
       else if (bad >= 3) { bad = 0; location.reload(); }  // elle ne revient pas : on recharge la page
-    }).catch(function () {});
+    });
   }
-  setInterval(check, 8000);
-  function wake() { kick(); bad = 1; setTimeout(check, 1200); setTimeout(check, 4000); }  // retour de la fenêtre : on vérifie tout de suite, sans attendre le contrôle périodique
+  setInterval(probe, 10000);
+  function wake() { bad = 0; setTimeout(probe, 600); setTimeout(probe, 5000); }  // retour de la fenêtre : on vérifie tout de suite
   document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') wake(); });
   window.addEventListener('focus', wake);
-  window.addEventListener('online', kick);
+  window.addEventListener('online', function () { kick(false); });
 })();
 </script>"""

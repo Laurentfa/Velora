@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 def test_the_watchdog_is_installed_and_reconnects_then_reloads() -> None:
     assert "ui.add_head_html(WATCHDOG_JS)" in (ROOT / "main.py").read_text(encoding="utf-8")
-    assert "s.connect()" in WATCHDOG_JS and "/_velora/alive/" in WATCHDOG_JS and "/_velora/alive/{cid}" in (ROOT / "main.py").read_text(encoding="utf-8")
+    assert "/_velora/ping/" in WATCHDOG_JS and "__vpong" in WATCHDOG_JS and "/_velora/ping/{cid}" in (ROOT / "main.py").read_text(encoding="utf-8")
     assert "location.reload()" in WATCHDOG_JS  # dernier recours si la connexion ne revient pas
 
 

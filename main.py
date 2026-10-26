@@ -2031,12 +2031,20 @@ if not DB_ERROR:
     app.add_static_files("/weather-icons", str(weather.ICONS))  # icônes météo animées (Meteocons, licence MIT)
     app.add_static_files("/pet", str(ui_pet.DIR))  # chat de compagnie
 
-    @app.get("/_velora/alive/{cid}")
-    def _alive(cid: str) -> dict:
-        """Le serveur voit-il encore cette fenêtre connectée ? (la page le demande régulièrement : voir WATCHDOG_JS)"""
+    @app.get("/_velora/ping/{cid}")
+    def _ping(cid: str) -> dict:
+        """Contrôle de la fenêtre (voir WATCHDOG_JS) : le serveur lui envoie un petit mot par sa liaison ; si elle ne le reçoit pas, elle est coupée."""
         from nicegui import Client
         c = Client.instances.get(cid)
-        return {"ok": bool(c and c.has_socket_connection)}
+        if not (c and c.has_socket_connection):
+            return {"ok": False}
+        c.run_javascript("window.__vpong = Date.now()")
+        return {"ok": True}
+
+    @app.get("/_velora/mute/{cid}")
+    def _mute(cid: str, n: int = 0, hidden: int = 0) -> dict:
+        log.warning("fenêtre muette [client %s] : aucune réponse du contrôle (échec n° %d, fenêtre %s)", cid[:6], n, "masquée" if hidden else "visible")
+        return {}
     app.on_startup(apple_writer.refresh_async)  # Apple Intelligence prête ? vérifié en arrière-plan dès le démarrage
     app.on_shutdown(apiserver.runner.stop)
 # le serveur de l'interface n'accepte que les requêtes destinées à cette machine : une page web malveillante qui ferait pointer un nom de
