@@ -1158,6 +1158,14 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                     ui.icon("forward" if x["verb"] == 2 else "reply", size="16px").style("color:var(--muted)").tooltip(
                         "Vous avez transféré ce message" if x["verb"] == 2 else "Vous avez répondu à ce message")
                 ui.label(("📎 " if x["has_att"] else "") + short_date(x["date"])).classes("when")
+                with ui.row().classes("gap-0 items-center no-wrap"):  # répondre ou transférer CE message, sans reprendre tout l'historique (comme Outlook)
+                    ui.button(icon="reply").props("flat dense round size=sm color=primary").on("click.stop", lambda _, x=x: self.reply_message(x)).tooltip(
+                        "Répondre à ce message").mark(f"tc-reply-{x['id']}")
+                    if len([a for a in f"{x['to_addrs'] or ''},{x['cc_addrs'] or ''}".split(",") if a.strip()]) > 1:
+                        ui.button(icon="reply_all").props("flat dense round size=sm color=primary").on("click.stop", lambda _, x=x: self.reply_message(x, True)).tooltip(
+                            "Répondre à tous").mark(f"tc-replyall-{x['id']}")
+                    ui.button(icon="forward").props("flat dense round size=sm color=primary").on("click.stop", lambda _, x=x: self.forward(x)).tooltip(
+                        "Transférer ce message").mark(f"tc-forward-{x['id']}")
             if opened:
                 with ui.element("div").classes("tbody"):
                     if x["cc_addrs"]:
@@ -1177,6 +1185,11 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                                     ui.button(icon="visibility", on_click=lambda _, a=a, x=x: self.preview(a, x)).props(
                                         "flat dense round size=sm color=grey-8").tooltip(f"Aperçu de {a['name']}")
                             self.attachments_zip_button(atts, x)
+
+    async def reply_message(self, x: dict, all_: bool = False) -> None:
+        """Répondre à un message précis de la conversation (et non au dernier) : il devient le message de référence, cité dans la réponse."""
+        self.cur = next((t for t in self.thread if t["id"] == x["id"]), None) or queries.get_message(x["id"]) or self.cur
+        await self.reply(all_)
 
     async def retry_details(self, mid: str) -> None:
         """Relit sur le serveur le contenu d'un message qu'on n'avait pas pu charger."""
@@ -1297,8 +1310,9 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self.counts = await run.io_bound(queries.counts)  # hors du fil de l'interface (voir tick)
         if self.view == "brief":
             self.refresh_title()  # les compteurs du sous-titre suivent ce que vous gérez
-            self.brief = await run.io_bound(queries.brief)
-            sig = ("b", self.account, self.brief["headline"], *[(x["id"], x["is_read"]) for k in ("todo", "info", "noise") for x in self.brief[k]])
+            brief = await run.io_bound(queries.brief)  # variable locale : pendant l'attente, une autre mise à jour peut remplacer self.brief
+            self.brief = brief
+            sig = ("b", self.account, brief["headline"], *[(x["id"], x["is_read"]) for k in ("todo", "info", "noise") for x in brief[k]])
         elif self.view == "drafts":
             self.drafts = db.drafts_list(local_only=True)
             sig = ("d", *[(x["id"], x["updated"]) for x in self.drafts])
