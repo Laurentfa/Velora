@@ -2,7 +2,7 @@
 import pytest
 from conftest import add_message
 
-from mailia import db, queries, sync
+from mailia import queries, sync
 
 
 class ErrorItemNotFound(Exception):
