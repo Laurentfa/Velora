@@ -954,7 +954,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         use_ai = config.ai_enabled()
         multi = len([a for a in (m["to_addrs"] + "," + m["cc_addrs"] if m["cc_addrs"] else m["to_addrs"]).split(",") if a.strip()]) > 1
         with ui.row().classes("gap-1 items-center no-wrap"):
-            ui.button("Répondre", icon="reply", on_click=self.reply).props("unelevated no-caps no-wrap color=primary")
+            ui.button(icon="reply", on_click=self.reply).props("outline no-caps no-wrap color=primary").tooltip("Répondre").mark("reply")
             if multi:  # juste après « Répondre » : même famille d'actions, avant la réponse rédigée par l'IA
                 ui.button(icon="reply_all", on_click=lambda: self.reply(all_=True)).props("outline no-caps no-wrap color=primary").tooltip("Répondre à tous").mark("reply-all")
             if use_ai:
