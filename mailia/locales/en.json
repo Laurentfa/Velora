@@ -311,6 +311,7 @@
 "Ce message n'a pas de texte à traduire.": "This email has no text to translate.",
 "Ce message n'est pas suspect": "This message isn't suspicious",
 "Ce message n'est pas une invitation à une réunion.": "This email is not a meeting invitation.",
+"Ce message n'existe plus sur le serveur (déplacé ou supprimé) : il est retiré de la liste.": "This message no longer exists on the server (moved or deleted): it has been removed from the list.",
 "Ce message part à {0} destinataires.": "This email is going to {0} recipients.",
 "Ce message prétend venir de votre organisation (@{0}) mais Exchange l'a reçu de l'extérieur : l'adresse est peut-être usurpée.": "This message claims to be from your organization (@{0}) but Exchange received it from outside: the address may be spoofed.",
 "Ce message ressemble très probablement à une arnaque (hameçonnage).": "This email is very likely a phishing scam.",

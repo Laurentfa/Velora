@@ -1185,6 +1185,13 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             return
         try:
             await run.io_bound(sync.ensure_details, x)
+        except sync.MessageGone:
+            db.delete_by_id(mid)
+            ui.notify("Ce message n'existe plus sur le serveur (déplacé ou supprimé) : il est retiré de la liste.", type="warning")
+            self.thread = queries.thread(x["ckey"])
+            self.cur = next((t for t in self.thread if t["id"] == (self.cur or {}).get("id")), self.thread[-1] if self.thread else None)
+            self.reader.refresh()
+            return await self.reload(force=True)
         except Exception as e:
             return ui.notify(f"Le serveur ne répond toujours pas : {e}", type="negative", multi_line=True)
         await self._prepare(queries.get_message(mid))
@@ -1468,6 +1475,9 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         if sync.needs_details(x):
             try:
                 x = await run.io_bound(sync.ensure_details, x)
+            except sync.MessageGone:  # le serveur n'a plus ce message : la copie locale est périmée, on la retire (il reviendra à la synchro s'il existe ailleurs)
+                log.info("message absent du serveur, copie locale retirée : %s", x.get("id"))
+                db.delete_by_id(x["id"])
             except Exception:
                 log.exception("lecture du détail d'un message")
         html = x.get("body_html")

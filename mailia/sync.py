@@ -558,11 +558,24 @@ def needs_details(m: dict) -> bool:
     return not (m.get("body") or m.get("body_html")) and m["id"] not in _empty_checked
 
 
+class MessageGone(Exception):
+    """Le serveur répond que le message n'existe plus (déplacé, supprimé ou jamais arrivé) : ce n'est pas une panne de réseau."""
+
+
+def _is_gone(e: Exception) -> bool:
+    return type(e).__name__ in ("ErrorItemNotFound", "ErrorInvalidIdMalformed") or "introuvable sur le serveur" in str(e)
+
+
 def ensure_details(m: dict) -> dict:
     """Charge copie, pièces jointes et contenu d'un message enregistré de façon incomplète (ancien, ou reçu sans corps)."""
     if not needs_details(m):
         return m
-    d = provider(m["account"]).details(m["folder"], m["uid"])
+    try:
+        d = provider(m["account"]).details(m["folder"], m["uid"])
+    except Exception as e:
+        if _is_gone(e):
+            raise MessageGone(str(e)) from e
+        raise
     db.set_details(m["id"], d["to"], d["cc"], d["attachments"], d.get("html", ""), d.get("unsub", ""), d.get("bcc", ""),
                    json.dumps(d.get("auth") or {}))
     if not m.get("body"):
