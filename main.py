@@ -968,7 +968,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                         ui.menu_item("Gérer cette liste…", on_click=self.manage_intents)
             if multi:
                 ui.button(icon="reply_all", on_click=lambda: self.reply(all_=True)).props("flat round dense").tooltip("Répondre à tous")
-            ui.button(icon="forward_to_inbox", on_click=lambda: self.forward(m)).props("flat round dense").tooltip("Transférer ce message")
+            ui.button(icon="forward", on_click=lambda: self.forward(m)).props("flat round dense").tooltip("Transférer ce message")
             if use_ai and not getattr(self, "has_summary", False):
                 ui.button(icon="auto_awesome", on_click=self.summarize_thread).props("flat round dense color=primary").tooltip("Résumer la conversation")
             if m["folder"] == "INBOX":
