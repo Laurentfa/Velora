@@ -19,6 +19,7 @@ log = logging.getLogger("mailia")
 API_VERSION = 1
 DIR = config.DATA_DIR / "modules"
 views: dict[str, dict] = {}   # identifiant de vue -> {"title", "icon", "build", "module"}
+slots: dict[str, list] = {"reader": []}  # emplacements dans l'interface : "reader" = sous les réponses rapides d'un message
 status: dict[str, str] = {}   # identifiant de module -> "ok" ou message d'erreur
 
 
@@ -72,6 +73,10 @@ class ModuleAPI:
         NOLIST_VIEWS.add(vid)
         return vid
 
+    def add_reader_widget(self, build) -> None:
+        """Ajoute un outil sous les réponses rapides d'un message. build(api, mailbox, message) le dessine avec NiceGUI (message : le message affiché, un dict)."""
+        slots["reader"].append({"module": self.id, "build": build})
+
     def get(self, key: str, default=None):
         """Réglage propre au module (gardé dans la base de Velora)."""
         try:
@@ -97,6 +102,8 @@ def load_all() -> None:
     """Charge les modules activés. Appelé une fois au démarrage ; un changement dans les Paramètres s'applique au redémarrage."""
     views.clear()
     status.clear()
+    for lst in slots.values():
+        lst.clear()
     if not master_on():
         return
     on = enabled_ids()
@@ -119,8 +126,10 @@ def load_all() -> None:
         except Exception as e:  # noqa: BLE001 — un module ne doit jamais empêcher Velora de démarrer
             log.exception("module %s : échec au chargement", mid)
             status[mid] = f"{type(e).__name__} : {str(e)[:160]}"
-            for vid in [v for v, d in views.items() if d["module"] == mid]:  # ses vues à moitié ajoutées sont retirées
+            for vid in [v for v, d in views.items() if d["module"] == mid]:  # ses vues et outils à moitié ajoutés sont retirés
                 views.pop(vid, None)
+            for lst in slots.values():
+                lst[:] = [x for x in lst if x["module"] != mid]
 
 
 def render(view_id: str) -> None:
@@ -135,3 +144,15 @@ def render(view_id: str) -> None:
     except Exception as e:  # noqa: BLE001
         log.exception("module %s : échec d'affichage", v["module"])
         ui.label(f"Ce module a rencontré une erreur : {type(e).__name__} : {str(e)[:200]}").classes("text-negative").style("padding:12px")
+
+
+def render_slot(name: str, mailbox, message: dict) -> None:
+    """Dessine les outils des modules dans un emplacement ; l'erreur d'un module reste dans son coin (journal + petite ligne grise)."""
+    from nicegui import ui
+    for it in list(slots.get(name, [])):
+        api = ModuleAPI({"id": it["module"], "dir": DIR / it["module"], "name": it["module"]})
+        try:
+            it["build"](api, mailbox, message)
+        except Exception as e:  # noqa: BLE001
+            log.exception("module %s : échec d'affichage", it["module"])
+            ui.label(f"Module « {it['module']} » en erreur : {type(e).__name__}").classes("rmeta")

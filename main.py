@@ -1009,6 +1009,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             for q in self.quick_replies():
                 ui.button(q["label"], on_click=lambda _, q=q: self.quick_reply(q["text"])).props("outline dense no-caps size=sm color=primary").tooltip(q["text"])
             ui.button(icon="tune", on_click=self.manage_quick).props("flat dense round size=sm").tooltip("Gérer mes réponses rapides")
+        modules.render_slot("reader", self, m)  # outils ajoutés par les modules personnels, sous les réponses rapides
         atts = json.loads(m["att_json"]) if m["att_json"] else []
         if atts:
             with ui.row().classes("gap-1 items-center q-mt-xs"):

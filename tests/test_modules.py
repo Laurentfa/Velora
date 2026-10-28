@@ -26,6 +26,7 @@ def mod_dir(tmp_path, monkeypatch):
         NOLIST_VIEWS.discard(vid)
     modules.views.clear()
     modules.status.clear()
+    modules.slots["reader"].clear()
     db.kv_set("modules_on", "0")
     db.kv_set("modules_enabled", "[]")
 
@@ -78,3 +79,13 @@ async def test_settings_show_the_modules_block_and_the_switch_saves(user: User) 
     user.find(marker="modules-switch").click()
     assert db.kv_get("modules_on") == "1"
     db.kv_set("modules_on", "0")
+
+
+def test_reader_widgets_load_and_a_broken_module_leaves_none_behind(mod_dir) -> None:
+    make(mod_dir, "outil", "def register(api):\n    api.add_reader_widget(lambda api, box, msg: None)\n")
+    make(mod_dir, "casse", "def register(api):\n    api.add_reader_widget(lambda api, box, msg: None)\n    raise RuntimeError('boum')\n")
+    for m in ("outil", "casse"):
+        modules.set_enabled(m, True)
+    db.kv_set("modules_on", "1")
+    modules.load_all()
+    assert [x["module"] for x in modules.slots["reader"]] == ["outil"]
