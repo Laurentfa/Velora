@@ -62,6 +62,7 @@ from nicegui import app, background_tasks, native, run, ui
 
 from mailia import ai, aipolicy, apiserver, compose, config, db, folder_order, folder_tree, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, vault, wizard
 from html import escape as html_escape
+from mailia import modules
 from mailia.textutil import for_ai, split_links
 from mailia.ui_account import friendly_error
 from mailia.ui_agenda import AgendaMixin
@@ -366,6 +367,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             item("tasks", "", "☑", "Tâches", c.get("tasks", 0))
             if self.srules_accounts():
                 item("srules", "", "▽", "Règles de tri", 0)
+            for vid, v in modules.views.items():  # vues ajoutées par les modules personnels
+                item(vid, "", v["icon"], v["title"], 0)
             if c.get("snoozed") or self.view == "snoozed":
                 item("snoozed", "", "⏳", "Reportés", c.get("snoozed", 0))
             if c.get("followups") or self.view == "followups":
@@ -720,6 +723,9 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             return
         if self.view == "srules":
             self.server_rules_view()
+            return
+        if self.view in modules.views:
+            modules.render(self.view)
             return
         if self.view == "outbox":
             if not self.outbox:
@@ -1327,6 +1333,8 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             sig = ("f", *[(x["id"], x["due_at"]) for x in self.followups])
         elif self.view == "srules":
             sig = ("sr", self.srules_acct)
+        elif self.view in modules.views:
+            sig = ("mod", self.view)
         elif self.view == "tasks":
             self.tasks = db.tasks_list(self.show_done)
             sig = ("t", self.show_done, *[(x["id"], x["done"], x["text"], x["due"]) for x in self.tasks])
@@ -2054,6 +2062,7 @@ if not DB_ERROR:
     app.on_startup(lambda: background_tasks.create(_start_api()))
     app.add_static_files("/weather-icons", str(weather.ICONS))  # icônes météo animées (Meteocons, licence MIT)
     app.add_static_files("/pet", str(ui_pet.DIR))  # chat de compagnie
+    modules.load_all()  # modules personnels activés dans les Paramètres (aucun par défaut)
 
     @app.get("/_velora/ping/{cid}")
     def _ping(cid: str) -> dict:
