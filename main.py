@@ -125,6 +125,9 @@ perf.install()
 
 
 
+_PAGE_LOADS = [0]  # nombre de pages affichées depuis le lancement (voir restore_open)
+
+
 class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin, AppleWriterMixin, WeatherMixin, AgendaMixin, FeedMixin, ServerRulesMixin):
     """État et interface d'une fenêtre (chaque client a la sienne)."""
 
@@ -456,14 +459,17 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         self.ephem.set_visibility(brief)
 
     async def restore_open(self) -> None:
-        """Fenêtre rechargée en cours de travail (moins de 10 minutes après la dernière ouverture d'un message) : on rouvre ce message."""
+        """Fenêtre rechargée en cours de travail : on rouvre le message qui était ouvert. Au premier affichage après le lancement de Velora : seulement s'il a été
+        ouvert il y a moins de 10 minutes ; si la page se recharge pendant que Velora tourne (fenêtre restée cachée longtemps), jusqu'à 24 heures."""
+        _PAGE_LOADS[0] += 1
+        window = 600 if _PAGE_LOADS[0] == 1 else 86400
         if self.view == "brief":
             return
         try:
             o = json.loads(db.kv_get("ui_open") or "{}")
         except ValueError:
             return
-        if o.get("id") and time.time() - float(o.get("t") or 0) < 600 and queries.get_message(o["id"]):
+        if o.get("id") and time.time() - float(o.get("t") or 0) < window and queries.get_message(o["id"]):
             await self.open(o["id"])
 
     def remember_view(self) -> None:
@@ -2119,8 +2125,9 @@ if __name__ in {"__main__", "__mp_main__"}:
     perf.mark("ui.run lancé")
     ui.run(
         # Délai laissé à la fenêtre pour se reconnecter avant que le serveur ne l'oublie (et que la page se recharge, en perdant ce qui était ouvert).
-        # Le réglage par défaut (3 s) est trop court : une veille, une fenêtre masquée ou sur un autre bureau suffit à le dépasser.
-        reconnect_timeout=3600,
+        # Le réglage par défaut (3 s) est trop court : une veille, une fenêtre masquée ou sur un autre bureau suffit à le dépasser. Une heure ne suffisait pas
+        # non plus (fenêtre réduite pendant une réunion ou une nuit : la page se rechargeait à la réouverture) : une semaine.
+        reconnect_timeout=7 * 24 * 3600,
         title="Velora", favicon="✉️", dark=None, reload=False, show=False, language=i18n.QUASAR[i18n.language()],
         native=not SERVER_MODE, window_size=None if SERVER_MODE else (1360, 860),  # window_size seul suffit à ouvrir une fenêtre
         host="0.0.0.0" if SERVER_MODE else "127.0.0.1", port=8765 if SERVER_MODE else native.find_open_port(),
