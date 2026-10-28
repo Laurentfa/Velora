@@ -315,7 +315,6 @@ def _tab_aff(f) -> None:
     weather_settings()
     feed_settings()
     pet_settings()
-    modules_settings()
 
     ui.label("Signature").classes("text-subtitle2 q-mt-md")
     ui.switch("Ajouter ma signature à mes messages et à mes réponses").bind_value(f, "SIG_ON")
@@ -905,12 +904,15 @@ def open_settings(host, on_folders) -> None:
                 ui.tab("use", label="Utilisation et données", icon="insights")
                 if dictation.usable():
                     ui.tab("dict", label="Dictée vocale", icon="mic")
+                ui.tab("mod", label="Modules", icon="extension")
                 ui.tab("about", label="À propos", icon="info")
             with ui.tab_panels(tabs, value="boites").props("vertical").classes("col").style("min-width:0;height:100%;background:transparent"):
-                sec = {k: ui.tab_panel(k).classes("q-pa-lg").style("overflow-y:auto") for k in ("boites", "aff", "dos", "ia", "prm", "rules", "abs", "cal", "auto", "priv", "api", "use", "about", *(("dict",) if dictation.usable() else ()))}
+                sec = {k: ui.tab_panel(k).classes("q-pa-lg").style("overflow-y:auto") for k in ("boites", "aff", "dos", "ia", "prm", "rules", "abs", "cal", "auto", "priv", "api", "use", "mod", "about", *(("dict",) if dictation.usable() else ()))}
         if "dict" in sec:
             with sec["dict"], ui.column().classes("w-full gap-2").style("max-width:700px"):
                 _tab_dictation(host)
+        with sec["mod"], ui.column().classes("w-full gap-2").style("max-width:700px"):
+            modules_settings()
         with sec["about"], ui.column().classes("w-full gap-1").style("max-width:700px"):
             _tab_about()
         with sec["api"], ui.column().classes("w-full gap-1").style("max-width:760px"):

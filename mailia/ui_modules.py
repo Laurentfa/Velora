@@ -6,7 +6,7 @@ from mailia.ui_common import reveal
 
 
 def modules_settings() -> None:
-    ui.label("Modules").classes("text-subtitle2 q-mt-md")
+    ui.label("Modules").classes("text-h6").style("font-weight:700")
     ui.label("Fonctionnalités personnelles ajoutées à Velora, rangées dans un dossier à part. Un module s'exécute avec vos droits : n'activez que ceux dont vous êtes sûr. "
              "Un changement s'applique au prochain lancement de Velora.").classes("text-caption text-grey")
     box = ui.column().classes("w-full gap-1")
