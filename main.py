@@ -955,8 +955,9 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         multi = len([a for a in (m["to_addrs"] + "," + m["cc_addrs"] if m["cc_addrs"] else m["to_addrs"]).split(",") if a.strip()]) > 1
         with ui.row().classes("gap-1 items-center no-wrap"):
             ui.button(icon="reply", on_click=self.reply).props("outline no-caps no-wrap color=primary").tooltip("Répondre").mark("reply")
-            if multi:  # juste après « Répondre » : même famille d'actions, avant la réponse rédigée par l'IA
+            if multi:  # les trois actions de réponse côte à côte (Répondre, Répondre à tous, Transférer), avant la réponse rédigée par l'IA
                 ui.button(icon="reply_all", on_click=lambda: self.reply(all_=True)).props("outline no-caps no-wrap color=primary").tooltip("Répondre à tous").mark("reply-all")
+            ui.button(icon="forward", on_click=lambda: self.forward(m)).props("outline no-caps no-wrap color=primary").tooltip("Transférer ce message").mark("forward")
             if use_ai:
                 with ui.button("✦ Réponse IA").props("outline no-caps no-wrap color=primary icon-right=arrow_drop_down").tooltip(
                         "L'IA rédige un brouillon : rien n'est envoyé, et aucun appel tant que vous ne choisissez pas"):
@@ -968,7 +969,6 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                         ui.menu_item("Autre consigne…", on_click=self.ai_custom)
                         ui.menu_item("✦ Suggérer des réponses pour ce message", on_click=self.suggest)
                         ui.menu_item("Gérer cette liste…", on_click=self.manage_intents)
-            ui.button(icon="forward", on_click=lambda: self.forward(m)).props("flat round dense").tooltip("Transférer ce message")
             if use_ai and not getattr(self, "has_summary", False):
                 ui.button(icon="auto_awesome", on_click=self.summarize_thread).props("flat round dense color=primary").tooltip("Résumer la conversation")
             if m["folder"] == "INBOX":
