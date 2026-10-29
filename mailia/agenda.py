@@ -63,6 +63,21 @@ def _merge(parts: dict[str, list[dict]]) -> list[dict]:
     return sorted(seen.values(), key=lambda e: (e["start"], e["end"], e["title"]))
 
 
+def describe_error(source: str, e: Exception) -> tuple[str, str]:
+    """(texte clair en français, genre) pour une panne de source : « timeout » (passager, réessayé tout seul : on ne l'affiche pas), « reauth » (Google demande de se
+    reconnecter), « api » (Google Tasks API pas activée) ou « other »."""
+    raw = f"{type(e).__name__} {e}"
+    low = raw.lower()
+    name = "Exchange" if source == "exchange" else ("Google Tasks" if source == "tasks" else "Google Agenda")
+    if any(k in low for k in ("readtimeout", "timed out", "max retries", "connectionerror", "injoignable", "connection aborted", "temporarily", "nameresolution")):
+        return f"{name} : le serveur n'a pas répondu à temps (nouvel essai automatique).", "timeout"
+    if source != "exchange" and any(k in low for k in ("expired or revoked", "invalid_grant", "refusé la connexion", "reconnectez", "refusé la lecture")):
+        return "Google : la connexion a expiré ou manque d'une autorisation. Reconnectez-vous.", "reauth"
+    if "api google tasks n'est pas activée" in low:
+        return "Google Tasks : activez « Google Tasks API » dans votre projet Google Cloud, puis reconnectez Google Agenda.", "api"
+    return f"{name} : {str(e)[:160]}", "other"
+
+
 def fetch(first: date, days: int = 7, force: bool = False) -> dict:
     """{"events": [...], "errors": [...]} pour les `days` jours à partir de `first`. Bloquant : à lancer hors de l'interface."""
     key = (first, days)
@@ -73,7 +88,7 @@ def fetch(first: date, days: int = 7, force: bool = False) -> dict:
     start = datetime(first.year, first.month, first.day)
     end = start + timedelta(days=days)
     jobs = {name: fn for name, fn in (("exchange", _exchange), ("google", gcal.list_events)) if sources()[name]}
-    parts, errors = {}, []
+    parts, errors, problems = {}, [], []
     with ThreadPoolExecutor(max_workers=max(1, len(jobs))) as ex:
         futures = {name: ex.submit(fn, start, end) for name, fn in jobs.items()}
     for name, f in futures.items():
@@ -81,16 +96,17 @@ def fetch(first: date, days: int = 7, force: bool = False) -> dict:
             parts[name] = f.result()
         except Exception as e:  # noqa: BLE001 — une source en panne ne cache pas l'autre
             log.warning("agenda %s : %s", name, e)
-            errors.append(f"{'Exchange' if name == 'exchange' else 'Google Agenda'} : {str(e)[:160]}")
-    tasks = _fetch_tasks(errors)
-    res = {"events": _merge(parts), "tasks": tasks, "errors": errors}
-    if not errors:
+            problems.append(describe_error(name, e))
+    tasks = _fetch_tasks(problems)
+    errors = list(dict.fromkeys(t for t, kind in problems if kind != "timeout"))  # les pannes passagères ne sont pas affichées (journal seulement)
+    res = {"events": _merge(parts), "tasks": tasks, "errors": errors, "reauth": any(kind == "reauth" for _, kind in problems), "transient": any(kind == "timeout" for _, kind in problems)}
+    if not problems:
         with _lock:
             _cache[key] = (time.monotonic(), res)
     return res
 
 
-def _fetch_tasks(errors: list[str]) -> list[dict]:
+def _fetch_tasks(problems: list) -> list[dict]:
     """Tâches Exchange et Google avec échéance (les deux sources en parallèle ; une panne n'empêche pas l'autre). Une même tâche présente des deux côtés n'apparaît qu'une fois."""
     src = sources()
     jobs = {name: fn for name, fn in (("exchange", _exchange_tasks), ("google", gcal.list_tasks)) if src[name]}
@@ -111,7 +127,7 @@ def _fetch_tasks(errors: list[str]) -> list[dict]:
                     seen[k] = {**t, "src": {name}, "refs": ref}
         except Exception as e:  # noqa: BLE001
             log.warning("tâches %s : %s", name, e)
-            errors.append(f"{'Exchange' if name == 'exchange' else 'Google Tasks'} : {str(e)[:160]}")
+            problems.append(describe_error("exchange" if name == "exchange" else "tasks", e))
     return sorted(seen.values(), key=lambda t: (t["due"], t["title"]))
 
 

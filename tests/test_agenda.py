@@ -29,7 +29,7 @@ def test_an_event_in_both_agendas_appears_once(monkeypatch) -> None:
 def test_a_failing_source_does_not_hide_the_other(monkeypatch) -> None:
     agenda.invalidate()
     monkeypatch.setattr(agenda, "sources", lambda: {"exchange": True, "google": True})
-    monkeypatch.setattr(agenda, "_exchange", lambda a, b: (_ for _ in ()).throw(RuntimeError("serveur injoignable")))
+    monkeypatch.setattr(agenda, "_exchange", lambda a, b: (_ for _ in ()).throw(RuntimeError("erreur interne")))
     monkeypatch.setattr(agenda.gcal, "list_events", lambda a, b: [{"title": "Rdv", "start": datetime(2026, 10, 20, 9), "end": datetime(2026, 10, 20, 10), "all_day": False, "where": ""}])
     r = agenda.fetch(date(2026, 10, 19), 7, force=True)
     assert [e["title"] for e in r["events"]] == ["Rdv"] and "Exchange" in r["errors"][0]
@@ -153,7 +153,7 @@ def test_tasks_from_both_sources_are_merged_and_failures_reported(monkeypatch) -
     assert [(t["title"].lower(), sorted(t["src"])) for t in got] == [("payer", ["exchange", "google"]), ("appeler", ["google"])] and not errs
     monkeypatch.setattr(agenda.gcal, "list_tasks", lambda: (_ for _ in ()).throw(RuntimeError("non autorisé")))
     errs = []
-    assert len(agenda._fetch_tasks(errs)) == 1 and "Google Tasks" in errs[0]
+    assert len(agenda._fetch_tasks(errs)) == 1 and "Google Tasks" in errs[0][0]
 
 
 def test_grid_shows_tasks_on_their_day_and_overdue_on_today() -> None:
@@ -288,3 +288,25 @@ async def test_feed_failure_is_shown_not_hidden(user, box, monkeypatch) -> None:
     await b.go("brief", "", "")
     await asyncio.sleep(0.9)
     await user.should_see("Flux indisponible pour le moment.")
+
+
+def test_errors_are_explained_in_french_and_transient_ones_stay_hidden(monkeypatch) -> None:
+    d = agenda.describe_error
+    assert d("exchange", RuntimeError("Reraised from ReadTimeout(HTTPSConnectionPool(host='x'): Read timed out. (read timeout=120))"))[1] == "timeout"
+    text, kind = d("google", RuntimeError("Le fournisseur a refusé la connexion : Token has been expired or revoked."))
+    assert kind == "reauth" and "Reconnectez" in text and "Token" not in text
+    assert d("tasks", RuntimeError("Google n'a pas encore l'autorisation de lire vos tâches : reconnectez Google Agenda"))[1] == "reauth"
+    assert d("tasks", RuntimeError("L'API Google Tasks n'est pas activée dans votre projet"))[1] == "api"
+    assert d("exchange", RuntimeError("erreur interne")) == ("Exchange : erreur interne", "other")
+
+
+def test_fetch_reports_a_single_reconnect_request_and_hides_a_timeout(monkeypatch) -> None:
+    agenda.invalidate()
+    monkeypatch.setattr(agenda, "sources", lambda: {"exchange": True, "google": True})
+    monkeypatch.setattr(agenda, "_exchange", lambda a, b: (_ for _ in ()).throw(RuntimeError("Read timed out")))
+    monkeypatch.setattr(agenda.gcal, "list_events", lambda a, b: (_ for _ in ()).throw(RuntimeError("Token has been expired or revoked")))
+    monkeypatch.setattr(agenda, "_exchange_tasks", lambda: [])
+    monkeypatch.setattr(agenda.gcal, "list_tasks", lambda: (_ for _ in ()).throw(RuntimeError("reconnectez Google Agenda")))
+    r = agenda.fetch(date(2026, 10, 19), 7, force=True)
+    assert r["reauth"] is True and r["transient"] is True
+    assert len(r["errors"]) == 1 and "Reconnectez" in r["errors"][0]  # deux pannes Google = un seul message ; le délai Exchange n'est pas affiché

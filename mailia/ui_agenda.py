@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta
 
 from nicegui import background_tasks, run, ui
 
-from mailia import agenda, config, i18n, sync
+from mailia import agenda, config, gcal, i18n, sync
 from mailia.ui_common import JOURS, MOIS_COURTS
 
 HOUR_PX = 40
@@ -109,8 +109,10 @@ class AgendaMixin:
             with ui.element("div").classes("ag-scroll"):
                 body = ui.html("", sanitize=False).mark("agenda-grid")
             note = ui.label("").classes("rmeta ag-note")
+            reco = ui.button("Se reconnecter à Google", icon="link", on_click=lambda: self.agenda_reconnect_google()).props("outline dense no-caps size=sm color=primary").mark("agenda-reconnect")
+            reco.set_visibility(False)
             self.feed_panel()
-        self._agenda_ui = (label, body, note)
+        self._agenda_ui = (label, body, note, reco)
         self._agenda_reg = {}
         if not (src["exchange"] or src["google"]):
             body.set_content('<div class="ag-empty">' + html.escape(i18n.tr("Aucun agenda connecté : ajoutez Exchange ou Google Agenda dans les Paramètres.")) + "</div>")
@@ -118,6 +120,18 @@ class AgendaMixin:
             return
         background_tasks.create(self._agenda_fill())
         ui.timer(300, lambda: background_tasks.create(self._agenda_fill()))  # la ligne de l'heure et les nouveaux rendez-vous
+
+    async def agenda_reconnect_google(self) -> None:
+        """Refait la connexion à Google (le navigateur s'ouvre pour l'autorisation) puis relit l'agenda ; l'ID client et le secret sont déjà enregistrés."""
+        ui.notify("Le navigateur s'ouvre : autorisez l'accès à votre agenda, puis revenez ici.", multi_line=True)
+        try:
+            await run.io_bound(gcal.connect)
+        except Exception as e:  # noqa: BLE001
+            return ui.notify(f"Connexion impossible : {e}", type="negative", multi_line=True)
+        ok, msg = await run.io_bound(gcal.test)
+        ui.notify(msg, type="positive" if ok else "negative", multi_line=True)
+        agenda.invalidate()
+        await self._agenda_fill(True)
 
     def _agenda_move(self, step: int) -> None:
         self.agenda_off = self.agenda_off + step if step else 0
@@ -127,7 +141,7 @@ class AgendaMixin:
         ui_ = getattr(self, "_agenda_ui", None)
         if not ui_:
             return
-        label, body, note = ui_
+        label, body, note, reco = ui_
         first = agenda.week_start(date.today()) + timedelta(weeks=self.agenda_off)
         try:
             label.set_text(range_label(first))
@@ -136,6 +150,7 @@ class AgendaMixin:
             body.set_content(grid_html(first, data, datetime.now(), reg))
             self._agenda_reg = reg
             note.set_text(" · ".join(data["errors"]))
+            reco.set_visibility(bool(data.get("reauth")))
             ui.run_javascript("mailiaAgendaScroll()")
         except Exception:  # noqa: BLE001 — le panneau a pu être fermé entre-temps
             pass
