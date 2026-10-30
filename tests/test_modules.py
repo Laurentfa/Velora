@@ -89,3 +89,16 @@ def test_reader_widgets_load_and_a_broken_module_leaves_none_behind(mod_dir) -> 
     db.kv_set("modules_on", "1")
     modules.load_all()
     assert [x["module"] for x in modules.slots["reader"]] == ["outil"]
+
+
+def test_reader_widgets_are_drawn_in_order(mod_dir) -> None:
+    make(mod_dir, "aaa", "def register(api):\n    api.add_reader_widget(lambda api, box, msg: None, order=30)\n")
+    make(mod_dir, "zzz", "def register(api):\n    api.add_reader_widget(lambda api, box, msg: None, order=10)\n")
+    for m in ("aaa", "zzz"):
+        modules.set_enabled(m, True)
+    db.kv_set("modules_on", "1")
+    modules.load_all()
+    drawn = []
+    for it in sorted(modules.slots["reader"], key=lambda x: (x.get("order", 100), x["module"])):
+        drawn.append(it["module"])
+    assert drawn == ["zzz", "aaa"]  # l'ordre demandé l'emporte sur l'ordre alphabétique

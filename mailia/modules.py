@@ -73,9 +73,10 @@ class ModuleAPI:
         NOLIST_VIEWS.add(vid)
         return vid
 
-    def add_reader_widget(self, build) -> None:
-        """Ajoute un outil sous les réponses rapides d'un message. build(api, mailbox, message) le dessine avec NiceGUI (message : le message affiché, un dict)."""
-        slots["reader"].append({"module": self.id, "build": build})
+    def add_reader_widget(self, build, order: int = 100) -> None:
+        """Ajoute un outil sous les réponses rapides d'un message. build(api, mailbox, message) le dessine avec NiceGUI (message : le message affiché, un dict).
+        order : position parmi les outils des modules (les plus petits d'abord, à égalité par nom de module)."""
+        slots["reader"].append({"module": self.id, "build": build, "order": order})
 
     def get(self, key: str, default=None):
         """Réglage propre au module (gardé dans la base de Velora)."""
@@ -149,7 +150,7 @@ def render(view_id: str) -> None:
 def render_slot(name: str, mailbox, message: dict) -> None:
     """Dessine les outils des modules dans un emplacement ; l'erreur d'un module reste dans son coin (journal + petite ligne grise)."""
     from nicegui import ui
-    for it in list(slots.get(name, [])):
+    for it in sorted(slots.get(name, []), key=lambda x: (x.get("order", 100), x["module"])):
         api = ModuleAPI({"id": it["module"], "dir": DIR / it["module"], "name": it["module"]})
         try:
             it["build"](api, mailbox, message)
