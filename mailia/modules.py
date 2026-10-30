@@ -19,6 +19,7 @@ log = logging.getLogger("mailia")
 API_VERSION = 1
 DIR = config.DATA_DIR / "modules"
 views: dict[str, dict] = {}   # identifiant de vue -> {"title", "icon", "build", "module"}
+services: dict[str, dict] = {}  # services optionnels publiés par les modules : nom -> {"module", "fn"} (un module peut s'en servir s'il existe, et fonctionne sans sinon)
 slots: dict[str, list] = {"reader": []}  # emplacements dans l'interface : "reader" = sous les réponses rapides d'un message
 status: dict[str, str] = {}   # identifiant de module -> "ok" ou message d'erreur
 
@@ -78,6 +79,15 @@ class ModuleAPI:
         order : position parmi les outils des modules (les plus petits d'abord, à égalité par nom de module)."""
         slots["reader"].append({"module": self.id, "build": build, "order": order})
 
+    def provide(self, name: str, fn) -> None:
+        """Publie un service optionnel que d'autres modules peuvent utiliser (voir `service`). fn(*args) est bloquant : à appeler avec run_blocking."""
+        services[name] = {"module": self.id, "fn": fn}
+
+    def service(self, name: str):
+        """Le service publié sous ce nom par un autre module, ou None s'il n'existe pas (module absent, éteint ou en panne) : un module doit alors fonctionner sans lui."""
+        it = services.get(name)
+        return it["fn"] if it and it["module"] != self.id else None
+
     def get(self, key: str, default=None):
         """Réglage propre au module (gardé dans la base de Velora)."""
         try:
@@ -103,6 +113,7 @@ def load_all() -> None:
     """Charge les modules activés. Appelé une fois au démarrage ; un changement dans les Paramètres s'applique au redémarrage."""
     views.clear()
     status.clear()
+    services.clear()
     for lst in slots.values():
         lst.clear()
     if not master_on():
@@ -131,6 +142,8 @@ def load_all() -> None:
                 views.pop(vid, None)
             for lst in slots.values():
                 lst[:] = [x for x in lst if x["module"] != mid]
+            for name in [n for n, it in services.items() if it["module"] == mid]:
+                services.pop(name, None)
 
 
 def render(view_id: str) -> None:

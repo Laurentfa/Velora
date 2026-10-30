@@ -27,6 +27,7 @@ def mod_dir(tmp_path, monkeypatch):
     modules.views.clear()
     modules.status.clear()
     modules.slots["reader"].clear()
+    modules.services.clear()
     db.kv_set("modules_on", "0")
     db.kv_set("modules_enabled", "[]")
 
@@ -102,3 +103,21 @@ def test_reader_widgets_are_drawn_in_order(mod_dir) -> None:
     for it in sorted(modules.slots["reader"], key=lambda x: (x.get("order", 100), x["module"])):
         drawn.append(it["module"])
     assert drawn == ["zzz", "aaa"]  # l'ordre demandé l'emporte sur l'ordre alphabétique
+
+
+def test_a_module_can_use_another_one_s_service_only_when_it_exists(mod_dir) -> None:
+    make(mod_dir, "fournisseur", "def register(api):\n    api.provide('dates', lambda ref: {'ok': ref})\n")
+    make(mod_dir, "client", "SEEN = []\ndef register(api):\n    SEEN.append(api.service('dates'))\n")
+    make(mod_dir, "casse", "def register(api):\n    api.provide('autre', lambda: 1)\n    raise RuntimeError('boum')\n")
+    for m in ("fournisseur", "client", "casse"):
+        modules.set_enabled(m, True)
+    db.kv_set("modules_on", "1")
+    modules.load_all()
+    assert "autre" not in modules.services  # le service d'un module en panne est retiré
+    api_client = modules.ModuleAPI({"id": "client", "dir": mod_dir, "name": "c"})
+    assert api_client.service("dates")("x") == {"ok": "x"}
+    assert api_client.service("inconnu") is None
+    assert modules.ModuleAPI({"id": "fournisseur", "dir": mod_dir, "name": "f"}).service("dates") is None  # un module n'est pas son propre client
+    modules.set_enabled("fournisseur", False)
+    modules.load_all()
+    assert api_client.service("dates") is None  # fournisseur éteint : le client doit fonctionner sans
