@@ -39,7 +39,7 @@ def add_message(mid="testbox|INBOX|1", account="testbox", sender="alice@example.
     from mailia import db
     row = {"id": mid, "account": account, "uid": mid.split("|")[-1], "subject": subject, "sender": sender, "sender_name": sender.split("@")[0].title(),
            "to_addrs": "moi@example.org", "date": date, "body": body, "is_read": 0, "has_att": 0, "folder": "INBOX", "ckey": mid,
-           "att_json": "[]", "body_html": "", "unsub": "", "bcc_addrs": "", "auth": "{}"}
+           "att_json": "[]", "body_html": "", "unsub": "", "bcc_addrs": "", "auth": "{}", "receipt_to": ""}
     row.update(extra)
     with db.conn() as c:
         cols = ",".join(row)

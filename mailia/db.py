@@ -212,6 +212,8 @@ def init() -> None:
             for col in ("source", "api_key") + (("api_note", "server_ref", "server_at", "server_folder") if tbl == "drafts" else ()):  # origine : « api » quand un programme ou un assistant l'a créé ; copie sur le serveur
                 if col not in have:
                     c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} TEXT DEFAULT ''")
+        if "receipt_to" not in cols:  # adresse à qui envoyer l'accusé de réception demandé par l'expéditeur (NULL : pas encore lu, vide : pas demandé)
+            c.execute("ALTER TABLE messages ADD COLUMN receipt_to TEXT")
         if "importance" not in cols:  # importance fixée par l'expéditeur (0 basse, 1 normale, 2 haute)
             c.execute("ALTER TABLE messages ADD COLUMN importance INTEGER DEFAULT 1")
         if "verb" not in cols:
@@ -394,7 +396,7 @@ def thread_rows(ckey: str) -> list[dict]:
 
 
 def set_details(mid: str, to: str, cc: str, attachments: list, html: str | None = None, unsub: str | None = None, bcc: str | None = None,
-                auth: str | None = None) -> None:
+                auth: str | None = None, receipt_to: str | None = None) -> None:
     with conn() as c:
         c.execute("UPDATE messages SET to_addrs=?, cc_addrs=?, att_json=?, has_att=? WHERE id=?",
                   (to, cc, json.dumps(attachments), int(bool(attachments)), mid))
@@ -406,6 +408,8 @@ def set_details(mid: str, to: str, cc: str, attachments: list, html: str | None 
             c.execute("UPDATE messages SET bcc_addrs=? WHERE id=?", (bcc, mid))
         if auth is not None:
             c.execute("UPDATE messages SET auth=? WHERE id=?", (auth, mid))
+        if receipt_to is not None:
+            c.execute("UPDATE messages SET receipt_to=? WHERE id=?", (receipt_to, mid))
 
 
 def set_body(mid: str, text: str) -> None:

@@ -5,7 +5,9 @@ import logging
 import re
 import smtplib
 from datetime import timezone
-from email.message import EmailMessage
+from email.message import EmailMessage, Message
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from email.utils import formatdate, make_msgid
 
 from imap_tools import AND, H, MailBox, MailBoxStartTls, MailMessageFlags
@@ -46,6 +48,30 @@ def thread_headers(msg, message_id: str, references: str = "") -> None:
             del msg[h]
     msg["In-Reply-To"] = mid
     msg["References"] = " ".join(chain[-20:])  # on borne la chaîne, comme le font les clients courants
+
+
+def receipt_address(headers: dict) -> str:
+    """Adresse qui demande un accusé de réception (en-tête Disposition-Notification-To), sinon une chaîne vide."""
+    from email.utils import parseaddr
+    raw = headers.get("disposition-notification-to", ())
+    addr = parseaddr(raw if isinstance(raw, str) else " ".join(raw))[1]
+    return addr if "@" in addr else ""
+
+
+def build_receipt(me: str, to: str, subject: str, original_id: str) -> MIMEMultipart:
+    """Accusé de réception conforme à la RFC 8098 : une partie lisible et une partie « message/disposition-notification »."""
+    msg = MIMEMultipart("report", report_type="disposition-notification")
+    msg["From"], msg["To"], msg["Subject"] = me, to, f"Accusé de réception : {subject}"
+    msg["Date"], msg["Message-ID"] = formatdate(localtime=True), make_msgid(domain=me.rpartition("@")[2] or None)
+    msg["Auto-Submitted"] = "auto-replied"
+    msg.attach(MIMEText(f"Votre message « {subject} » a été lu par {me}.\n\nCet accusé confirme que le message a été affiché, pas qu'il a été compris ni approuvé.", "plain", "utf-8"))
+    fields = f"Reporting-UA: Velora\nFinal-Recipient: rfc822; {me}\n" + (f"Original-Message-ID: {original_id}\n" if original_id else "") + \
+        "Disposition: manual-action/MDN-sent-manually; displayed\n"
+    part = Message()
+    part.set_type("message/disposition-notification")
+    part.set_payload(fields)
+    msg.attach(part)
+    return msg
 
 
 def importance_of(headers: dict) -> int:
@@ -220,7 +246,15 @@ class ImapProvider:
                 "text": (m.text or "").strip()[:20000],
                 "unsub": __import__("mailia.unsub", fromlist=["parse"]).parse(
                     " ".join(m.headers.get("list-unsubscribe", ())), " ".join(m.headers.get("list-unsubscribe-post", ())), m.html or ""),
-                "auth": __import__("mailia.authcheck", fromlist=["parse"]).parse({k.lower(): list(v) for k, v in m.headers.items()})}
+                "auth": __import__("mailia.authcheck", fromlist=["parse"]).parse({k.lower(): list(v) for k, v in m.headers.items()}),
+                "receipt_to": receipt_address(m.headers or {})}
+
+    def send_receipt(self, m: dict) -> None:
+        """Accusé de réception (RFC 8098) pour un message reçu : envoyé seulement quand l'utilisateur le décide."""
+        orig = self._full(m["folder"], m["uid"])
+        msg = build_receipt(self.cfg.email, m["receipt_to"], m["subject"], " ".join((orig.headers or {}).get("message-id", ())))
+        with self.smtp() as s:
+            s.send_message(msg)
 
     def inline_images(self, key: str, uid: str, cids: list[str]) -> dict[str, tuple[bytes, str]]:
         out: dict[str, tuple[bytes, str]] = {}

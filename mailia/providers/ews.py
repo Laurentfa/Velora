@@ -526,7 +526,13 @@ class EwsProvider:
         return {"to": _addrs(i.to_recipients), "cc": _addrs(i.cc_recipients), "bcc": _addrs(i.bcc_recipients), "attachments": _atts(i), "html": _html(i),
                 "text": text[:20000],
                 "unsub": unsub.parse(hdr.get("list-unsubscribe", ""), hdr.get("list-unsubscribe-post", ""), _html(i)),
-                "auth": authcheck.parse(multi)}
+                "auth": authcheck.parse(multi),
+                "receipt_to": (getattr(getattr(i, "sender", None), "email_address", "") or "") if getattr(i, "is_read_receipt_requested", False) else ""}
+
+    def send_receipt(self, m: dict) -> None:
+        """Accusé de lecture simple (« Lu : … ») pour un message dont l'expéditeur l'a demandé ; envoyé seulement quand l'utilisateur le décide."""
+        msg = self.build(f"Lu : {m['subject']}", f"Votre message « {m['subject']} » a été lu par {self.cfg.email}.", [Mailbox(email_address=m["receipt_to"])], None, None)
+        msg.send()
 
     def inline_images(self, key: str, uid: str, cids: list[str]) -> dict[str, tuple[bytes, str]]:
         out: dict[str, tuple[bytes, str]] = {}

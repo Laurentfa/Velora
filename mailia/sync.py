@@ -562,6 +562,7 @@ _empty_checked: set[str] = set()  # messages réellement vides côté serveur : 
 
 def needs_details(m: dict) -> bool:
     if m.get("att_json") is None or m.get("body_html") is None or m.get("unsub") is None or m.get("auth") is None \
+            or m.get("receipt_to") is None \
             or (m.get("bcc_addrs") is None and m.get("folder") != "INBOX"):  # une copie cachée ne se voit que sur les mails envoyés
         return True
     return not (m.get("body") or m.get("body_html")) and m["id"] not in _empty_checked
@@ -586,7 +587,7 @@ def ensure_details(m: dict) -> dict:
             raise MessageGone(str(e)) from e
         raise
     db.set_details(m["id"], d["to"], d["cc"], d["attachments"], d.get("html", ""), d.get("unsub", ""), d.get("bcc", ""),
-                   json.dumps(d.get("auth") or {}))
+                   json.dumps(d.get("auth") or {}), d.get("receipt_to", ""))
     if not m.get("body"):
         text = d.get("text") or html_to_text(d.get("html", ""))
         if text.strip():
@@ -596,6 +597,16 @@ def ensure_details(m: dict) -> dict:
         else:
             _empty_checked.add(m["id"])
     return queries.get_message(m["id"]) or m
+
+
+def send_receipt(m: dict) -> None:
+    """Envoie l'accusé de réception demandé par l'expéditeur de ce message (à n'appeler que sur un clic de l'utilisateur)."""
+    if not (m.get("receipt_to") or "").strip():
+        raise ValueError("Aucun accusé de réception n'est demandé pour ce message.")
+    if config.env("MAILIA_DRY_RUN") == "1":
+        log.warning("ACCUSÉ DE RÉCEPTION SIMULÉ : %s -> %s", m["account"], m["receipt_to"])
+        return
+    provider(m["account"]).send_receipt(m)
 
 
 def inline_images(m: dict, cids: list[str]) -> dict[str, str]:

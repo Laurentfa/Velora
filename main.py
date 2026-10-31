@@ -863,6 +863,7 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
 
     def body_view(self, x: dict, trim: bool = False) -> None:
         """Corps du message : HTML d'origine (nettoyé, dans un cadre isolé) ; texte brut à défaut ou sur demande."""
+        self.receipt_banner(x)
         html = x.get("body_html")
         text = x["body"] or ""
         if not html and not text.strip() and sync.needs_details(x):  # le contenu n'a pas pu être lu sur le serveur : on le dit, au lieu d'un faux « message vide »
@@ -938,6 +939,31 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
         cur = self.trusted_senders()
         cur.add(addr) if on else cur.discard(addr)
         db.kv_set("trusted_senders", json.dumps(sorted(cur)))
+        self.reader.refresh()
+
+    def receipt_banner(self, x: dict) -> None:
+        """L'expéditeur a demandé un accusé de réception : on le propose, jamais d'envoi automatique (l'envoi révèle que le message a été lu)."""
+        to = (x.get("receipt_to") or "").strip()
+        acct = sync.ACCOUNTS.get(x.get("account"))
+        if not to or db.kv_get(f"receipt:{x['id']}") or (acct and to.lower() == acct.email.lower()):
+            return
+        with ui.row().classes("mailnote items-center gap-2 w-full").mark("receipt-note"):
+            ui.icon("mark_email_read", size="18px")
+            ui.label(f"{to} demande un accusé de réception.").classes("col")
+            ui.button("Envoyer l'accusé", icon="send", on_click=lambda _, i=x["id"]: self.answer_receipt(i, True)).props("flat dense no-caps size=sm color=primary").mark("receipt-send")
+            ui.button("Ne pas répondre", on_click=lambda _, i=x["id"]: self.answer_receipt(i, False)).props("flat dense no-caps size=sm").mark("receipt-skip")
+
+    async def answer_receipt(self, mid: str, send: bool) -> None:
+        x = next((t for t in self.thread if t["id"] == mid), None) or queries.get_message(mid)
+        if not x:
+            return
+        if send:
+            try:
+                await run.io_bound(sync.send_receipt, x)
+            except Exception as e:
+                return ui.notify(f"Accusé non envoyé : {e}", type="negative", multi_line=True)
+            ui.notify("Accusé de réception envoyé.", type="positive")
+        db.kv_set(f"receipt:{mid}", "1" if send else "0")
         self.reader.refresh()
 
     def allow_images(self, mid: str) -> None:
