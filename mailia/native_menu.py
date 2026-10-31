@@ -49,6 +49,7 @@ def _tidy_mac_menus(cocoa) -> None:
                 from AppKit import NSMenu, NSMenuItem, NSMenuItemImportFromDeviceIdentifier
                 imp = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Importer depuis l'iPhone ou l'iPad", None, "")
                 imp.setIdentifier_(NSMenuItemImportFromDeviceIdentifier)
+                imp.setSubmenu_(NSMenu.alloc().initWithTitle_("Importer depuis l'iPhone ou l'iPad"))  # comme dans TextEdit : macOS remplit ce sous-menu (appareils proches)
                 file_menu = NSMenu.alloc().initWithTitle_("Fichier")
                 file_menu.addItem_(imp)
                 file_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Fichier", None, "")
@@ -203,6 +204,7 @@ def show_continuity_menu() -> None:
     item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Importer depuis l'iPhone ou l'iPad", None, "")
     item.setIdentifier_(NSMenuItemImportFromDeviceIdentifier)  # entrée standard : le système la remplace par les appareils proches (photo, document numérisé…)
     item.setEnabled_(True)
+    item.setSubmenu_(NSMenu.alloc().initWithTitle_("Importer depuis l'iPhone ou l'iPad"))
     menu.addItem_(item)
     db.kv_set("iphone_status", "menu ouvert")
     from AppKit import NSEvent
