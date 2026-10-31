@@ -349,6 +349,14 @@ def build_pdf(pages: list[bytes], mode: str = "color", dpi: int = 200, enhance: 
     raise ScanError("Ce document est trop volumineux pour être joint (20 Mo maximum). Scannez moins de pages ou en noir et blanc.")
 
 
+def to_jpeg(data: bytes) -> bytes:
+    """Toute image lisible (PNG, JPEG, HEIC si disponible…) en JPEG, orientation corrigée."""
+    im = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
+    out = io.BytesIO()
+    im.save(out, "JPEG", quality=90)
+    return out.getvalue()
+
+
 def thumbnail(data: bytes, size: int = 240) -> bytes:
     im = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
     im.thumbnail((size, size))

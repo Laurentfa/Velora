@@ -1,5 +1,7 @@
 """Numérisation d'un document : scanner réseau ou téléphone, assemblage en PDF, ajout au message."""
+import base64
 import re
+import sys
 from datetime import datetime
 
 from nicegui import run, ui
@@ -9,10 +11,25 @@ from mailia import scan
 from mailia.ui_common import human_size, log
 
 
+# Continuité (macOS) : un clic droit dans une zone modifiable propose « Importer depuis l'iPhone » ; l'image arrive dans la zone, on la récupère puis on la vide.
+IPHONE_JS = """window.__velIph = async (root, emit, ev) => {
+  const send = async (blob) => {
+    const u = new Uint8Array(await blob.arrayBuffer()); let s = '';
+    for (let i = 0; i < u.length; i += 32768) s += String.fromCharCode.apply(null, u.subarray(i, i + 32768));
+    emit({b64: btoa(s), type: blob.type});
+  };
+  const files = ev && ev.clipboardData ? [...ev.clipboardData.files] : [];
+  if (files.length) { ev.preventDefault(); for (const f of files) await send(f); return; }
+  for (const im of [...root.querySelectorAll('img')]) {
+    try { await send(await (await fetch(im.src)).blob()); } catch (e) { emit({error: String(e)}); }
+    im.remove();
+  }
+};"""
+
+
 class ScanMixin:
     async def scan_dialog(self) -> None:
         """Numérise (scanner réseau ou téléphone), assemble les pages en un PDF et le joint au message."""
-        import base64
         pages: list[dict] = []  # {"raw": JPEG, "thumb": data URI, "enh": bool}
         st = {"server": None, "seen": 0, "base": ""}
         o = {"mode": "color", "dpi": 200, "name": f"Scan {datetime.now():%Y-%m-%d %H.%M}", "source": "auto", "addr": "", "found": ""}
@@ -27,6 +44,17 @@ class ScanMixin:
                 pages.append({"raw": raw, "thumb": "data:image/jpeg;base64," + base64.b64encode(th).decode(), "enh": enhance})
             pages_view.refresh()
 
+        async def on_iphone(e) -> None:
+            """Image reçue de l'iPhone (Continuité) : convertie en JPEG puis ajoutée aux pages."""
+            a = e.args if isinstance(e.args, dict) else {}
+            if a.get("error") or not a.get("b64"):
+                return ui.notify("Image de l'iPhone non reçue.", type="warning")
+            try:
+                raw = await run.io_bound(scan.to_jpeg, base64.b64decode(a["b64"]))
+            except Exception:  # noqa: BLE001
+                return ui.notify("Ce format n'est pas pris en charge : choisissez « Prendre une photo » ou « Numériser des documents ».", type="warning")
+            await add_pages([raw], False)
+
         def stop_server() -> None:
             if st["server"]:
                 st["server"].stop()
@@ -38,6 +66,7 @@ class ScanMixin:
             with ui.tabs().props("dense align=left no-caps") as tabs:
                 t_net = ui.tab("Scanner réseau", icon="print")
                 t_ph = ui.tab("Téléphone", icon="smartphone")
+                t_iph = ui.tab("iPhone (Mac)", icon="phone_iphone") if sys.platform == "darwin" else None
             with ui.tab_panels(tabs, value=t_net).classes("w-full").props("animated=false"):
                 with ui.tab_panel(t_net).classes("q-pa-sm"):
                     ui.label("Imprimantes multifonctions et scanners récents du réseau (AirScan / Mopria), sans pilote.").classes("rmeta")
@@ -147,6 +176,15 @@ class ScanMixin:
 
                     ph_btn.on_click(start_phone)
                     poll = ui.timer(1.0, poll_phone, active=False)
+                if t_iph is not None:
+                    with ui.tab_panel(t_iph).classes("q-pa-sm"):
+                        ui.label("Sans Wi-Fi commun : l'iPhone proche du Mac (même identifiant Apple, Bluetooth et Wi-Fi activés) envoie la photo ou le document numérisé directement.").classes("rmeta")
+                        ui.label("Faites un clic droit dans le cadre ci-dessous, puis « Importer depuis l'iPhone ou l'iPad » › « Numériser des documents » (ou « Prendre une photo »).").classes("rmeta q-mt-sm")
+                        zone = ui.element("div").props('contenteditable=true data-ph="Clic droit ici"').classes("w-full q-mt-sm").style(
+                            "min-height:130px;border:2px dashed var(--accent);border-radius:12px;padding:12px;display:flex;align-items:center;justify-content:center;color:var(--muted)").mark("iphone-zone")
+                        zone.on("paste", on_iphone, js_handler="(ev) => window.__velIph(ev.currentTarget, emit, ev)")
+                        zone.on("input", on_iphone, js_handler="(ev) => window.__velIph(ev.currentTarget, emit, null)")
+                        ui.run_javascript(IPHONE_JS)
             ui.separator()
 
             @ui.refreshable
