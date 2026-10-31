@@ -11,7 +11,7 @@ from mailia import compose, config, db, queries, sync
 
 def test_every_model_survives_the_outgoing_cleaning() -> None:
     from mailia import htmlmail
-    for key in compose.SIGNATURE_MODELS:
+    for key in compose.STARTER_MODELS:
         out = htmlmail.sanitize_outgoing(compose.model_html(key))
         assert "<table" in out and "border" in out and "color" in out and "{{" not in out
 
@@ -84,11 +84,14 @@ def test_user_models_can_be_created_edited_and_deleted() -> None:
     mid = compose.save_user_model(None, "Ma carte de vœux", '<p style="color:#c62828">Bonne année {{nom}}</p><script>x()</script>')
     assert compose.user_models()[mid][0] == "Ma carte de vœux" and "script" not in compose.user_models()[mid][1]
     assert mid in compose.all_models() and "Bonne année" in compose.sig_block("", mid)
-    assert compose.save_user_model(mid, "Renommé", "<p>Autre</p>") == mid and len(compose.user_models()) == 1 and compose.user_models()[mid][0] == "Renommé"
+    assert compose.save_user_model(mid, "Renommé", "<p>Autre</p>") == mid and len(compose.user_models()) == 4 and compose.user_models()[mid][0] == "Renommé"
     db.kv_set("sig_xmas_model", mid)
     assert compose.christmas_model() == mid
     compose.delete_user_model(mid)
     assert mid not in compose.all_models() and compose.christmas_model() == "noel_classique"
+    for key in list(compose.all_models()):  # les modèles de départ aussi se suppriment, sans qu'ils reviennent
+        compose.delete_user_model(key)
+    assert compose.all_models() == {} and compose.default_model() is None and compose.christmas_model() == ""
 
 
 async def test_the_manager_can_duplicate_and_delete(user, box) -> None:
@@ -98,7 +101,14 @@ async def test_the_manager_can_duplicate_and_delete(user, box) -> None:
     await user.should_see("Noël doré")
     user.find(marker="sigm-dup-noel_dore").click()
     await user.should_see("Noël doré (copie)")
-    mid = next(iter(compose.user_models()))
+    mid = [k for k in compose.user_models() if k not in compose.STARTER_MODELS][0]
     user.find(marker=f"sigm-del-{mid}").click()
     await user.should_not_see("Noël doré (copie)")
-    assert compose.user_models() == {}
+    user.find(marker="sigm-del-noel_classique").click()
+    await user.should_not_see("Noël classique")
+    assert "noel_classique" not in compose.user_models()
+
+
+def test_starting_models_keep_the_ones_created_before() -> None:
+    db.kv_set("sig_models_user", '[{"id": "u1", "name": "Ancien", "html": "<p>x</p>"}]')
+    assert "u1" in compose.user_models() and "noel_dore" in compose.user_models()

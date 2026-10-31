@@ -25,9 +25,9 @@ def signature_html(account: str = "") -> str:
     return v if v and v.strip() else f"<p>{_html.escape(config.signature())}</p>"
 
 
-# Modèles de signature proposés à la rédaction (en plus de « Ma signature »). {{nom}} : votre nom (Paramètres › Affichage et signature).
+# Modèles de signature de départ, copiés une seule fois parmi les vôtres (modifiables et supprimables). {{nom}} : votre nom (Paramètres › Affichage et signature).
 # Tableaux et styles en ligne seulement : c'est ce que lisent Outlook, Gmail et Apple Mail ; des émojis plutôt que des images, qui seraient bloquées.
-SIGNATURE_MODELS = {
+STARTER_MODELS = {
     "noel_classique": ("Noël classique",
         '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-family:Arial,Helvetica,sans-serif"><tr>'
         '<td style="border-top:3px solid #c62828;border-bottom:3px solid #2e7d32;padding:8px 16px">'
@@ -51,6 +51,15 @@ NO_SIGNATURE = "none"
 
 def user_models() -> dict[str, tuple[str, str]]:
     """Modèles créés par l'utilisateur : identifiant -> (nom, HTML)."""
+    if not db.kv_get("sig_models_seeded"):  # première utilisation : les modèles de départ deviennent les vôtres
+        try:
+            mine = [r for r in json.loads(db.kv_get("sig_models_user") or "[]") if isinstance(r, dict)]  # ceux déjà créés avant sont conservés
+        except ValueError:
+            mine = []
+        have = {r.get("id") for r in mine}
+        rows = [{"id": k, "name": v[0], "html": v[1]} for k, v in STARTER_MODELS.items() if k not in have] + mine
+        db.kv_set("sig_models_user", json.dumps(rows, ensure_ascii=False))
+        db.kv_set("sig_models_seeded", "1")
     try:
         rows = json.loads(db.kv_get("sig_models_user") or "[]")
         return {r["id"]: (r["name"], r["html"]) for r in rows if isinstance(r, dict) and r.get("id") and r.get("name")}
@@ -59,8 +68,8 @@ def user_models() -> dict[str, tuple[str, str]]:
 
 
 def all_models() -> dict[str, tuple[str, str]]:
-    """Modèles proposés : ceux fournis avec Velora, puis les vôtres."""
-    return {**SIGNATURE_MODELS, **user_models()}
+    """Les modèles de signature (les vôtres, dont ceux de départ si vous les avez gardés)."""
+    return user_models()
 
 
 def save_user_model(model_id: str | None, name: str, html: str) -> str:
@@ -84,13 +93,14 @@ def christmas_auto() -> bool:
 
 
 def christmas_model() -> str:
+    models = all_models()
     m = db.kv_get("sig_xmas_model")
-    return m if m in all_models() else "noel_classique"
+    return m if m in models else next(iter(models), "")
 
 
 def default_model() -> str | None:
     """Modèle posé d'office : celui de Noël en décembre si le réglage est actif, sinon aucun (votre signature habituelle)."""
-    return christmas_model() if christmas_auto() and datetime.now().month == 12 else None
+    return (christmas_model() or None) if christmas_auto() and datetime.now().month == 12 else None
 
 
 def model_html(model: str) -> str:
@@ -98,7 +108,7 @@ def model_html(model: str) -> str:
 
 
 def sig_block(account: str = "", model: str | None = None) -> str:
-    """Signature à insérer. model : None = automatique (voir default_model), un identifiant de SIGNATURE_MODELS, ou NO_SIGNATURE ; "" = ma signature."""
+    """Signature à insérer. model : None = automatique (voir default_model), un identifiant de STARTER_MODELS, ou NO_SIGNATURE ; "" = ma signature."""
     explicit = model is not None
     model = default_model() if model is None else model
     if model == NO_SIGNATURE or (not explicit and not signature_on()):

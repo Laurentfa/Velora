@@ -9,21 +9,17 @@ def signature_models_dialog(host=None, on_change=None) -> None:
     """Fenêtre de gestion. host : élément sous lequel l'ouvrir (la rédaction) ; on_change : appelée après chaque modification."""
     with (host if host is not None else ui.element()), ui.dialog() as dlg, ui.card().style("width:760px;max-width:96vw"):
         ui.label("Mes modèles de signature").classes("text-h6")
-        ui.label("Variable utilisable : {{nom}} (votre nom, réglé plus haut). Les modèles fournis avec Velora ne se modifient pas : dupliquez-en un pour le personnaliser.").classes("text-caption text-grey")
+        ui.label("Variable utilisable : {{nom}} (votre nom, réglé plus haut).").classes("text-caption text-grey")
 
         @ui.refreshable
         def listing() -> None:
-            for key, (name, _) in compose.SIGNATURE_MODELS.items():
-                with ui.row().classes("w-full items-center no-wrap gap-2").style("border:1px solid var(--line);border-radius:12px;padding:6px 10px"):
-                    ui.label(name).classes("col").style("font-weight:600")
-                    ui.label("fourni").classes("rmeta")
-                    ui.button(icon="content_copy", on_click=lambda _, k=key: duplicate(k)).props("flat dense round").tooltip("Dupliquer pour le modifier").mark(f"sigm-dup-{key}")
             mine = compose.user_models()
             if not mine:
-                ui.label("Vous n'avez pas encore créé de modèle.").classes("text-caption text-grey")
+                ui.label("Aucun modèle : créez-en un avec « Nouveau modèle ».").classes("text-caption text-grey")
             for key, (name, html) in mine.items():
                 with ui.row().classes("w-full items-center no-wrap gap-2").style("border:1px solid var(--line);border-radius:12px;padding:6px 10px"):
                     ui.label(name).classes("col").style("font-weight:600")
+                    ui.button(icon="content_copy", on_click=lambda _, k=key: duplicate(k)).props("flat dense round").tooltip("Dupliquer").mark(f"sigm-dup-{key}")
                     ui.button(icon="edit", on_click=lambda _, k=key: edit(k)).props("flat dense round").tooltip("Modifier").mark(f"sigm-edit-{key}")
                     ui.button(icon="delete_outline", on_click=lambda _, k=key: drop(k)).props("flat dense round color=negative").tooltip("Supprimer").mark(f"sigm-del-{key}")
 
@@ -58,5 +54,5 @@ def signature_models_dialog(host=None, on_change=None) -> None:
         listing()
         with ui.row().classes("justify-between w-full"):
             ui.button("Nouveau modèle", icon="add", on_click=lambda: edit(None)).props("outline no-caps dense").mark("sigm-new")
-            ui.button("Fermer", on_click=lambda: dlg.submit(None)).props("flat no-caps")
+            ui.button("Fermer", on_click=lambda: dlg.close()).props("flat no-caps")
     dlg.open()
