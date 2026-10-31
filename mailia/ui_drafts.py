@@ -10,6 +10,7 @@ from mailia import ai, compose, config, contacts_ui, db, htmlmail, queries, sync
 from mailia.textutil import html_to_text
 
 from mailia.ui_common import ago, label_of, log, make_editor
+from mailia.ui_sigmodels import signature_models_dialog
 
 
 class DraftsMixin:
@@ -76,8 +77,10 @@ class DraftsMixin:
                 with ui.button("Modèle de signature", icon="celebration").props("flat dense no-caps size=sm").tooltip(
                         "Choisir la signature de ce message : la vôtre, un modèle de Noël, ou aucune").mark("sig-model-tool"):
                     with ui.menu():
-                        for key, label in (("", "Ma signature"), *((k, v[0]) for k, v in compose.SIGNATURE_MODELS.items()), (compose.NO_SIGNATURE, "Sans signature")):
+                        for key, label in (("", "Ma signature"), *((k, v[0]) for k, v in compose.all_models().items()), (compose.NO_SIGNATURE, "Sans signature")):
                             ui.menu_item(label, on_click=lambda _, k=key: self.choose_signature(k)).mark(f"sig-model-{key or 'mine'}")
+                        ui.separator()
+                        ui.menu_item("Gérer mes modèles de signature…", on_click=lambda: signature_models_dialog(self.host, self.reader.refresh)).mark("sig-model-manage")
                 with ui.button("Modèles", icon="description").props("flat dense no-caps size=sm"):
                     with ui.menu():
                         tpls = db.templates_list()

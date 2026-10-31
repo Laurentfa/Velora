@@ -1,6 +1,8 @@
 """Contenu initial d'un message : signature mise en forme et message d'origine cité."""
 import html as _html
+import json
 import re
+import uuid
 from datetime import datetime
 
 from . import config, db, htmlmail, tlsutil
@@ -47,6 +49,35 @@ SIGNATURE_MODELS = {
 NO_SIGNATURE = "none"
 
 
+def user_models() -> dict[str, tuple[str, str]]:
+    """Modèles créés par l'utilisateur : identifiant -> (nom, HTML)."""
+    try:
+        rows = json.loads(db.kv_get("sig_models_user") or "[]")
+        return {r["id"]: (r["name"], r["html"]) for r in rows if isinstance(r, dict) and r.get("id") and r.get("name")}
+    except (ValueError, TypeError, KeyError):
+        return {}
+
+
+def all_models() -> dict[str, tuple[str, str]]:
+    """Modèles proposés : ceux fournis avec Velora, puis les vôtres."""
+    return {**SIGNATURE_MODELS, **user_models()}
+
+
+def save_user_model(model_id: str | None, name: str, html: str) -> str:
+    """Crée (model_id None) ou modifie un de vos modèles ; retourne son identifiant."""
+    models = user_models()
+    mid = model_id if model_id in models else f"u{uuid.uuid4().hex[:8]}"
+    models[mid] = (name.strip()[:80] or "Sans nom", htmlmail.sanitize_outgoing(html or ""))
+    db.kv_set("sig_models_user", json.dumps([{"id": k, "name": v[0], "html": v[1]} for k, v in models.items()], ensure_ascii=False))
+    return mid
+
+
+def delete_user_model(model_id: str) -> None:
+    models = user_models()
+    if models.pop(model_id, None) is not None:
+        db.kv_set("sig_models_user", json.dumps([{"id": k, "name": v[0], "html": v[1]} for k, v in models.items()], ensure_ascii=False))
+
+
 def christmas_auto() -> bool:
     """Signature de Noël posée d'office en décembre (réglable dans Paramètres › Affichage et signature)."""
     return db.kv_get("sig_xmas_auto") != "0"
@@ -54,7 +85,7 @@ def christmas_auto() -> bool:
 
 def christmas_model() -> str:
     m = db.kv_get("sig_xmas_model")
-    return m if m in SIGNATURE_MODELS else "noel_classique"
+    return m if m in all_models() else "noel_classique"
 
 
 def default_model() -> str | None:
@@ -63,7 +94,7 @@ def default_model() -> str | None:
 
 
 def model_html(model: str) -> str:
-    return SIGNATURE_MODELS[model][1].replace("{{nom}}", _html.escape(config.signature() or ""))
+    return all_models()[model][1].replace("{{nom}}", _html.escape(config.signature() or ""))
 
 
 def sig_block(account: str = "", model: str | None = None) -> str:
@@ -72,7 +103,7 @@ def sig_block(account: str = "", model: str | None = None) -> str:
     model = default_model() if model is None else model
     if model == NO_SIGNATURE or (not explicit and not signature_on()):
         return ""
-    if model in SIGNATURE_MODELS:
+    if model in all_models():
         return f'<div><br></div><div class="msig">{htmlmail.sanitize_outgoing(model_html(model))}</div>'
     # images incorporées dès l'insertion : l'éditeur (WebKit) n'affiche pas toujours celles d'un hébergeur distant, le message final les aura de toute façon
     body = embed_signature_images(htmlmail.sanitize_outgoing(signature_html(account)), account)

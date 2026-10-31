@@ -17,6 +17,7 @@ from mailia.ui_lock import lock_screen_now
 from mailia.ui_feed import feed_settings
 from mailia.ui_modules import modules_settings
 from mailia.ui_pet import pet_settings
+from mailia.ui_sigmodels import signature_models_dialog
 from mailia.ui_weather import weather_settings
 from mailia.ui_update import panel as update_panel
 from mailia import ui_zoom
@@ -323,8 +324,13 @@ def _tab_aff(f) -> None:
     ui.label("Signature de Noël").classes("text-subtitle2 q-mt-md")
     ui.switch("Utiliser automatiquement une signature de Noël en décembre", value=compose.christmas_auto(),
               on_change=lambda e: db.kv_set("sig_xmas_auto", "1" if e.value else "0")).props("dense").mark("sig-xmas-auto")
-    ui.select({k: v[0] for k, v in compose.SIGNATURE_MODELS.items()}, value=compose.christmas_model(), label="Modèle utilisé en décembre",
-              on_change=lambda e: db.kv_set("sig_xmas_model", e.value)).props("outlined dense stack-label").classes("w-full").mark("sig-xmas-model")
+    xmas = ui.select({k: v[0] for k, v in compose.all_models().items()}, value=compose.christmas_model(), label="Modèle utilisé en décembre",
+                     on_change=lambda e: db.kv_set("sig_xmas_model", e.value)).props("outlined dense stack-label").classes("w-full").mark("sig-xmas-model")
+
+    def models_changed() -> None:
+        xmas.set_options({k: v[0] for k, v in compose.all_models().items()}, value=compose.christmas_model())
+
+    ui.button("Mes modèles de signature…", icon="celebration", on_click=lambda: signature_models_dialog(None, models_changed)).props("outline no-caps dense").classes("q-mt-sm").mark("sig-models-open")
     ui.label("À la rédaction, le bouton « Modèle de signature » permet d'en choisir un autre, ou de revenir à la vôtre, message par message (réponses et transferts compris).").classes("text-caption text-grey")
 
 

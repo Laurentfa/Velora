@@ -78,3 +78,27 @@ async def test_the_model_can_be_chosen_when_replying_and_forwarding(user, box) -
     assert "Joyeuses fêtes" in b.draft["html"] and b.draft["html"].count('class="msig"') == 1 and "TR:" in b.draft["subject"]
     b.choose_signature(compose.NO_SIGNATURE)
     assert "msig" not in b.draft["html"]
+
+
+def test_user_models_can_be_created_edited_and_deleted() -> None:
+    mid = compose.save_user_model(None, "Ma carte de vœux", '<p style="color:#c62828">Bonne année {{nom}}</p><script>x()</script>')
+    assert compose.user_models()[mid][0] == "Ma carte de vœux" and "script" not in compose.user_models()[mid][1]
+    assert mid in compose.all_models() and "Bonne année" in compose.sig_block("", mid)
+    assert compose.save_user_model(mid, "Renommé", "<p>Autre</p>") == mid and len(compose.user_models()) == 1 and compose.user_models()[mid][0] == "Renommé"
+    db.kv_set("sig_xmas_model", mid)
+    assert compose.christmas_model() == mid
+    compose.delete_user_model(mid)
+    assert mid not in compose.all_models() and compose.christmas_model() == "noel_classique"
+
+
+async def test_the_manager_can_duplicate_and_delete(user, box) -> None:
+    ui.page("/gm")(lambda: ui.button("ouvrir", on_click=lambda: __import__("mailia.ui_sigmodels", fromlist=["x"]).signature_models_dialog(None)))
+    await user.open("/gm")
+    user.find("ouvrir").click()
+    await user.should_see("Noël doré")
+    user.find(marker="sigm-dup-noel_dore").click()
+    await user.should_see("Noël doré (copie)")
+    mid = next(iter(compose.user_models()))
+    user.find(marker=f"sigm-del-{mid}").click()
+    await user.should_not_see("Noël doré (copie)")
+    assert compose.user_models() == {}
