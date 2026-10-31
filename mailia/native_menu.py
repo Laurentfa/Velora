@@ -47,14 +47,30 @@ def _tidy_mac_menus(cocoa) -> None:
 
             try:  # menu « Fichier » réduit à « Importer depuis l'iPhone ou l'iPad » : macOS y met lui-même les appareils proches (Continuité)
                 from AppKit import NSMenu, NSMenuItem, NSMenuItemImportFromDeviceIdentifier
-                imp = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Importer depuis l'iPhone ou l'iPad", None, "")
+                imp = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Importer depuis l'iPhone ou l'iPad", "importFromDevice:", "")  # action d'AppKit (NSApplication) : c'est elle qui fait remplir le sous-menu
                 imp.setIdentifier_(NSMenuItemImportFromDeviceIdentifier)
-                imp.setSubmenu_(NSMenu.alloc().initWithTitle_("Importer depuis l'iPhone ou l'iPad"))  # comme dans TextEdit : macOS remplit ce sous-menu (appareils proches)
+                imp.setSubmenu_(NSMenu.alloc().initWithTitle_("Importer depuis l'iPhone ou l'iPad"))
                 file_menu = NSMenu.alloc().initWithTitle_("Fichier")
                 file_menu.addItem_(imp)
                 file_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Fichier", None, "")
                 file_item.setSubmenu_(file_menu)
                 main_menu.insertItem_atIndex_(file_item, 1)
+                cocoa.BrowserView.app.setMainMenu_(main_menu)
+                try:  # AppKit repère l'entrée d'identifiant standard dans le menu principal et la confie à Sidecar, qui y met les appareils proches
+                    cocoa.BrowserView.app._customizeImportFromDeviceMenuItem()
+                except Exception:  # noqa: BLE001
+                    logging.getLogger("mailia").warning("Continuité : entrée non confiée à AppKit", exc_info=True)
+
+                _import_item[:] = [imp]
+
+                def refresh(*_args) -> None:  # dans cette fenêtre, macOS ne remplit pas seul le sous-menu à l'ouverture : on le lui demande (appareils proches)
+                    sub = imp.submenu()
+                    if sub is not None:
+                        sub.update()
+
+                from AppKit import NSMenuDidBeginTrackingNotification, NSNotificationCenter as _NC
+                _NC.defaultCenter().addObserverForName_object_queue_usingBlock_(NSMenuDidBeginTrackingNotification, None, None, refresh)
+                refresh()
             except Exception:  # noqa: BLE001
                 logging.getLogger("mailia").warning("menu Fichier non ajouté", exc_info=True)
             edit = main_menu.itemAtIndex_(2).submenu() if main_menu.numberOfItems() > 2 else edit
@@ -135,9 +151,6 @@ def _inbox_dir() -> Path:
     return d
 
 
-_seen: list[str] = []  # appels reçus par la vue (diagnostic de Continuité)
-
-
 def enable_continuity(cocoa) -> None:
     """macOS : la vue de la fenêtre se déclare capable de recevoir une image (PDF, PNG, TIFF) : le système propose alors « Importer depuis l'iPhone
     ou l'iPad » (menus et clic droit). Ce qui arrive est déposé pour le programme principal (voir inbox_take)."""
@@ -147,9 +160,13 @@ def enable_continuity(cocoa) -> None:
     # PDF, PNG, JPEG, TIFF, HEIC… ce que l'iPhone peut renvoyer ; le système interroge aussi avec les anciens noms (« Apple PDF pasteboard type »…)
     wanted = {str(t) for t in NSImage.imageTypes()} | {"Apple PDF pasteboard type", "Apple PNG pasteboard type", "NeXT TIFF v4.0 pasteboard type", "com.adobe.pdf", "public.png", "public.jpeg", "public.tiff"}
     original = host.validRequestorForSendType_returnType_
+    try:  # sans cette déclaration, macOS n'interroge jamais la vue pour des images (il ne demande que du texte) et le sous-menu reste vide
+        from AppKit import NSApplication
+        NSApplication.sharedApplication().registerServicesMenuSendTypes_returnTypes_([], sorted(wanted))
+    except Exception:  # noqa: BLE001
+        logging.getLogger("mailia").warning("Continuité : types non déclarés", exc_info=True)
 
     def valid(self, send_type, return_type):
-        _seen.append(f"{send_type}|{return_type}")
         if send_type is None and return_type is not None and str(return_type) in wanted:
             return self
         return original(self, send_type, return_type)
@@ -187,32 +204,69 @@ def enable_continuity(cocoa) -> None:
         logging.getLogger("mailia").warning("Continuité : protocole non déclaré", exc_info=True)
 
 
+_import_item: list = []  # entrée « Importer depuis l'iPhone » du menu Fichier (celle que macOS relie à la fenêtre et remplit)
+_choosers: list = []  # cibles des entrées du menu du bouton (à garder en vie)
+
+
+def _chooser_class():
+    """Cible des entrées du menu du bouton. La classe n'est créée qu'une fois : macOS refuse qu'une classe du même nom soit déclarée deux fois."""
+    import objc
+    from Foundation import NSObject
+    try:
+        return objc.lookUpClass("VeloraIPhoneChooser")
+    except objc.nosuchclass_error:
+        pass
+
+    class VeloraIPhoneChooser(NSObject):
+        def choose_(self, sender):
+            try:
+                from webview.platforms import cocoa
+                view = next(iter(cocoa.BrowserView.instances.values())).webview
+                view.window().makeFirstResponder_(view)
+                real = _import_item[0].submenu()
+                real.update()
+                real.performActionForItemAtIndex_(sender.tag())
+            except Exception:  # noqa: BLE001
+                log.exception("choix de l'iPhone")
+
+    return VeloraIPhoneChooser
+
+
 def show_continuity_menu() -> None:
-    """Fil principal de la fenêtre : fait apparaître le menu « Importer depuis l'iPhone ou l'iPad » que le système remplit lui-même (menu vide,
-    la vue de la fenêtre étant la destination de l'image : voir enable_continuity). Reste affiché jusqu'au choix de l'utilisateur."""
-    from AppKit import NSMenu
-    from Foundation import NSMakePoint
+    """Fil principal de la fenêtre : propose les choix de l'iPhone proche (« Prendre une photo », « Scanner des documents »…). Chaque entrée déclenche
+    l'entrée équivalente du menu Fichier, la seule que macOS relie à la fenêtre ; l'image arrive par readSelectionFromPasteboard (voir enable_continuity)."""
+    from AppKit import NSEvent, NSMenu, NSMenuItem
+    from Foundation import NSDate, NSMakePoint, NSRunLoop
     from webview.platforms import cocoa
+    if not _import_item:
+        return
+    real = _import_item[0].submenu()
     view = next(iter(cocoa.BrowserView.instances.values())).webview
     window = view.window()
     window.makeKeyAndOrderFront_(None)
-    window.makeFirstResponder_(view)  # sinon le système grise les entrées
-    box = view.bounds().size
-    from AppKit import NSMenuItem, NSMenuItemImportFromDeviceIdentifier
+    window.makeFirstResponder_(view)
+    for _ in range(3):  # les appareils proches arrivent de façon asynchrone
+        real.update()
+        NSRunLoop.currentRunLoop().runUntilDate_(NSDate.dateWithTimeIntervalSinceNow_(0.3))
+    real.update()
+
+    chooser = _chooser_class().alloc().init()
+    _choosers[:] = [chooser]
     menu = NSMenu.alloc().init()
-    menu.setAutoenablesItems_(False)  # l'entrée n'a pas d'action propre : sinon macOS la grise d'office
-    item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Importer depuis l'iPhone ou l'iPad", None, "")
-    item.setIdentifier_(NSMenuItemImportFromDeviceIdentifier)  # entrée standard : le système la remplace par les appareils proches (photo, document numérisé…)
-    item.setEnabled_(True)
-    item.setSubmenu_(NSMenu.alloc().initWithTitle_("Importer depuis l'iPhone ou l'iPad"))
-    menu.addItem_(item)
-    db.kv_set("iphone_status", "menu ouvert")
-    from AppKit import NSEvent
+    menu.setAutoenablesItems_(False)
+    for i, it in enumerate(real.itemArray()):
+        if it.isSeparatorItem() or not str(it.title()):
+            continue
+        mine = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(it.title(), "choose:" if str(it.action()) == "importFromDevice:" else None, "")
+        mine.setTarget_(chooser)
+        mine.setTag_(i)
+        mine.setImage_(it.image())
+        mine.setEnabled_(str(it.action()) == "importFromDevice:")
+        menu.addItem_(mine)
+    box = view.bounds().size
     event = NSEvent.mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure_(
-        1, NSMakePoint(box.width / 2, box.height / 2), 0, 0, window.windowNumber(), None, 0, 1, 1.0)  # NSEventTypeLeftMouseDown : le menu naît d'un clic, comme pour un vrai menu contextuel
+        1, NSMakePoint(box.width / 2, box.height / 2), 0, 0, window.windowNumber(), None, 0, 1, 1.0)
     NSMenu.popUpContextMenu_withEvent_forView_(menu, event, view)
-    db.kv_set("iphone_status", f"menu fermé ({menu.numberOfItems()} entrées) ; vue interrogée {len(_seen)} fois : {sorted(set(_seen))[:6]}")
-    _seen.clear()
 
 
 def watch_iphone(stop: threading.Event | None = None, every: float = 0.3, call_on_main=None) -> None:

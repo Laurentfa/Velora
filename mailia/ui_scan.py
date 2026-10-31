@@ -38,6 +38,10 @@ class ScanMixin:
                 return ui.notify("Cette image n'est pas lisible.", type="warning")
             await add_pages([jpeg], False)
 
+        def ask_iphone() -> None:
+            """Fait apparaître, dans la fenêtre native, les choix de l'iPhone proche (menu fourni par macOS)."""
+            db.kv_set("iphone_request", uuid.uuid4().hex)
+
         def stop_server() -> None:
             if st["server"]:
                 st["server"].stop()
@@ -50,6 +54,13 @@ class ScanMixin:
                 t_net = ui.tab("Scanner réseau", icon="print")
                 t_ph = ui.tab("Téléphone", icon="smartphone")
                 t_iph = ui.tab("iPhone (Mac)", icon="phone_iphone") if sys.platform == "darwin" else None
+            def tab_changed(e) -> None:
+                on_iphone_tab = t_iph is not None and e.value == t_iph._props["name"]
+                settings.set_visibility(not on_iphone_tab)
+                if on_iphone_tab:
+                    ask_iphone()  # le menu de l'iPhone s'ouvre dès qu'on choisit l'onglet
+
+            tabs.on_value_change(tab_changed)
             with ui.tab_panels(tabs, value=t_net).classes("w-full").props("animated=false"):
                 with ui.tab_panel(t_net).classes("q-pa-sm"):
                     ui.label("Imprimantes multifonctions et scanners récents du réseau (AirScan / Mopria), sans pilote.").classes("rmeta")
@@ -161,11 +172,10 @@ class ScanMixin:
                     poll = ui.timer(1.0, poll_phone, active=False)
                 if t_iph is not None:
                     with ui.tab_panel(t_iph).classes("q-pa-sm"):
-                        ui.label("Sans Wi-Fi commun : l'iPhone proche du Mac (même identifiant Apple, Bluetooth et Wi-Fi activés) envoie la photo ou le document numérisé directement.").classes("rmeta")
-                        ui.label("Ouvrez le menu « Fichier » en haut de l'écran › « Importer depuis l'iPhone ou l'iPad », puis choisissez « Numériser des documents » "
-                                 "ou « Prendre une photo ». Le résultat arrive ici, sans Wi-Fi commun.").classes("rmeta q-mt-sm")
-                        ui.button("Importer depuis l'iPhone…", icon="phone_iphone", on_click=lambda: db.kv_set("iphone_request", uuid.uuid4().hex)).props(
-                            "unelevated no-caps color=primary").classes("q-mt-sm").mark("iphone-go")
+                        ui.label("L'iPhone proche du Mac (même identifiant Apple, Bluetooth et Wi-Fi activés) envoie la photo ou le document numérisé directement, "
+                                 "sans Wi-Fi commun. Choisissez « Scanner des documents » ou « Prendre une photo » dans le menu : l'iPhone s'ouvre, "
+                                 "et le résultat arrive ici.").classes("rmeta")
+                        ui.button("Ajouter une photo", icon="add_a_photo", on_click=ask_iphone).props("unelevated no-caps color=primary").classes("q-mt-sm").mark("iphone-go")
 
                         async def poll_iphone() -> None:  # images reçues par la fenêtre native (menu système de Continuité)
                             from mailia import native_menu
@@ -201,10 +211,12 @@ class ScanMixin:
 
             pages_view()
             with ui.row().classes("w-full items-center no-wrap gap-2 q-mt-sm"):
-                ui.select({"color": "Couleur", "gray": "Niveaux de gris", "bw": "Noir et blanc"}, label="Rendu").bind_value(o, "mode").props(
-                    "outlined dense").style("min-width:170px")
-                ui.select({150: "Légère (150 dpi)", 200: "Standard (200 dpi)", 300: "Haute (300 dpi)"}, label="Qualité").bind_value(o, "dpi").props(
-                    "outlined dense").style("min-width:170px")
+                settings = ui.row().classes("items-center no-wrap gap-2")  # réglages de numérisation : sans objet pour une photo d'iPhone
+                with settings:
+                    ui.select({"color": "Couleur", "gray": "Niveaux de gris", "bw": "Noir et blanc"}, label="Rendu").bind_value(o, "mode").props(
+                        "outlined dense").style("min-width:170px")
+                    ui.select({150: "Légère (150 dpi)", 200: "Standard (200 dpi)", 300: "Haute (300 dpi)"}, label="Qualité").bind_value(o, "dpi").props(
+                        "outlined dense").style("min-width:170px")
                 ui.input("Nom du fichier").bind_value(o, "name").props("outlined dense").classes("col")
 
             async def attach() -> None:
