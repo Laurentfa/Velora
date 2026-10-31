@@ -61,13 +61,15 @@ class OutboxMixin:
                     pass
             follow = ui.select({0: "Non", 2: "Dans 2 jours", 3: "Dans 3 jours", 5: "Dans 5 jours", 7: "Dans 1 semaine", 14: "Dans 2 semaines"},
                                value=0, label="Me rappeler si je n'ai pas de réponse").props("outlined dense stack-label").classes("w-full")
+            receipt = ui.checkbox("Demander un accusé de réception", value=False).props("dense").mark("send-receipt")
+            ui.label("Le destinataire choisit de le renvoyer ou non : sans réponse, cela ne prouve pas que le message n'a pas été lu.").classes("text-caption text-grey")
             replying = bool(m) and not self.new  # une réponse : on peut ranger la conversation d'origine en même temps
             arch = None
             if replying:
                 arch = ui.checkbox("Archiver la conversation après l'envoi", value=db.kv_get("send_archive") == "1").props("dense").mark("send-archive")
 
             def confirm() -> None:
-                dlg.submit({"when": when.value, "custom": custom.value, "follow": int(follow.value or 0), "archive": bool(arch and arch.value)})
+                dlg.submit({"when": when.value, "custom": custom.value, "follow": int(follow.value or 0), "archive": bool(arch and arch.value), "receipt": bool(receipt.value)})
 
             with ui.row().classes("justify-end w-full gap-2 q-mt-sm"):
                 ui.button("Annuler", on_click=lambda: dlg.submit(None)).props("flat no-caps")
@@ -89,7 +91,7 @@ class OutboxMixin:
         else:
             at = opts[choice["when"]]
         oid = outgoing.queue(account, d["to"], d["cc"], d.get("bcc", ""), d["subject"], d["html"], d["files"], at, draft_id=d.get("id"),
-                             reply_to=d.get("reply_to"), followup_days=choice["follow"], importance=d.get("importance", 1))
+                             reply_to=d.get("reply_to"), followup_days=choice["follow"], importance=d.get("importance", 1), receipt=choice["receipt"])
         if replying:
             db.kv_set("send_archive", "1" if choice["archive"] else "0")  # le choix est repris la prochaine fois
         self.close_compose()

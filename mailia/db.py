@@ -207,6 +207,8 @@ def init() -> None:
                 c.execute(f"ALTER TABLE {tbl} ADD COLUMN bcc TEXT DEFAULT ''")
             if "importance" not in have:
                 c.execute(f"ALTER TABLE {tbl} ADD COLUMN importance INTEGER DEFAULT 1")
+            if tbl == "outbox" and "receipt" not in have:  # accusé de réception demandé à l'envoi (0 non, 1 oui)
+                c.execute("ALTER TABLE outbox ADD COLUMN receipt INTEGER DEFAULT 0")
             for col in ("source", "api_key") + (("api_note", "server_ref", "server_at", "server_folder") if tbl == "drafts" else ()):  # origine : « api » quand un programme ou un assistant l'a créé ; copie sur le serveur
                 if col not in have:
                     c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} TEXT DEFAULT ''")
@@ -787,11 +789,11 @@ def _now_iso() -> str:
 def outbox_add(row: dict, files: list | None = None) -> None:
     with conn() as c:
         c.execute(
-            "INSERT OR REPLACE INTO outbox(id,account,to_addrs,cc,bcc,subject,html,body,draft_id,reply_to,send_at,status,error,created,followup_days,source,api_key,importance) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,'pending','',?,?,?,?,?)",
+            "INSERT OR REPLACE INTO outbox(id,account,to_addrs,cc,bcc,subject,html,body,draft_id,reply_to,send_at,status,error,created,followup_days,source,api_key,importance,receipt) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,'pending','',?,?,?,?,?,?)",
             (row["id"], row["account"], row["to"], row["cc"], row.get("bcc", ""), row["subject"], row["html"], row["body"], row.get("draft_id"),
              row.get("reply_to"), row["send_at"], _now_iso(), int(row.get("followup_days") or 0), row.get("source", ""), row.get("api_key", ""),
-             int(row.get("importance", 1))))
+             int(row.get("importance", 1)), int(row.get("receipt", 0))))
         c.execute("DELETE FROM outbox_files WHERE outbox_id=?", (row["id"],))
         for name, data, mime in files or []:
             c.execute("INSERT INTO outbox_files(outbox_id,name,mime,data) VALUES(?,?,?,?)", (row["id"], name, mime, data))

@@ -544,13 +544,13 @@ class EwsProvider:
         raise RuntimeError("Pièce jointe introuvable (ou message joint non téléchargeable)")
 
     def send(self, to: str, subject: str, body: str, cc: str = "", attachments: list | None = None,
-             html: str | None = None, inline: list | None = None, bcc: str = "", ref: tuple | None = None, importance: int = 1) -> None:
+             html: str | None = None, inline: list | None = None, bcc: str = "", ref: tuple | None = None, importance: int = 1, receipt: bool = False) -> None:
         """`ref` = (« reply » ou « forward », dossier, uid) du message d'origine : le message part alors dans SA conversation.
         `importance` : 0 basse, 1 normale, 2 haute."""
         box = lambda s: [Mailbox(email_address=a.strip()) for a in s.replace(";", ",").split(",") if a.strip()]
         if ref and env("MAILIA_THREADED_SEND", "1") != "0":  # MAILIA_THREADED_SEND=0 : retour à l'envoi simple (dépannage)
             try:
-                if self._send_threaded(ref, subject, body, box(to), box(cc), box(bcc), attachments, html, inline, importance):
+                if self._send_threaded(ref, subject, body, box(to), box(cc), box(bcc), attachments, html, inline, importance, receipt):
                     _stat("threaded")
                     return
             except _AlreadySent:
@@ -559,10 +559,10 @@ class EwsProvider:
             except Exception:
                 _stat("fallback", subject)
                 log.warning("envoi rattaché à la conversation impossible : envoi simple", exc_info=True)
-        m = self.build(subject, body, box(to), box(cc), attachments, html, inline, box(bcc), importance)
+        m = self.build(subject, body, box(to), box(cc), attachments, html, inline, box(bcc), importance, receipt)
         m.send()  # une copie est enregistrée dans les éléments envoyés
 
-    def _send_threaded(self, ref, subject, body, to, cc, bcc, attachments, html, inline, importance: int = 1) -> bool:
+    def _send_threaded(self, ref, subject, body, to, cc, bcc, attachments, html, inline, importance: int = 1, receipt: bool = False) -> bool:
         """Réponse ou transfert rattaché à la conversation de l'original, quel que soit son âge ou son objet exact : Exchange le fait quand
         le brouillon est créé « à partir de » l'original (sinon il ne regroupe que d'après l'objet, et seulement les messages récents).
         Le brouillon créé par le serveur ne sert que de support : on le remplace par ce que l'utilisateur a rédigé (texte, citation, pièces jointes)."""
@@ -582,7 +582,8 @@ class EwsProvider:
             d.to_recipients, d.cc_recipients, d.bcc_recipients = to, cc or None, bcc or None
             d.support_mark = "1"
             d.importance = _IMPORTANCE_NAME.get(importance, "Normal")
-            d.save(update_fields=["subject", "body", "to_recipients", "cc_recipients", "bcc_recipients", "support_mark", "importance"])
+            d.is_read_receipt_requested = bool(receipt)
+            d.save(update_fields=["subject", "body", "to_recipients", "cc_recipients", "bcc_recipients", "support_mark", "importance", "is_read_receipt_requested"])
             for name, data, ctype in attachments or []:
                 d.attach(FileAttachment(name=name, content=data, content_type=ctype or "application/octet-stream"))
             for cid, data, mime, name in inline or []:
@@ -645,9 +646,10 @@ class EwsProvider:
         except Exception:
             log.warning("nettoyage des brouillons de support impossible", exc_info=True)
 
-    def build(self, subject, body, to, cc, attachments, html=None, inline=None, bcc=None, importance: int = 1):
+    def build(self, subject, body, to, cc, attachments, html=None, inline=None, bcc=None, importance: int = 1, receipt: bool = False):
         m = Message(account=self.account, subject=subject, body=HTMLBody(html) if html else body,
-                    to_recipients=to, cc_recipients=cc or None, bcc_recipients=bcc or None, importance=_IMPORTANCE_NAME.get(importance, "Normal"))
+                    to_recipients=to, cc_recipients=cc or None, bcc_recipients=bcc or None, importance=_IMPORTANCE_NAME.get(importance, "Normal"),
+                    is_read_receipt_requested=bool(receipt))
         for name, data, ctype in attachments or []:
             m.attach(FileAttachment(name=name, content=data, content_type=ctype or "application/octet-stream"))
         for cid, data, mime, name in inline or []:  # images affichées dans le corps du message

@@ -620,7 +620,7 @@ def thread_ref(account: str, reply_to: str | None) -> tuple | None:
 
 
 def send_mail(account: str, to: str, subject: str, body: str, cc: str = "", attachments: list | None = None,
-              html: str | None = None, bcc: str = "", reply_to: str | None = None, importance: int = 1) -> None:
+              html: str | None = None, bcc: str = "", reply_to: str | None = None, importance: int = 1, receipt: bool = False) -> None:
     """Envoie un message (réponse ou nouveau) avec contrôles élémentaires avant d'appeler le serveur. `importance` : 0 basse, 1 normale, 2 haute."""
     addrs = [a.strip() for a in (to + "," + cc + "," + bcc).replace(";", ",").split(",") if a.strip()]
     bad = [a for a in addrs if not re.fullmatch(r"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+", a)]
@@ -639,13 +639,13 @@ def send_mail(account: str, to: str, subject: str, body: str, cc: str = "", atta
     if config.env("MAILIA_DRY_RUN") == "1":  # essais : rien ne part, on garde seulement une trace
         log.warning("ENVOI SIMULÉ (MAILIA_DRY_RUN) : %s -> %s « %s »", account, to, subject)
         sent = json.loads(db.kv_get("dryrun_sent") or "[]")
-        sent.append({"account": account, "to": to, "cc": cc, "bcc": bcc, "subject": subject, "files": [a[0] for a in attachments or []], "importance": importance})
+        sent.append({"account": account, "to": to, "cc": cc, "bcc": bcc, "subject": subject, "files": [a[0] for a in attachments or []], "importance": importance, "receipt": receipt})
         db.kv_set("dryrun_sent", json.dumps(sent[-50:]))
         return
     # l'objet part tel quel, espaces finaux compris : Exchange range le message dans la conversation de l'original d'après l'objet exact
     # (« Document mutuelle␠ » et « TR: Document mutuelle » seraient deux conversations différentes)
     provider(account).send(to, subject if subject.strip() else "(sans objet)", body, cc, attachments, html, inline, bcc, ref=thread_ref(account, reply_to),
-                           importance=importance)
+                           importance=importance, receipt=receipt)
 
 
 def digest_upkeep() -> None:
@@ -734,7 +734,7 @@ def send_due() -> int:
             continue
         try:
             send_mail(row["account"], row["to_addrs"], row["subject"], row["body"], row["cc"], db.outbox_files(row["id"]), row["html"], row["bcc"] or "",
-                      reply_to=row["reply_to"], importance=1 if row.get("importance") is None else int(row["importance"]))
+                      reply_to=row["reply_to"], importance=1 if row.get("importance") is None else int(row["importance"]), receipt=bool(row.get("receipt")))
         except Exception as e:
             log.warning("envoi %s : %s", row["id"], e)
             db.outbox_mark(row["id"], "error", str(e)[:300])

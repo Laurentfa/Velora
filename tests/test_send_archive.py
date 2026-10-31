@@ -54,3 +54,31 @@ async def test_without_the_box_ticked_the_conversation_stays(user, box, monkeypa
     user.find(marker="send-go").click()
     await asyncio.wait_for(task, 10)
     assert calls == []
+
+
+def test_a_read_receipt_request_reaches_the_outgoing_queue_and_the_message_headers() -> None:
+    from datetime import datetime, timezone
+    from mailia import outgoing
+    from mailia.providers.imap import ImapProvider
+    oid = outgoing.queue("testbox", "a@b.fr", "", "", "Sujet", "<p>x</p>", [], datetime.now(timezone.utc), receipt=True)
+    assert db.outbox_get(oid)["receipt"] == 1
+    oid2 = outgoing.queue("testbox", "a@b.fr", "", "", "Sujet", "<p>x</p>", [], datetime.now(timezone.utc))
+    assert db.outbox_get(oid2)["receipt"] == 0  # par défaut : pas d'accusé
+    cfg = sync.ACCOUNTS["testbox"]
+    p = ImapProvider(cfg)
+    assert p.build("a@b.fr", "S", "texte", receipt=True)["Disposition-Notification-To"] == cfg.email
+    assert p.build("a@b.fr", "S", "texte")["Disposition-Notification-To"] is None
+
+
+async def test_the_send_dialog_offers_a_read_receipt_and_passes_the_choice_on(user, box, monkeypatch) -> None:
+    asked = []
+    from mailia import outgoing
+    real = outgoing.queue
+    monkeypatch.setattr(outgoing, "queue", lambda *a, **k: (asked.append(k.get("receipt")), real(*a, **k))[1])
+    await user.open("/")
+    b, task, calls = await _reply_dialog(box, monkeypatch, True)
+    await user.should_see("Demander un accusé de réception")
+    user.find(marker="send-receipt").click()
+    user.find(marker="send-go").click()
+    await asyncio.wait_for(task, 10)
+    assert asked == [True]

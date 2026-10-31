@@ -237,9 +237,11 @@ class ImapProvider:
         return a.payload, a.filename or "piece-jointe"
 
     def build(self, to: str, subject: str, body: str, cc: str = "", attachments: list | None = None,
-              html: str | None = None, inline: list | None = None, bcc: str = "", importance: int = 1) -> EmailMessage:
+              html: str | None = None, inline: list | None = None, bcc: str = "", importance: int = 1, receipt: bool = False) -> EmailMessage:
         msg = EmailMessage()
         msg["From"], msg["To"], msg["Subject"] = self.cfg.email, to, subject
+        if receipt:  # accusé de réception (RFC 8098) : le destinataire choisit de le renvoyer ou non ; les réponses arrivent à l'adresse de l'expéditeur
+            msg["Disposition-Notification-To"] = self.cfg.email
         if importance == 2:  # les marques que lisent Outlook, Apple Mail et Thunderbird
             msg["Importance"], msg["X-Priority"], msg["Priority"], msg["X-MSMail-Priority"] = "high", "1 (Highest)", "urgent", "High"
         elif importance == 0:
@@ -281,8 +283,8 @@ class ImapProvider:
         return s
 
     def send(self, to: str, subject: str, body: str, cc: str = "", attachments: list | None = None,
-             html: str | None = None, inline: list | None = None, bcc: str = "", ref: tuple | None = None, importance: int = 1) -> None:
-        msg = self.build(to, subject, body, cc, attachments, html, inline, bcc, importance)
+             html: str | None = None, inline: list | None = None, bcc: str = "", ref: tuple | None = None, importance: int = 1, receipt: bool = False) -> None:
+        msg = self.build(to, subject, body, cc, attachments, html, inline, bcc, importance, receipt)
         if ref:
             try:
                 orig = self._full(ref[1], ref[2])
