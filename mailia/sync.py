@@ -4,7 +4,7 @@ import logging
 import re
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from . import ai, compose, config, db, htmlmail, notify, queries, rules, security
 from .textutil import html_to_text
@@ -560,9 +560,17 @@ def set_pinned(m: dict, on: bool) -> None:
 _empty_checked: set[str] = set()  # messages réellement vides côté serveur : inutile de les redemander à chaque ouverture
 
 
+def _recent(m: dict, days: int = 30) -> bool:
+    """Seuls les messages récents sont relus sur le serveur pour y chercher une demande d'accusé de réception (un vieux mail n'en a plus l'usage)."""
+    try:
+        return datetime.fromisoformat(m["date"]) >= datetime.now(timezone.utc) - timedelta(days=days)
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 def needs_details(m: dict) -> bool:
     if m.get("att_json") is None or m.get("body_html") is None or m.get("unsub") is None or m.get("auth") is None \
-            or m.get("receipt_to") is None \
+            or (m.get("receipt_to") is None and _recent(m)) \
             or (m.get("bcc_addrs") is None and m.get("folder") != "INBOX"):  # une copie cachée ne se voit que sur les mails envoyés
         return True
     return not (m.get("body") or m.get("body_html")) and m["id"] not in _empty_checked

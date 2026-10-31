@@ -2136,7 +2136,7 @@ if not DB_ERROR:
 
     @app.get("/_velora/mute/{cid}")
     def _mute(cid: str, n: int = 0, hidden: int = 0) -> dict:
-        log.warning("fenêtre muette [client %s] : aucune réponse du contrôle (échec n° %d, fenêtre %s)", cid[:6], n, "masquée" if hidden else "visible")
+        log.warning("fenêtre muette [client %.6r] : aucune réponse du contrôle (échec n° %d, fenêtre %s)", cid, n, "masquée" if hidden else "visible")
         return {}
     app.on_startup(apple_writer.refresh_async)  # Apple Intelligence prête ? vérifié en arrière-plan dès le démarrage
     app.on_shutdown(apiserver.runner.stop)

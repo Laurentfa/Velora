@@ -58,3 +58,8 @@ async def test_the_reader_tells_which_trackers_were_hidden(user, box) -> None:
     await box[-1].open("testbox|INBOX|1")
     await user.should_see("Pisteur d'ouverture masqué : suivi.exemple.com")
     await user.should_not_see("Images distantes bloquées")
+
+
+def test_thin_remote_lines_are_not_taken_for_trackers() -> None:
+    out, found = strip('<img src="https://exemple.fr/filet.png" width="600" height="1"><img src="https://exemple.fr/barre.png" width="2" height="400">')
+    assert found == [] and out.count("<img") == 2

@@ -60,6 +60,7 @@ def receipt_address(headers: dict) -> str:
 
 def build_receipt(me: str, to: str, subject: str, original_id: str) -> MIMEMultipart:
     """Accusé de réception conforme à la RFC 8098 : une partie lisible et une partie « message/disposition-notification »."""
+    subject, original_id = " ".join(subject.split()), " ".join(original_id.split())  # jamais de saut de ligne dans un en-tête (injection d'en-têtes)
     msg = MIMEMultipart("report", report_type="disposition-notification")
     msg["From"], msg["To"], msg["Subject"] = me, to, f"Accusé de réception : {subject}"
     msg["Date"], msg["Message-ID"] = formatdate(localtime=True), make_msgid(domain=me.rpartition("@")[2] or None)
@@ -251,8 +252,9 @@ class ImapProvider:
 
     def send_receipt(self, m: dict) -> None:
         """Accusé de réception (RFC 8098) pour un message reçu : envoyé seulement quand l'utilisateur le décide."""
-        orig = self._full(m["folder"], m["uid"])
-        msg = build_receipt(self.cfg.email, m["receipt_to"], m["subject"], " ".join((orig.headers or {}).get("message-id", ())))
+        with self._box(m["folder"]) as mb:  # seuls les en-têtes sont lus : pas la peine de télécharger les pièces jointes
+            orig = next(iter(mb.fetch(AND(uid=[m["uid"]]), headers_only=True, mark_seen=False)), None)
+        msg = build_receipt(self.cfg.email, m["receipt_to"], m["subject"], " ".join(((orig.headers if orig else None) or {}).get("message-id", ())))
         with self.smtp() as s:
             s.send_message(msg)
 

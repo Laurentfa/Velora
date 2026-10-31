@@ -91,7 +91,8 @@ def strip_trackers(clean: str) -> tuple[str, list[dict]]:
         if not src:
             return tag  # image incorporée (cid:, data:) : jamais un pisteur
         sizes = {k.lower(): int(v) for k, v in _SIZE.findall(tag)}
-        tiny = (sizes.get("width") is not None and sizes["width"] <= 2) or (sizes.get("height") is not None and sizes["height"] <= 2) or bool(_TINY_STYLE.search(tag))
+        w, h = sizes.get("width"), sizes.get("height")
+        tiny = (w is not None and w <= 2 and (h is None or h <= 2)) or (h is not None and h <= 2 and w is None) or bool(_TINY_STYLE.search(tag))  # un filet de 1 × 600 n'est pas un pisteur
         by_url = bool(_TRACKER_URL.search(src.group(1)))
         if not (tiny or by_url):
             return tag

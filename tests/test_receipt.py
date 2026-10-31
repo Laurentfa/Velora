@@ -69,3 +69,16 @@ async def test_no_banner_when_nothing_was_requested(user, box) -> None:
     await user.open("/")
     await box[-1].open("testbox|INBOX|3")
     await user.should_not_see("demande un accusé de réception")
+
+
+def test_a_subject_cannot_inject_headers_into_the_receipt() -> None:
+    msg = imap.build_receipt("moi@pro.fr", "laurent@perso.fr", "Devis\r\nBcc: espion@mal.fr", "<a@b>\r\nX-Evil: 1")
+    assert msg["Bcc"] is None and msg["X-Evil"] is None and "\n" not in msg["Subject"]
+
+
+def test_only_recent_mail_is_reread_for_a_receipt_request() -> None:
+    from datetime import datetime, timedelta, timezone
+    base = {"att_json": "[]", "body_html": "", "unsub": "", "auth": "{}", "bcc_addrs": "", "folder": "INBOX", "body": "x", "id": "a", "receipt_to": None}
+    new = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+    old = (datetime.now(timezone.utc) - timedelta(days=90)).isoformat()
+    assert sync.needs_details({**base, "date": new}) and not sync.needs_details({**base, "date": old})
