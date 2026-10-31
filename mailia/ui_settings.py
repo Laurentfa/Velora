@@ -320,6 +320,12 @@ def _tab_aff(f) -> None:
     ui.switch("Ajouter ma signature à mes messages et à mes réponses").bind_value(f, "SIG_ON")
     make_editor(f["SIG_HTML"], lambda e: f.__setitem__("SIG_HTML", e.value or ""), "110px")
     ui.label("Mise en forme libre (police, couleurs, liens, image de logo…). Elle est insérée dans l'éditeur, où vous pouvez la modifier.").classes("text-caption text-grey")
+    ui.label("Signature de Noël").classes("text-subtitle2 q-mt-md")
+    ui.switch("Utiliser automatiquement une signature de Noël en décembre", value=compose.christmas_auto(),
+              on_change=lambda e: db.kv_set("sig_xmas_auto", "1" if e.value else "0")).props("dense").mark("sig-xmas-auto")
+    ui.select({k: v[0] for k, v in compose.SIGNATURE_MODELS.items()}, value=compose.christmas_model(), label="Modèle utilisé en décembre",
+              on_change=lambda e: db.kv_set("sig_xmas_model", e.value)).props("outlined dense stack-label").classes("w-full").mark("sig-xmas-model")
+    ui.label("À la rédaction, le bouton « Modèle de signature » permet d'en choisir un autre, ou de revenir à la vôtre, message par message (réponses et transferts compris).").classes("text-caption text-grey")
 
 
 def _tab_dos(cfgs, dlg, on_folders) -> None:

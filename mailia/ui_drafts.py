@@ -73,6 +73,11 @@ class DraftsMixin:
                 self.dictation_widget("body")
                 ui.button("Image", icon="image", on_click=self.insert_image).props("flat dense no-caps size=sm").tooltip("Insérer une image dans le message")
                 ui.button("Ma signature", icon="draw", on_click=self.insert_signature).props("flat dense no-caps size=sm").tooltip("Insérer ma signature à l'endroit du curseur")
+                with ui.button("Modèle de signature", icon="celebration").props("flat dense no-caps size=sm").tooltip(
+                        "Choisir la signature de ce message : la vôtre, un modèle de Noël, ou aucune").mark("sig-model-tool"):
+                    with ui.menu():
+                        for key, label in (("", "Ma signature"), *((k, v[0]) for k, v in compose.SIGNATURE_MODELS.items()), (compose.NO_SIGNATURE, "Sans signature")):
+                            ui.menu_item(label, on_click=lambda _, k=key: self.choose_signature(k)).mark(f"sig-model-{key or 'mine'}")
                 with ui.button("Modèles", icon="description").props("flat dense no-caps size=sm"):
                     with ui.menu():
                         tpls = db.templates_list()
@@ -123,10 +128,20 @@ class DraftsMixin:
                 for lvl, label in ((1, "Normale"), (2, "Haute (!)"), (0, "Basse")):
                     ui.menu_item(("✓  " if level == lvl else "     ") + label, on_click=lambda _, v=lvl: self.set_importance(v)).mark(f"importance-{lvl}")
 
+    def choose_signature(self, model: str) -> None:
+        """Signature de ce message : la vôtre (""), un modèle, ou aucune. Remplace celle qui est en place sans toucher au texte ni à la citation."""
+        d = self.draft
+        d["sig_model"] = model
+        account = d.get("account") or (self.cur or {}).get("account", "")
+        new_html = compose.swap_signature(d["html"] or "", account, model)
+        if getattr(self, "editor", None) is not None:
+            d["html"] = new_html
+            self.editor.set_value(new_html)
+
     def account_changed(self, account: str) -> None:
         """Nouvelle boîte d'expédition : la signature suit (si elle a la sienne)."""
         d = self.draft
-        new_html = compose.swap_signature(d["html"] or "", account)
+        new_html = compose.swap_signature(d["html"] or "", account, d.get("sig_model"))
         if new_html != (d["html"] or "") and getattr(self, "editor", None) is not None:
             d["html"] = new_html
             self.editor.set_value(new_html)

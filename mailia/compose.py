@@ -23,26 +23,80 @@ def signature_html(account: str = "") -> str:
     return v if v and v.strip() else f"<p>{_html.escape(config.signature())}</p>"
 
 
-def sig_block(account: str = "") -> str:
-    if not signature_on():
+# Modèles de signature proposés à la rédaction (en plus de « Ma signature »). {{nom}} : votre nom (Paramètres › Affichage et signature).
+# Tableaux et styles en ligne seulement : c'est ce que lisent Outlook, Gmail et Apple Mail ; des émojis plutôt que des images, qui seraient bloquées.
+SIGNATURE_MODELS = {
+    "noel_classique": ("Noël classique",
+        '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-family:Arial,Helvetica,sans-serif"><tr>'
+        '<td style="border-top:3px solid #c62828;border-bottom:3px solid #2e7d32;padding:8px 16px">'
+        '<div style="font-size:18px;font-weight:bold;color:#c62828">🎄 Joyeux Noël ! 🎄</div>'
+        '<div style="font-size:14px;font-weight:bold;color:#222222;padding-top:2px">{{nom}}</div>'
+        '<div style="font-size:12px;color:#2e7d32;padding-top:2px">Que cette fin d\'année vous apporte joie et sérénité.</div></td></tr></table>'),
+    "noel_dore": ("Noël doré",
+        '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-family:Georgia,\'Times New Roman\',serif"><tr>'
+        '<td style="background-color:#14452f;border-left:4px solid #d4af37;padding:10px 18px">'
+        '<div style="font-size:17px;color:#f5d06f">✨ Joyeuses fêtes ✨</div>'
+        '<div style="font-size:14px;color:#ffffff;padding-top:3px">{{nom}}</div>'
+        '<div style="font-size:12px;color:#f5d06f;padding-top:3px">Tous mes vœux pour cette nouvelle année 🎁</div></td></tr></table>'),
+    "voeux_sobres": ("Vœux sobres",
+        '<table cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-family:Arial,Helvetica,sans-serif"><tr>'
+        '<td style="border-left:3px solid #c62828;padding:2px 12px">'
+        '<div style="font-size:14px;font-weight:bold;color:#222222">{{nom}}</div>'
+        '<div style="font-size:12px;color:#666666;padding-top:2px">❄ Bonnes fêtes de fin d\'année</div></td></tr></table>'),
+}
+NO_SIGNATURE = "none"
+
+
+def christmas_auto() -> bool:
+    """Signature de Noël posée d'office en décembre (réglable dans Paramètres › Affichage et signature)."""
+    return db.kv_get("sig_xmas_auto") != "0"
+
+
+def christmas_model() -> str:
+    m = db.kv_get("sig_xmas_model")
+    return m if m in SIGNATURE_MODELS else "noel_classique"
+
+
+def default_model() -> str | None:
+    """Modèle posé d'office : celui de Noël en décembre si le réglage est actif, sinon aucun (votre signature habituelle)."""
+    return christmas_model() if christmas_auto() and datetime.now().month == 12 else None
+
+
+def model_html(model: str) -> str:
+    return SIGNATURE_MODELS[model][1].replace("{{nom}}", _html.escape(config.signature() or ""))
+
+
+def sig_block(account: str = "", model: str | None = None) -> str:
+    """Signature à insérer. model : None = automatique (voir default_model), un identifiant de SIGNATURE_MODELS, ou NO_SIGNATURE ; "" = ma signature."""
+    explicit = model is not None
+    model = default_model() if model is None else model
+    if model == NO_SIGNATURE or (not explicit and not signature_on()):
         return ""
+    if model in SIGNATURE_MODELS:
+        return f'<div><br></div><div class="msig">{htmlmail.sanitize_outgoing(model_html(model))}</div>'
     # images incorporées dès l'insertion : l'éditeur (WebKit) n'affiche pas toujours celles d'un hébergeur distant, le message final les aura de toute façon
     body = embed_signature_images(htmlmail.sanitize_outgoing(signature_html(account)), account)
     return f'<div><br></div><div class="msig">{body}</div>'
 
 
-def swap_signature(html: str, account: str) -> str:
-    """Remplace la signature d'un message en cours d'écriture par celle d'une autre boîte (changement de « De »)."""
+def swap_signature(html: str, account: str, model: str | None = None) -> str:
+    """Remplace la signature d'un message en cours d'écriture par celle d'une autre boîte (changement de « De ») ou par un autre modèle.
+    Sans signature en place, la nouvelle est ajoutée avant le message cité (ou à la fin)."""
     marker = '<div class="msig">'
-    i = (html or "").find(marker)
+    html = html or ""
+    i = html.find(marker)
     if i < 0:
-        return html
+        if model is None:
+            return html
+        j = html.find("<hr")
+        j = len(html) if j < 0 else j
+        return html[:j] + sig_block(account, model) + html[j:]
     # la signature va de son <div class="msig"> jusqu'à la citation (<hr) ou la fin
     j = html.find("<hr", i)
     j = len(html) if j < 0 else j
     start = html.rfind("<div><br></div>", 0, i)
     start = start if start >= 0 and html[start:i].strip() == "<div><br></div>" else i
-    return html[:start] + sig_block(account) + html[j:]
+    return html[:start] + sig_block(account, model) + html[j:]
 
 
 def quote_html(m: dict, images: bool = False) -> str:
