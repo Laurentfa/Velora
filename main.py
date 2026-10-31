@@ -1561,10 +1561,12 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                     ui.button("Supprimer", on_click=lambda: dlg.submit(True)).props("unelevated no-caps color=negative")
             if not await dlg:
                 return
+        gone = self._draft_ids_of(targets) if kind in ("delete", "archive", "move") else set()
         try:
             await run.io_bound(sync.perform_many, targets, kind, dest)
         except Exception as e:
             return ui.notify(f"Action impossible : {e}", type="negative", multi_line=True)
+        self._close_if_open_draft(gone)
         what = "Conversation" if n > 1 else "Message"
         done = {"archive": f"{what} archivée" if n > 1 else "Message archivé",
                 "delete": f"{what} mise à la corbeille" if n > 1 else "Message mis à la corbeille",
@@ -1630,13 +1632,32 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
             return ui.notify(f"Action impossible : {err}", type="negative", multi_line=True)
         await self._after_swipe(m, removed=False)
 
+    def _draft_ids_of(self, msgs: list[dict]) -> set[str]:
+        """Identifiants des brouillons locaux qui correspondent à ces messages (ceux du dossier Brouillons)."""
+        ids = set()
+        for x in msgs:
+            known = db.draft_by_ref(x["account"], x["uid"])
+            if known:
+                ids.add(known["id"])
+        return ids
+
+    def _close_if_open_draft(self, gone: set[str]) -> None:
+        """Le brouillon ouvert dans l'éditeur vient d'être supprimé depuis la liste : l'éditeur et le message affiché avec lui se ferment."""
+        if gone and self.draft.get("id") in gone and (self.compose or self.new):
+            self.cur, self.thread = None, []
+            self.close_compose()
+            self.root.classes(remove="reading")
+            self.reader.refresh()
+
     async def swipe_act(self, m: dict, kind: str) -> None:
         th = self._conversation(m)
         nxt = self._neighbour(1) or self._neighbour(-1)
+        gone = self._draft_ids_of(th) if kind in ("delete", "archive") else set()
         try:
             await run.io_bound(sync.perform_many, th, kind, None)
         except Exception as err:
             return ui.notify(f"Action impossible : {err}", type="negative", multi_line=True)
+        self._close_if_open_draft(gone)
         what = "Conversation" if len(th) > 1 else "Message"
         ui.notify({"archive": f"{what} archivé{'e' if len(th) > 1 else ''}",
                    "delete": f"{what} mis{'e' if len(th) > 1 else ''} à la corbeille"}[kind], type="positive")

@@ -445,6 +445,13 @@ def _contacts_upkeep(changed: bool) -> None:
 
 
 # ---------- actions sur un message (répercutées sur le serveur) ----------
+def _forget_local_draft(account: str, uid: str, folder: str) -> None:
+    """Un brouillon du dossier Brouillons vient d'être supprimé ou déplacé : sa copie locale ne doit pas rester (l'éditeur la réenregistrerait et la recréerait sur le serveur)."""
+    known = db.draft_by_ref(account, uid)
+    if known and (known.get("server_folder") or folder) == folder:
+        db.draft_delete(known["id"], keep_server=True)
+
+
 def perform(m: dict, kind: str, dest: str | None = None) -> None:
     """kind : read | unread | delete | archive | move. Les mails supprimés vont à la corbeille du serveur."""
     key, folder, uid = m["account"], m["folder"], m["uid"]
@@ -455,6 +462,7 @@ def perform(m: dict, kind: str, dest: str | None = None) -> None:
     elif kind == "delete":
         p.delete(folder, uid)
         db.delete_by_id(m["id"])
+        _forget_local_draft(key, uid, folder)
     elif kind in ("archive", "move"):
         dest = archive_folder(key) if kind == "archive" else dest
         if not dest:
@@ -463,6 +471,7 @@ def perform(m: dict, kind: str, dest: str | None = None) -> None:
             raise RuntimeError("Le message est déjà dans ce dossier.")
         p.move(folder, uid, dest)
         db.delete_by_id(m["id"])  # il réapparaît tout seul s'il atterrit dans un dossier synchronisé
+        _forget_local_draft(key, uid, folder)
     else:
         raise ValueError(kind)
 
