@@ -45,6 +45,18 @@ def _tidy_mac_menus(cocoa) -> None:
                     if str(item.title()) not in keep and not item.isSeparatorItem() and not _keep_title(str(item.title())):
                         edit.removeItem_(item)
 
+            try:  # menu « Fichier » réduit à « Importer depuis l'iPhone ou l'iPad » : macOS y met lui-même les appareils proches (Continuité)
+                from AppKit import NSMenu, NSMenuItem, NSMenuItemImportFromDeviceIdentifier
+                imp = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Importer depuis l'iPhone ou l'iPad", None, "")
+                imp.setIdentifier_(NSMenuItemImportFromDeviceIdentifier)
+                file_menu = NSMenu.alloc().initWithTitle_("Fichier")
+                file_menu.addItem_(imp)
+                file_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Fichier", None, "")
+                file_item.setSubmenu_(file_menu)
+                main_menu.insertItem_atIndex_(file_item, 1)
+            except Exception:  # noqa: BLE001
+                logging.getLogger("mailia").warning("menu Fichier non ajouté", exc_info=True)
+            edit = main_menu.itemAtIndex_(2).submenu() if main_menu.numberOfItems() > 2 else edit
             if edit is not None:
                 from AppKit import NSMenuDidAddItemNotification, NSNotificationCenter
                 clean()
@@ -187,9 +199,10 @@ def show_continuity_menu() -> None:
     box = view.bounds().size
     from AppKit import NSMenuItem, NSMenuItemImportFromDeviceIdentifier
     menu = NSMenu.alloc().init()
-    menu.setAutoenablesItems_(True)
+    menu.setAutoenablesItems_(False)  # l'entrée n'a pas d'action propre : sinon macOS la grise d'office
     item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Importer depuis l'iPhone ou l'iPad", None, "")
     item.setIdentifier_(NSMenuItemImportFromDeviceIdentifier)  # entrée standard : le système la remplace par les appareils proches (photo, document numérisé…)
+    item.setEnabled_(True)
     menu.addItem_(item)
     db.kv_set("iphone_status", "menu ouvert")
     from AppKit import NSEvent

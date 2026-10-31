@@ -162,8 +162,8 @@ class ScanMixin:
                 if t_iph is not None:
                     with ui.tab_panel(t_iph).classes("q-pa-sm"):
                         ui.label("Sans Wi-Fi commun : l'iPhone proche du Mac (même identifiant Apple, Bluetooth et Wi-Fi activés) envoie la photo ou le document numérisé directement.").classes("rmeta")
-                        ui.label("Cliquez sur le bouton, puis choisissez l'iPhone dans le menu qui s'ouvre : « Numériser des documents » ou « Prendre une photo ». "
-                                 "Le résultat arrive ici, sans Wi-Fi commun.").classes("rmeta q-mt-sm")
+                        ui.label("Ouvrez le menu « Fichier » en haut de l'écran › « Importer depuis l'iPhone ou l'iPad », puis choisissez « Numériser des documents » "
+                                 "ou « Prendre une photo ». Le résultat arrive ici, sans Wi-Fi commun.").classes("rmeta q-mt-sm")
                         ui.button("Importer depuis l'iPhone…", icon="phone_iphone", on_click=lambda: db.kv_set("iphone_request", uuid.uuid4().hex)).props(
                             "unelevated no-caps color=primary").classes("q-mt-sm").mark("iphone-go")
 
