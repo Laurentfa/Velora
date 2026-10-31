@@ -58,7 +58,7 @@ Message.register("icon_index", _IconIndex)
 Message.register("flag_status", _FlagStatus)
 Message.register("followup_icon", _FollowupIcon)
 
-FIELDS = ["subject", "sender", "to_recipients", "cc_recipients", "datetime_received", "is_read", "body", "has_attachments", "attachments", "conversation_id", "flag_status", "last_verb", "importance",
+FIELDS = ["subject", "sender", "to_recipients", "cc_recipients", "datetime_received", "is_read", "body", "has_attachments", "attachments", "conversation_id", "flag_status", "last_verb", "importance", "is_read_receipt_requested",
           "start", "end", "location"]  # les trois derniers : invitations à une réunion
 EVENTS = ["NewMailEvent", "CreatedEvent", "DeletedEvent", "ModifiedEvent", "MovedEvent"]
 
@@ -69,6 +69,13 @@ def _html_escape(text: str) -> str:
 
 _IMPORTANCE = {"Low": 0, "Normal": 1, "High": 2}
 _IMPORTANCE_NAME = {0: "Low", 1: "Normal", 2: "High"}
+
+
+def _receipt_to(i) -> str:
+    """L'expéditeur demande un accusé de lecture : son adresse (Exchange ne donne pas l'adresse de l'en-tête de demande) ; sinon une chaîne vide."""
+    if not getattr(i, "is_read_receipt_requested", False):
+        return ""
+    return getattr(getattr(i, "sender", None), "email_address", "") or ""
 
 
 def _importance(i) -> int:
@@ -137,6 +144,7 @@ def _to_msg(i) -> Msg | None:
         verb={102: 1, 103: 1, 104: 2}.get(getattr(i, "last_verb", None) or 0, 0),
         meeting=_meeting(i),
         importance=_importance(i),
+        receipt_to=_receipt_to(i),
     )
 
 
@@ -527,7 +535,7 @@ class EwsProvider:
                 "text": text[:20000],
                 "unsub": unsub.parse(hdr.get("list-unsubscribe", ""), hdr.get("list-unsubscribe-post", ""), _html(i)),
                 "auth": authcheck.parse(multi),
-                "receipt_to": (getattr(getattr(i, "sender", None), "email_address", "") or "") if getattr(i, "is_read_receipt_requested", False) else ""}
+                "receipt_to": _receipt_to(i)}
 
     def send_receipt(self, m: dict) -> None:
         """Accusé de lecture simple (« Lu : … ») pour un message dont l'expéditeur l'a demandé ; envoyé seulement quand l'utilisateur le décide."""

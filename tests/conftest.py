@@ -34,9 +34,12 @@ def clean_db():
     yield
 
 
-def add_message(mid="testbox|INBOX|1", account="testbox", sender="alice@example.com", subject="Bonjour", body="texte", date="2026-10-01T10:00:00+00:00",
+def add_message(mid="testbox|INBOX|1", account="testbox", sender="alice@example.com", subject="Bonjour", body="texte", date=None,
                 **extra):
+    from datetime import datetime, timedelta, timezone
+
     from mailia import db
+    date = date or (datetime.now(timezone.utc) - timedelta(hours=2)).replace(microsecond=0).isoformat()  # toujours « récent » : aucun test ne dépend de la date du jour
     row = {"id": mid, "account": account, "uid": mid.split("|")[-1], "subject": subject, "sender": sender, "sender_name": sender.split("@")[0].title(),
            "to_addrs": "moi@example.org", "date": date, "body": body, "is_read": 0, "has_att": 0, "folder": "INBOX", "ckey": mid,
            "att_json": "[]", "body_html": "", "unsub": "", "bcc_addrs": "", "auth": "{}", "receipt_to": ""}

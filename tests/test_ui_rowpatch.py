@@ -1,6 +1,6 @@
 """Liste de gauche : seules les lignes modifiées sont reconstruites ; le menu clic droit n'est créé qu'au survol de la ligne."""
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from nicegui import events, ui
@@ -17,7 +17,8 @@ def mailbox(monkeypatch):
     ui.page("/")(main.index_page)  # NiceGUI repart de zéro à chaque test : on réenregistre la page principale
     db.kv_set("brief_day", datetime.now().strftime("%Y-%m-%d"))
     add_message(mid="testbox|INBOX|1", subject="Devis chaudière", body="Voici le devis demandé.", ckey="testbox|c1")
-    add_message(mid="testbox|INBOX|2", subject="Réunion jeudi", body="On se voit jeudi.", ckey="testbox|c2", date="2026-10-01T11:00:00+00:00")
+    add_message(mid="testbox|INBOX|2", subject="Réunion jeudi", body="On se voit jeudi.", ckey="testbox|c2",
+                date=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat())
 
 
 @pytest.fixture
@@ -58,7 +59,7 @@ async def test_structure_change_redraws_everything(user: User, mailbox, box) -> 
     await user.should_see("Devis chaudière")
     b = box[-1]
     first = row_of(user, "testbox|INBOX|1")
-    add_message(mid="testbox|INBOX|3", subject="Nouveau venu", body="Bonjour", ckey="testbox|c3", date="2026-10-02T09:00:00+00:00")
+    add_message(mid="testbox|INBOX|3", subject="Nouveau venu", body="Bonjour", ckey="testbox|c3", date=(datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat())
     await b.reload()
     await user.should_see("Nouveau venu")
     assert row_of(user, "testbox|INBOX|1") is not first  # un mail de plus : redessin complet

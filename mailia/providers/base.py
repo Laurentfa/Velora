@@ -21,6 +21,7 @@ class Msg:
     verb: int = 0  # 1 = on a répondu à ce message, 2 = on l'a transféré (marque posée par nous ou par Outlook)
     meeting: str = ""  # JSON d'une invitation / réponse / annulation de réunion (Exchange), sinon ""
     importance: int = 1  # importance fixée par l'expéditeur : 0 basse, 1 normale, 2 haute
+    receipt_to: str | None = None  # adresse à qui l'expéditeur demande un accusé de réception ("" : aucune demande ; None : inconnu, lu à l'ouverture)
 
 
 @dataclass

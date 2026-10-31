@@ -15,6 +15,10 @@ async def install(info: dict) -> None:
         ui.label("L'application va redémarrer toute seule.").classes("text-caption text-grey")
     dlg.open()
     try:
+        try:
+            await run.io_bound(db.backup_now)  # copie de la base avant de remplacer l'application : retour possible si la nouvelle version la gâtait
+        except Exception:  # noqa: BLE001 — une sauvegarde impossible ne doit pas empêcher la mise à jour
+            pass
         archive = await run.io_bound(updater.download, info)
         updater.install(archive, os.getpid())
     except Exception as e:

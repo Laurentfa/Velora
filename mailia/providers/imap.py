@@ -111,6 +111,7 @@ def _msg(m) -> Msg:
         flagged=MailMessageFlags.FLAGGED in m.flags,
         verb=2 if "$Forwarded" in m.flags else 1 if MailMessageFlags.ANSWERED in m.flags else 0,
         importance=importance_of(m.headers or {}),
+        receipt_to=receipt_address(m.headers or {}),
     )
 
 

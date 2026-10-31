@@ -337,10 +337,10 @@ def upsert(account: str, folder: str, m) -> bool:
                           (m.cc, att, m.to, mid))
             return False
         c.execute(
-            "INSERT INTO messages(id,account,uid,folder,subject,sender,sender_name,to_addrs,cc_addrs,att_json,date,body,is_read,has_att,conv_id,ckey,body_html,flagged,meeting,verb,importance)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO messages(id,account,uid,folder,subject,sender,sender_name,to_addrs,cc_addrs,att_json,date,body,is_read,has_att,conv_id,ckey,body_html,flagged,meeting,verb,importance,receipt_to)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (mid, account, m.uid, folder, m.subject, m.sender, m.sender_name, m.to, m.cc, att, m.date, m.body,
-             int(m.is_read), int(m.has_att), m.conv, f"{account}|{m.conv}" if m.conv else mid, m.html, int(m.flagged), m.meeting or None, int(m.verb or 0), int(m.importance)))
+             int(m.is_read), int(m.has_att), m.conv, f"{account}|{m.conv}" if m.conv else mid, m.html, int(m.flagged), m.meeting or None, int(m.verb or 0), int(m.importance), m.receipt_to))
         c.execute("INSERT INTO fts(id,subject,sender,body) VALUES(?,?,?,?)",
                   (mid, m.subject, f"{m.sender_name} {m.sender}", m.body))
         return True

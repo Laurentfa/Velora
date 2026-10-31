@@ -347,6 +347,7 @@
 "Cet ordinateur transcrit lentement : le texte n'apparaîtra qu'aux pauses. Le modèle « Rapide » (Paramètres › Dictée vocale) ira plus vite.": "This computer transcribes slowly: text will only appear at pauses. The \"Fast\" model (Settings › Voice dictation) will be quicker.",
 "Cet élément n'existe plus sur le serveur : rafraîchissez l'agenda.": "This item no longer exists on the server: refresh the calendar.",
 "Cette adresse est déjà configurée.": "This address is already configured.",
+"Cette adresse n'est pas celle de l'expéditeur : n'envoyez l'accusé que si vous connaissez cette personne.": "This address is not the sender's: only send the receipt if you know this person.",
 "Cette adresse n'est pas sur votre réseau local.": "This address is not on your local network.",
 "Cette aide": "This help",
 "Cette archive ZIP n'a pas pu être lue.": "This ZIP archive couldn't be read.",
