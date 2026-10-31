@@ -37,11 +37,12 @@ def _tidy_mac_menus(cocoa) -> None:
             keep = {fr.get(k, v) for k, v in (("cocoa.menu.cut", "Cut"), ("cocoa.menu.copy", "Copy"), ("cocoa.menu.paste", "Paste"),
                                               ("cocoa.menu.selectAll", "Select All"))}
             keep |= {"Cut", "Copy", "Paste", "Select All"}
+            _keep_title = lambda t: any(k in t for k in ("iPhone", "iPad"))  # « Importer depuis l'iPhone ou l'iPad » (Continuité) ajouté par le système
             edit = main_menu.itemAtIndex_(1).submenu() if main_menu.numberOfItems() > 1 else None
 
             def clean(*_args) -> None:  # le système ajoute lui-même des entrées au menu Édition (remplissage automatique…) : on ne garde que les quatre utiles
                 for item in list(edit.itemArray()):
-                    if str(item.title()) not in keep and not item.isSeparatorItem():
+                    if str(item.title()) not in keep and not item.isSeparatorItem() and not _keep_title(str(item.title())):
                         edit.removeItem_(item)
 
             if edit is not None:
@@ -52,6 +53,111 @@ def _tidy_mac_menus(cocoa) -> None:
         AppHelper.callAfter(rebuild)
     except Exception:
         logging.getLogger("mailia").warning("barre de menus non simplifiée", exc_info=True)
+
+
+def pages_from_pasteboard(pboard) -> list[bytes]:
+    """Images reçues de l'iPhone par Continuité (PDF numérisé, PNG ou TIFF d'une photo) : une image PNG par page."""
+    from AppKit import NSBitmapImageRep, NSImage, NSPasteboardTypePDF, NSPasteboardTypePNG, NSPasteboardTypeTIFF
+    from Foundation import NSMakeSize
+    from Quartz import PDFDocument, kPDFDisplayBoxMediaBox
+
+    def png(img) -> bytes | None:
+        rep = NSBitmapImageRep.imageRepWithData_(img.TIFFRepresentation())
+        data = rep.representationUsingType_properties_(4, None) if rep else None  # 4 : NSBitmapImageFileTypePNG
+        return bytes(data) if data else None
+
+    out: list[bytes] = []
+    pdf = pboard.dataForType_(NSPasteboardTypePDF)
+    if pdf is not None:
+        doc = PDFDocument.alloc().initWithData_(pdf)
+        for i in range(doc.pageCount() if doc else 0):
+            page = doc.pageAtIndex_(i)
+            box = page.boundsForBox_(kPDFDisplayBoxMediaBox)
+            k = 2000 / max(box.size.width, box.size.height, 1)  # ~2000 px sur le grand côté : lisible, sans excès
+            img = page.thumbnailOfSize_forBox_(NSMakeSize(box.size.width * k, box.size.height * k), kPDFDisplayBoxMediaBox)
+            data = png(img) if img else None
+            if data:
+                out.append(data)
+        return out
+    for t in (NSPasteboardTypePNG, NSPasteboardTypeTIFF):
+        d = pboard.dataForType_(t)
+        if d is not None:
+            img = NSImage.alloc().initWithData_(d)
+            data = png(img) if img else None
+            if data:
+                return [data]
+    return out
+
+
+def inbox_push(files: list[str]) -> None:
+    """Fenêtre native -> programme principal : fichiers reçus de l'iPhone, à ajouter aux pages du scan (kv « iphone_inbox »)."""
+    with db.conn() as c:
+        row = c.execute("SELECT v FROM kv WHERE k='iphone_inbox'").fetchone()
+        try:
+            cur = json.loads(row["v"]) if row else []
+        except ValueError:
+            cur = []
+    db.kv_set("iphone_inbox", json.dumps(cur + files))
+
+
+def inbox_take() -> list[bytes]:
+    """Programme principal : récupère (et vide) les images reçues de l'iPhone."""
+    with db.conn() as c:
+        row = c.execute("SELECT v FROM kv WHERE k='iphone_inbox'").fetchone()
+    try:
+        names = json.loads(row["v"]) if row and row["v"] else []
+    except ValueError:
+        names = []
+    if not names:
+        return []
+    db.kv_set("iphone_inbox", "[]")
+    out = []
+    for n in names:
+        p = Path(n)
+        if p.is_file() and p.parent == _inbox_dir():
+            out.append(p.read_bytes())
+            p.unlink(missing_ok=True)
+    return out
+
+
+def _inbox_dir() -> Path:
+    from . import config
+    d = config.DATA_DIR / "iphone"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def enable_continuity(cocoa) -> None:
+    """macOS : la vue de la fenêtre se déclare capable de recevoir une image (PDF, PNG, TIFF) : le système propose alors « Importer depuis l'iPhone
+    ou l'iPad » (menus et clic droit). Ce qui arrive est déposé pour le programme principal (voir inbox_take)."""
+    import objc
+    from AppKit import NSPasteboardTypePDF, NSPasteboardTypePNG, NSPasteboardTypeTIFF
+    host = cocoa.BrowserView.WebKitHost
+    wanted = {str(NSPasteboardTypePDF), str(NSPasteboardTypePNG), str(NSPasteboardTypeTIFF)}
+    original = host.validRequestorForSendType_returnType_
+
+    def valid(self, send_type, return_type):
+        if send_type is None and return_type is not None and str(return_type) in wanted:
+            return self
+        return original(self, send_type, return_type)
+
+    def read(self, pboard):
+        try:
+            import time
+            files = []
+            for n, png in enumerate(pages_from_pasteboard(pboard)):
+                f = _inbox_dir() / f"{int(time.time() * 1000)}-{n}.png"
+                f.write_bytes(png)
+                files.append(str(f))
+            if files:
+                inbox_push(files)
+            return bool(files)
+        except Exception:  # noqa: BLE001
+            logging.getLogger("mailia").exception("image reçue de l'iPhone")
+            return False
+
+    host.validRequestorForSendType_returnType_ = objc.selector(valid, selector=b"validRequestorForSendType:returnType:", signature=b"@@:@@")
+    host.readSelectionFromPasteboard_ = objc.selector(read, selector=b"readSelectionFromPasteboard:", signature=b"Z@:@")
 
 
 def apply_zoom(factor: float) -> None:
@@ -203,3 +309,8 @@ def setup() -> None:
         _tidy_mac_menus(cocoa)
     except Exception:
         logging.getLogger("mailia").exception("menu clic droit")
+    try:
+        from webview.platforms import cocoa as _cocoa
+        enable_continuity(_cocoa)
+    except Exception:  # noqa: BLE001
+        logging.getLogger("mailia").warning("Continuité (importer depuis l'iPhone) non activée", exc_info=True)

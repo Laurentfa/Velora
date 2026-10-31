@@ -30,6 +30,7 @@ IPHONE_JS = """window.__velIph = async (root, emit, ev) => {
 class ScanMixin:
     async def scan_dialog(self) -> None:
         """Numérise (scanner réseau ou téléphone), assemble les pages en un PDF et le joint au message."""
+        iph_timer: list = []  # minuteur de réception depuis l'iPhone (arrêté à la fermeture de la fenêtre)
         pages: list[dict] = []  # {"raw": JPEG, "thumb": data URI, "enh": bool}
         st = {"server": None, "seen": 0, "base": ""}
         o = {"mode": "color", "dpi": 200, "name": f"Scan {datetime.now():%Y-%m-%d %H.%M}", "source": "auto", "addr": "", "found": ""}
@@ -179,12 +180,19 @@ class ScanMixin:
                 if t_iph is not None:
                     with ui.tab_panel(t_iph).classes("q-pa-sm"):
                         ui.label("Sans Wi-Fi commun : l'iPhone proche du Mac (même identifiant Apple, Bluetooth et Wi-Fi activés) envoie la photo ou le document numérisé directement.").classes("rmeta")
-                        ui.label("Faites un clic droit dans le cadre ci-dessous, puis « Importer depuis l'iPhone ou l'iPad » › « Numériser des documents » (ou « Prendre une photo »).").classes("rmeta q-mt-sm")
+                        ui.label("Faites un clic droit dans le cadre ci-dessous (ou ouvrez le menu Édition), puis « Importer depuis l'iPhone ou l'iPad » › « Numériser des documents » (ou « Prendre une photo »).").classes("rmeta q-mt-sm")
                         zone = ui.element("div").props('contenteditable=true data-ph="Clic droit ici"').classes("w-full q-mt-sm").style(
                             "min-height:130px;border:2px dashed var(--accent);border-radius:12px;padding:12px;display:flex;align-items:center;justify-content:center;color:var(--muted)").mark("iphone-zone")
                         zone.on("paste", on_iphone, js_handler="(ev) => window.__velIph(ev.currentTarget, emit, ev)")
                         zone.on("input", on_iphone, js_handler="(ev) => window.__velIph(ev.currentTarget, emit, null)")
                         ui.run_javascript(IPHONE_JS)
+
+                        async def poll_iphone() -> None:  # images reçues par la fenêtre native (menu système de Continuité)
+                            from mailia import native_menu
+                            for raw in await run.io_bound(native_menu.inbox_take):
+                                await on_iphone(type("E", (), {"args": {"b64": base64.b64encode(raw).decode(), "type": "image/png"}})())
+
+                        iph_timer.append(ui.timer(1.0, poll_iphone))
             ui.separator()
 
             @ui.refreshable
@@ -240,4 +248,5 @@ class ScanMixin:
                 ui.button("Annuler", on_click=dlg.close).props("flat no-caps")
                 add_btn = ui.button("Ajouter au message", icon="attach_file", on_click=attach).props("unelevated no-caps color=primary")
         dlg.on("hide", stop_server)
+        dlg.on("hide", lambda: [t.cancel() for t in iph_timer])
         dlg.open()
