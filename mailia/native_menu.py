@@ -122,16 +122,21 @@ def _inbox_dir() -> Path:
     return d
 
 
+_seen: list[str] = []  # appels reçus par la vue (diagnostic de Continuité)
+
+
 def enable_continuity(cocoa) -> None:
     """macOS : la vue de la fenêtre se déclare capable de recevoir une image (PDF, PNG, TIFF) : le système propose alors « Importer depuis l'iPhone
     ou l'iPad » (menus et clic droit). Ce qui arrive est déposé pour le programme principal (voir inbox_take)."""
     import objc
     from AppKit import NSImage
     host = cocoa.BrowserView.WebKitHost
-    wanted = {str(t) for t in NSImage.imageTypes()}  # PDF, PNG, JPEG, TIFF, HEIC… : ce que l'iPhone peut renvoyer
+    # PDF, PNG, JPEG, TIFF, HEIC… ce que l'iPhone peut renvoyer ; le système interroge aussi avec les anciens noms (« Apple PDF pasteboard type »…)
+    wanted = {str(t) for t in NSImage.imageTypes()} | {"Apple PDF pasteboard type", "Apple PNG pasteboard type", "NeXT TIFF v4.0 pasteboard type", "com.adobe.pdf", "public.png", "public.jpeg", "public.tiff"}
     original = host.validRequestorForSendType_returnType_
 
     def valid(self, send_type, return_type):
+        _seen.append(f"{send_type}|{return_type}")
         if send_type is None and return_type is not None and str(return_type) in wanted:
             return self
         return original(self, send_type, return_type)
@@ -153,6 +158,20 @@ def enable_continuity(cocoa) -> None:
 
     host.validRequestorForSendType_returnType_ = objc.selector(valid, selector=b"validRequestorForSendType:returnType:", signature=b"@@:@@")
     host.readSelectionFromPasteboard_ = objc.selector(read, selector=b"readSelectionFromPasteboard:", signature=b"Z@:@")
+    try:  # le système n'accepte comme destinataire qu'une classe qui se déclare conforme à NSServicesMenuRequestor
+        import ctypes
+        lib = ctypes.CDLL("/usr/lib/libobjc.A.dylib")
+        lib.class_addProtocol.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
+        lib.class_addProtocol.restype = ctypes.c_bool
+        lib.objc_getClass.argtypes = [ctypes.c_char_p]
+        lib.objc_getClass.restype = ctypes.c_void_p
+        lib.objc_getProtocol.argtypes = [ctypes.c_char_p]
+        lib.objc_getProtocol.restype = ctypes.c_void_p
+        proto = lib.objc_getProtocol(b"NSServicesMenuRequestor")
+        if not proto or not lib.class_addProtocol(lib.objc_getClass(host.__name__.encode()), proto):
+            logging.getLogger("mailia").warning("Continuité : protocole non déclaré")
+    except Exception:  # noqa: BLE001
+        logging.getLogger("mailia").warning("Continuité : protocole non déclaré", exc_info=True)
 
 
 def show_continuity_menu() -> None:
@@ -166,7 +185,19 @@ def show_continuity_menu() -> None:
     window.makeKeyAndOrderFront_(None)
     window.makeFirstResponder_(view)  # sinon le système grise les entrées
     box = view.bounds().size
-    NSMenu.alloc().init().popUpMenuPositioningItem_atLocation_inView_(None, NSMakePoint(box.width / 2, box.height / 2), view)
+    from AppKit import NSMenuItem, NSMenuItemImportFromDeviceIdentifier
+    menu = NSMenu.alloc().init()
+    menu.setAutoenablesItems_(True)
+    item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("Importer depuis l'iPhone ou l'iPad", None, "")
+    item.setIdentifier_(NSMenuItemImportFromDeviceIdentifier)  # entrée standard : le système la remplace par les appareils proches (photo, document numérisé…)
+    menu.addItem_(item)
+    db.kv_set("iphone_status", "menu ouvert")
+    from AppKit import NSEvent
+    event = NSEvent.mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure_(
+        1, NSMakePoint(box.width / 2, box.height / 2), 0, 0, window.windowNumber(), None, 0, 1, 1.0)  # NSEventTypeLeftMouseDown : le menu naît d'un clic, comme pour un vrai menu contextuel
+    NSMenu.popUpContextMenu_withEvent_forView_(menu, event, view)
+    db.kv_set("iphone_status", f"menu fermé ({menu.numberOfItems()} entrées) ; vue interrogée {len(_seen)} fois : {sorted(set(_seen))[:6]}")
+    _seen.clear()
 
 
 def watch_iphone(stop: threading.Event | None = None, every: float = 0.3, call_on_main=None) -> None:
