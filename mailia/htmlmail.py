@@ -70,6 +70,38 @@ def sanitize(raw: str, limit: int = MAX_HTML) -> str:
     )
 
 
+_IMG = re.compile(r"<img\b[^>]*>", re.I)
+_SRC = re.compile(r"""\bsrc\s*=\s*["']?\s*(https?://[^"'\s>]+)""", re.I)
+_SIZE = re.compile(r"""\b(width|height)\s*=\s*["']?\s*(\d+)\s*(?:px)?\b""", re.I)
+_TINY_STYLE = re.compile(r"(?:width|height)\s*:\s*[01](?:px)?\s*(?:;|\"|'|$)", re.I)
+# adresses de suivi d'ouverture connues (envoi en masse, relance commerciale) ; prudence : seulement des motifs sans ambiguïté
+_TRACKER_URL = re.compile(
+    r"list-manage\.com/track/open|/track/open|mandrillapp\.com/track|sendgrid\.net/wf/open|/e2t/o/|mailtrack\.io|pstmrk\.it|/open\.(?:gif|php|png)\b"
+    r"|[?&/]open\.gif|/wf/open|/e/o/|tracking[./-]pixel|/pixel\.(?:gif|png)\b|beacon\.(?:gif|png)|\bopen[-_]?track", re.I)
+
+
+def strip_trackers(clean: str) -> tuple[str, list[dict]]:
+    """Retire les pixels espions d'un mail nettoyé : images distantes de 1 pixel (ou moins de 3) ou dont l'adresse est un suivi d'ouverture connu.
+    Retourne (html sans eux, [{"host": site qui reçoit le signal, "kind": "pixel" | "adresse de suivi"}])."""
+    found: list[dict] = []
+
+    def repl(m: re.Match) -> str:
+        tag = m.group(0)
+        src = _SRC.search(tag)
+        if not src:
+            return tag  # image incorporée (cid:, data:) : jamais un pisteur
+        sizes = {k.lower(): int(v) for k, v in _SIZE.findall(tag)}
+        tiny = (sizes.get("width") is not None and sizes["width"] <= 2) or (sizes.get("height") is not None and sizes["height"] <= 2) or bool(_TINY_STYLE.search(tag))
+        by_url = bool(_TRACKER_URL.search(src.group(1)))
+        if not (tiny or by_url):
+            return tag
+        host = re.sub(r"^https?://([^/:?#]+).*$", r"\1", src.group(1), flags=re.I)
+        found.append({"host": host, "kind": "pixel" if tiny else "adresse de suivi"})
+        return ""
+
+    return _IMG.sub(repl, clean), found
+
+
 def has_remote_images(clean: str) -> bool:
     return bool(_REMOTE.search(clean))
 

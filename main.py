@@ -885,11 +885,17 @@ class Mailbox(BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, Outbo
                 ui.button("Afficher la mise en forme", icon="auto_awesome_mosaic",
                           on_click=lambda _, i=x["id"]: self.toggle_plain(i)).props("flat dense no-caps size=sm")
             return
-        clean = htmlmail.sanitize(html)
+        clean, trackers = htmlmail.strip_trackers(htmlmail.sanitize(html))  # les pixels espions sont retirés, que les images soient affichées ou non
         sender = (x.get("sender") or "").strip().lower()
         trusted = bool(sender) and sender in self.trusted_senders()
         allow = x["id"] in self.images or trusted
         with ui.column().classes("w-full gap-1"):
+            if trackers:
+                hosts = ", ".join(dict.fromkeys(t["host"] for t in trackers))
+                with ui.row().classes("mailnote items-center gap-2"):
+                    ui.icon("visibility_off", size="18px")
+                    ui.label(f"Pisteur d'ouverture masqué : {hosts}" if len(trackers) == 1 else f"{len(trackers)} pisteurs d'ouverture masqués : {hosts}").classes("col").tooltip(
+                        "L'expéditeur glisse une image invisible dans ses mails pour savoir si, quand et d'où vous les ouvrez. Elle a été retirée : il n'en est pas informé.").mark("tracker-note")
             if htmlmail.has_remote_images(clean) and not allow:
                 with ui.row().classes("mailnote items-center gap-2"):
                     ui.icon("image_not_supported", size="18px")
