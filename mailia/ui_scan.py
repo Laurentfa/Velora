@@ -2,29 +2,14 @@
 import base64
 import re
 import sys
+import uuid
 from datetime import datetime
 
 from nicegui import run, ui
 
-from mailia import scan
+from mailia import db, scan
 
 from mailia.ui_common import human_size, log
-
-
-# Continuité (macOS) : un clic droit dans une zone modifiable propose « Importer depuis l'iPhone » ; l'image arrive dans la zone, on la récupère puis on la vide.
-IPHONE_JS = """window.__velIph = async (root, emit, ev) => {
-  const send = async (blob) => {
-    const u = new Uint8Array(await blob.arrayBuffer()); let s = '';
-    for (let i = 0; i < u.length; i += 32768) s += String.fromCharCode.apply(null, u.subarray(i, i + 32768));
-    emit({b64: btoa(s), type: blob.type});
-  };
-  const files = ev && ev.clipboardData ? [...ev.clipboardData.files] : [];
-  if (files.length) { ev.preventDefault(); for (const f of files) await send(f); return; }
-  for (const im of [...root.querySelectorAll('img')]) {
-    try { await send(await (await fetch(im.src)).blob()); } catch (e) { emit({error: String(e)}); }
-    im.remove();
-  }
-};"""
 
 
 class ScanMixin:
@@ -45,16 +30,13 @@ class ScanMixin:
                 pages.append({"raw": raw, "thumb": "data:image/jpeg;base64," + base64.b64encode(th).decode(), "enh": enhance})
             pages_view.refresh()
 
-        async def on_iphone(e) -> None:
+        async def on_iphone(raw: bytes) -> None:
             """Image reçue de l'iPhone (Continuité) : convertie en JPEG puis ajoutée aux pages."""
-            a = e.args if isinstance(e.args, dict) else {}
-            if a.get("error") or not a.get("b64"):
-                return ui.notify("Image de l'iPhone non reçue.", type="warning")
             try:
-                raw = await run.io_bound(scan.to_jpeg, base64.b64decode(a["b64"]))
+                jpeg = await run.io_bound(scan.to_jpeg, raw)
             except Exception:  # noqa: BLE001
-                return ui.notify("Ce format n'est pas pris en charge : choisissez « Prendre une photo » ou « Numériser des documents ».", type="warning")
-            await add_pages([raw], False)
+                return ui.notify("Cette image n'est pas lisible.", type="warning")
+            await add_pages([jpeg], False)
 
         def stop_server() -> None:
             if st["server"]:
@@ -180,17 +162,15 @@ class ScanMixin:
                 if t_iph is not None:
                     with ui.tab_panel(t_iph).classes("q-pa-sm"):
                         ui.label("Sans Wi-Fi commun : l'iPhone proche du Mac (même identifiant Apple, Bluetooth et Wi-Fi activés) envoie la photo ou le document numérisé directement.").classes("rmeta")
-                        ui.label("Faites un clic droit dans le cadre ci-dessous (ou ouvrez le menu Édition), puis « Importer depuis l'iPhone ou l'iPad » › « Numériser des documents » (ou « Prendre une photo »).").classes("rmeta q-mt-sm")
-                        zone = ui.element("div").props('contenteditable=true data-ph="Clic droit ici"').classes("w-full q-mt-sm").style(
-                            "min-height:130px;border:2px dashed var(--accent);border-radius:12px;padding:12px;display:flex;align-items:center;justify-content:center;color:var(--muted)").mark("iphone-zone")
-                        zone.on("paste", on_iphone, js_handler="(ev) => window.__velIph(ev.currentTarget, emit, ev)")
-                        zone.on("input", on_iphone, js_handler="(ev) => window.__velIph(ev.currentTarget, emit, null)")
-                        ui.run_javascript(IPHONE_JS)
+                        ui.label("Cliquez sur le bouton, puis choisissez l'iPhone dans le menu qui s'ouvre : « Numériser des documents » ou « Prendre une photo ». "
+                                 "Le résultat arrive ici, sans Wi-Fi commun.").classes("rmeta q-mt-sm")
+                        ui.button("Importer depuis l'iPhone…", icon="phone_iphone", on_click=lambda: db.kv_set("iphone_request", uuid.uuid4().hex)).props(
+                            "unelevated no-caps color=primary").classes("q-mt-sm").mark("iphone-go")
 
                         async def poll_iphone() -> None:  # images reçues par la fenêtre native (menu système de Continuité)
                             from mailia import native_menu
                             for raw in await run.io_bound(native_menu.inbox_take):
-                                await on_iphone(type("E", (), {"args": {"b64": base64.b64encode(raw).decode(), "type": "image/png"}})())
+                                await on_iphone(raw)
 
                         iph_timer.append(ui.timer(1.0, poll_iphone))
             ui.separator()

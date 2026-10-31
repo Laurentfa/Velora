@@ -57,7 +57,7 @@ def _tidy_mac_menus(cocoa) -> None:
 
 def pages_from_pasteboard(pboard) -> list[bytes]:
     """Images reçues de l'iPhone par Continuité (PDF numérisé, PNG ou TIFF d'une photo) : une image PNG par page."""
-    from AppKit import NSBitmapImageRep, NSImage, NSPasteboardTypePDF, NSPasteboardTypePNG, NSPasteboardTypeTIFF
+    from AppKit import NSBitmapImageRep, NSImage, NSPasteboardTypePDF
     from Foundation import NSMakeSize
     from Quartz import PDFDocument, kPDFDisplayBoxMediaBox
 
@@ -79,14 +79,9 @@ def pages_from_pasteboard(pboard) -> list[bytes]:
             if data:
                 out.append(data)
         return out
-    for t in (NSPasteboardTypePNG, NSPasteboardTypeTIFF):
-        d = pboard.dataForType_(t)
-        if d is not None:
-            img = NSImage.alloc().initWithData_(d)
-            data = png(img) if img else None
-            if data:
-                return [data]
-    return out
+    img = NSImage.alloc().initWithPasteboard_(pboard)  # photo (JPEG, HEIC, PNG, TIFF…) : le système sait la lire
+    data = png(img) if img else None
+    return [data] if data else out
 
 
 def inbox_push(files: list[str]) -> None:
@@ -131,9 +126,9 @@ def enable_continuity(cocoa) -> None:
     """macOS : la vue de la fenêtre se déclare capable de recevoir une image (PDF, PNG, TIFF) : le système propose alors « Importer depuis l'iPhone
     ou l'iPad » (menus et clic droit). Ce qui arrive est déposé pour le programme principal (voir inbox_take)."""
     import objc
-    from AppKit import NSPasteboardTypePDF, NSPasteboardTypePNG, NSPasteboardTypeTIFF
+    from AppKit import NSImage
     host = cocoa.BrowserView.WebKitHost
-    wanted = {str(NSPasteboardTypePDF), str(NSPasteboardTypePNG), str(NSPasteboardTypeTIFF)}
+    wanted = {str(t) for t in NSImage.imageTypes()}  # PDF, PNG, JPEG, TIFF, HEIC… : ce que l'iPhone peut renvoyer
     original = host.validRequestorForSendType_returnType_
 
     def valid(self, send_type, return_type):
@@ -158,6 +153,42 @@ def enable_continuity(cocoa) -> None:
 
     host.validRequestorForSendType_returnType_ = objc.selector(valid, selector=b"validRequestorForSendType:returnType:", signature=b"@@:@@")
     host.readSelectionFromPasteboard_ = objc.selector(read, selector=b"readSelectionFromPasteboard:", signature=b"Z@:@")
+
+
+def show_continuity_menu() -> None:
+    """Fil principal de la fenêtre : fait apparaître le menu « Importer depuis l'iPhone ou l'iPad » que le système remplit lui-même (menu vide,
+    la vue de la fenêtre étant la destination de l'image : voir enable_continuity). Reste affiché jusqu'au choix de l'utilisateur."""
+    from AppKit import NSMenu
+    from Foundation import NSMakePoint
+    from webview.platforms import cocoa
+    view = next(iter(cocoa.BrowserView.instances.values())).webview
+    window = view.window()
+    window.makeKeyAndOrderFront_(None)
+    window.makeFirstResponder_(view)  # sinon le système grise les entrées
+    box = view.bounds().size
+    NSMenu.alloc().init().popUpMenuPositioningItem_atLocation_inView_(None, NSMakePoint(box.width / 2, box.height / 2), view)
+
+
+def watch_iphone(stop: threading.Event | None = None, every: float = 0.3, call_on_main=None) -> None:
+    """Le programme principal demande le menu de l'iPhone en écrivant « iphone_request » ; on l'ouvre ici (fenêtre native)."""
+    def current() -> str:
+        with db.conn() as c:
+            row = c.execute("SELECT v FROM kv WHERE k='iphone_request'").fetchone()
+        return row["v"] if row else ""
+
+    if call_on_main is None:
+        from PyObjCTools import AppHelper
+        call_on_main = AppHelper.callAfter
+    done = current()  # une demande restée d'un lancement précédent ne doit pas être rejouée
+    while not (stop and stop.is_set()):
+        try:
+            req = current()
+            if req and req != done:
+                done = req
+                call_on_main(show_continuity_menu)
+        except Exception as e:  # noqa: BLE001
+            log.warning("menu de l'iPhone : %s", e)
+        time.sleep(every)
 
 
 def apply_zoom(factor: float) -> None:
@@ -288,6 +319,7 @@ def setup() -> None:
     threading.Thread(target=watch_zoom, daemon=True, name="zoom").start()
     if sys.platform == "darwin":
         threading.Thread(target=watch_print, daemon=True, name="impression").start()
+        threading.Thread(target=watch_iphone, daemon=True, name="iphone").start()
     if sys.platform != "darwin":
         return
     try:
