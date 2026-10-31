@@ -162,6 +162,8 @@ def check(sender: str, name: str = "", subject: str = "", html: str = "", body: 
     `trusted` : correspondant connu, on ne se méfie pas d'un nom de marque cité dans l'objet.
     `auth` : résultats SPF/DKIM/DMARC et « Répondre à » (voir authcheck) ; `attachments` : [{'name': …}] ; `bulk` : message de liste de diffusion."""
     dom = _domain_of(sender)
+    if re.fullmatch(r"microsoftexchange[0-9a-f]{32}@.+", (sender or "").lower()) and (auth or {}).get("authas") != "anonymous":
+        return {"level": "", "score": 0, "reasons": []}  # compte système d'Exchange (notifications d'échec, boîte pleine…), « Microsoft Outlook » : pas une usurpation de marque
     reasons: list[tuple[int, str]] = []
     name_l, subj_l = (name or "").lower(), (subject or "").lower()
 

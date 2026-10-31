@@ -26,6 +26,7 @@ html,body{overflow:hidden;background:var(--bg);color:var(--text)}
 /* boutons : coins arrondis, relief léger, survol et appui vivants (la barre d'outils de l'éditeur garde son aspect) */
 .q-btn:not(.q-btn--round):not(.q-editor .q-btn){border-radius:11px;transition:box-shadow .18s,transform .12s,background-color .18s,filter .18s;letter-spacing:.01em}
 .q-btn.q-btn--dense:not(.q-btn--round):not(.q-editor .q-btn){border-radius:9px}
+.q-notification.bg-positive{background:var(--accent)!important}
 .q-btn--unelevated.bg-primary,.q-btn--unelevated.bg-negative,.q-btn--unelevated.bg-positive{
  box-shadow:0 1px 2px rgba(10,50,120,.28),0 4px 10px -4px rgba(10,90,220,.45),inset 0 1px 0 rgba(255,255,255,.22);font-weight:600}
 .q-btn--unelevated.bg-primary{background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 84%,#fff),var(--accent))!important;color:#fff!important}
