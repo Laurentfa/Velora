@@ -363,9 +363,9 @@ SWIPE_JS = """<script>
       const fam = (cs.fontFamily || '').split(',')[0].replace(/["']/g, '').trim().toLowerCase();
       want = items.find(i => label(i) === fam) || items.find(isDef);
     } else if (items.some(i => /^[0-9,]+ pt/.test(label(i)))) {
-      const pt = Math.round(parseFloat(cs.fontSize) * 0.75 * 2) / 2;
-      const txt = String(pt).replace('.', ',');
-      want = items.find(i => label(i).replace(' (normal)', '').replace(/ pt$/, '') === txt);
+      const pt = parseFloat(cs.fontSize) * 0.75;  // taille réelle du texte (ex. 9,6 pt pour <small>) : la liste n'a pas toutes les valeurs, on met en évidence la plus proche
+      const size = i => parseFloat(label(i).replace(' (normal)', '').replace(/ pt$/, '').replace(',', '.'));
+      want = items.filter(i => !isNaN(size(i))).sort((a, b) => Math.abs(size(a) - pt) - Math.abs(size(b) - pt))[0];
     }
     if (want) { want.classList.add('q-item--active'); want.style.fontWeight = '700'; want.style.background = 'rgba(10,102,232,.10)'; }
   };
@@ -1023,11 +1023,16 @@ SWIPE_JS = """<script>
       cell = c; tbl = c.closest('table');
       bar.style.display = 'flex'; syncBar(); place();
     };
-    const onPoint = e => {
+    const shown = () => bar && bar.style.display !== 'none';
+    const onPoint = e => {  // un simple clic dans un tableau n'ouvre pas la barre (les signatures sont des tableaux) : elle suit seulement le clic si elle est déjà ouverte
       if (drag) return;
       const c = e.target.closest && e.target.closest('td,th');
-      if (c && c.closest(ED)) show(c);
+      if (c && c.closest(ED) && shown()) show(c);
     };
+    document.addEventListener('dblclick', e => {  // double-clic dans une cellule : ouvre la barre du tableau
+      const c = e.target.closest && e.target.closest('td,th');
+      if (c && c.closest(ED)) show(c);
+    });
     document.addEventListener('click', e => {
       if (e.target.closest && (e.target.closest('.tblbar') || e.target.closest(ED))) { onPoint(e); if (!(e.target.closest('td,th') && e.target.closest(ED)) && !e.target.closest('.tblbar')) hide(); return; }
       hide();
@@ -1036,7 +1041,7 @@ SWIPE_JS = """<script>
       const s = getSelection(); if (!s || !s.anchorNode) return;
       const n = s.anchorNode.nodeType === 1 ? s.anchorNode : s.anchorNode.parentElement;
       const c = n && n.closest && n.closest('td,th');
-      if (c && c.closest(ED)) show(c); else if (bar && bar.style.display !== 'none' && n && !n.closest('.tblbar')) hide();
+      if (c && c.closest(ED)) { if (shown()) show(c); } else if (shown() && n && !n.closest('.tblbar')) hide();
     });
     window.addEventListener('scroll', place, true);
     window.addEventListener('resize', place);
