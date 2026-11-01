@@ -106,7 +106,7 @@ def open_account(host, key: str | None = None) -> None:
                "html": (db.kv_get(f"signature_html:{key}") if key else "") or compose.signature_html()}
         if key:
             ui.switch("Signature différente pour cette boîte").bind_value(sig, "custom")
-            sig_ed = make_editor(sig["html"], lambda e: sig.__setitem__("html", e.value or ""), "110px")
+            sig_ed = make_editor(sig["html"], lambda e: sig.__setitem__("html", e.value or ""), "110px", source=True)
             sig_ed.bind_visibility_from(sig, "custom")
             ui.label("Sinon, la signature générale (Paramètres › Affichage et signature) est utilisée.").classes("text-caption text-grey")
         result = ui.label().classes("text-body2").style("white-space:pre-wrap")

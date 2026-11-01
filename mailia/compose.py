@@ -114,7 +114,7 @@ def sig_block(account: str = "", model: str | None = None) -> str:
     if model == NO_SIGNATURE or (not explicit and not signature_on()):
         return ""
     if model in all_models():
-        return f'<div><br></div><div class="msig">{htmlmail.sanitize_outgoing(model_html(model))}</div>'
+        return f'<div><br></div><div class="msig">{embed_signature_images(htmlmail.sanitize_outgoing(model_html(model)), account)}</div>'
     # images incorporées dès l'insertion : l'éditeur (WebKit) n'affiche pas toujours celles d'un hébergeur distant, le message final les aura de toute façon
     body = embed_signature_images(htmlmail.sanitize_outgoing(signature_html(account)), account)
     return f'<div><br></div><div class="msig">{body}</div>'
@@ -263,7 +263,8 @@ def embed_signature_images(html: str, account: str = "") -> str:
     """Remplace par des images incorporées (data:) les images distantes qui viennent de la signature : elles s'affichent chez tous les
     destinataires, même quand leur messagerie bloque les images externes ou si l'hébergement du logo disparaît."""
     import base64
-    wanted = {_html.unescape(m.group(3)) for m in _IMG_SRC.finditer(signature_html(account))}
+    sources = [signature_html(account), *(h for _name, h in all_models().values())]  # la signature, et vos modèles : leurs images distantes sont incorporées de même
+    wanted = {_html.unescape(m.group(3)) for src in sources for m in _IMG_SRC.finditer(src)}
     if not wanted:
         return html
 

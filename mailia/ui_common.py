@@ -43,7 +43,7 @@ _TABLE = ('<table border="1" cellpadding="6" style="border-collapse:collapse;wid
           + "<tr>" + "<td>&nbsp;</td>" * 3 + "</tr>" + "<tr>" + "<td>&nbsp;</td>" * 3 + "</tr>" + "<tr>" + "<td>&nbsp;</td>" * 3 + "</tr></table><p><br></p>")
 
 
-def _editor_config() -> tuple[list, dict]:
+def _editor_config(source: bool = False) -> tuple[list, dict]:
     defs: dict = {}
     for i, (name, hexv, ico) in enumerate(_COLORS):
         defs[f"col{i}"] = {"label": f"{ico}  {name}", "tip": f"{ico}  {name}", "cmd": "foreColor", "param": hexv}
@@ -73,7 +73,7 @@ def _editor_config() -> tuple[list, dict]:
         ["quote", "link", "hr", "tbl", "imgp",
          {"icon": "mood", "tip": "Insérer un emoji", "fixedIcon": True, "list": "no-icons", "options": [f"em{i}" for i in range(len(emos))]}],
         ["subscript", "superscript", "removeFormat"],
-        ["fullscreen"],
+        ["viewsource", "fullscreen"] if source else ["fullscreen"],
     ]
     return toolbar, defs
 
@@ -90,9 +90,10 @@ def _definitions_js(defs: dict) -> str:
     return re.sub(r'"@@(.*?)@@"', lambda m: "() => " + m.group(1).replace('\\"', '"'), raw)
 
 
-def make_editor(value: str, on_change, min_height: str = "240px") -> ui.editor:
-    """Éditeur de texte riche (HTML) : tout ce que propose Outlook, plus des tableaux, des emojis et du surlignage."""
-    toolbar, defs = _editor_config()
+def make_editor(value: str, on_change, min_height: str = "240px", source: bool = False) -> ui.editor:
+    """Éditeur de texte riche (HTML) : tout ce que propose Outlook, plus des tableaux, des emojis et du surlignage.
+    source : ajoute le bouton « code » qui montre et permet de modifier le HTML (signatures)."""
+    toolbar, defs = _editor_config(source)
     ed = ui.editor(value=value, on_change=on_change).classes("w-full mailedit")
     ed._props.update({"toolbar": toolbar, ":definitions": _definitions_js(defs), "fonts": EDITOR_FONTS, "min-height": min_height})
     return ed

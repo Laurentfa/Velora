@@ -6,7 +6,7 @@ from conftest import add_message
 from nicegui import ui
 
 import main
-from mailia import compose, config, db, queries, sync
+from mailia import compose, config, db, htmlmail, queries, sync
 
 
 def test_every_model_survives_the_outgoing_cleaning() -> None:
@@ -112,3 +112,35 @@ async def test_the_manager_can_duplicate_and_delete(user, box) -> None:
 def test_starting_models_keep_the_ones_created_before() -> None:
     db.kv_set("sig_models_user", '[{"id": "u1", "name": "Ancien", "html": "<p>x</p>"}]')
     assert "u1" in compose.user_models() and "noel_dore" in compose.user_models()
+
+
+async def test_the_main_signature_can_be_copied_without_touching_it(user, box) -> None:
+    from mailia import db
+    db.kv_set("signature_html", "<p>Laurent <b>Fauvel</b></p>")
+    ui.page("/gm2")(lambda: ui.button("ouvrir", on_click=lambda: __import__("mailia.ui_sigmodels", fromlist=["x"]).signature_models_dialog(None)))
+    await user.open("/gm2")
+    user.find("ouvrir").click()
+    await user.should_see(marker="sigm-copy-main")
+    user.find(marker="sigm-copy-main").click()
+    await user.should_see(marker="sigm-save")  # la copie s'ouvre dans l'éditeur
+    copies = {k: v for k, v in compose.user_models().items() if v[0] == "Ma signature (copie)"}
+    assert len(copies) == 1 and "Laurent" in next(iter(copies.values()))[1] and "Fauvel" in next(iter(copies.values()))[1]
+    assert db.kv_get("signature_html") == "<p>Laurent <b>Fauvel</b></p>"  # l'originale n'a pas bougé
+
+
+def test_the_signature_editor_can_show_the_html_source() -> None:
+    from mailia.ui_common import _editor_config
+    assert "viewsource" in sum(_editor_config(source=True)[0][-1:], [])
+    assert "viewsource" not in sum(_editor_config()[0], [])  # pas dans l'éditeur des messages
+
+
+def test_the_images_of_a_model_are_embedded_like_those_of_the_main_signature(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(compose, "_fetch_signature_image", lambda url: (calls.append(url), (b"\x89PNG-fake", "image/png"))[1])
+    mid = compose.save_user_model(None, "Avec image", '<table><tr><td><img src="http://exemple.fr/voeux.jpg" width="100" height="200"></td><td>Texte</td></tr></table>')
+    block = compose.sig_block("", mid)
+    assert "data:image/png;base64," in block and "http://exemple.fr/voeux.jpg" not in block and calls == ["http://exemple.fr/voeux.jpg"]
+    sent = compose.embed_signature_images(htmlmail.sanitize_outgoing(f'<div class="msig">{compose.model_html(mid)}</div>'))  # à l'envoi aussi
+    assert "data:image/png;base64," in sent
+    other = compose.embed_signature_images('<img src="http://autre.fr/pistage.png">')  # une image qui n'est ni d'un modèle ni de la signature reste telle quelle
+    assert "pistage.png" in other and "data:" not in other

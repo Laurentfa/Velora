@@ -319,7 +319,7 @@ def _tab_aff(f) -> None:
 
     ui.label("Signature").classes("text-subtitle2 q-mt-md")
     ui.switch("Ajouter ma signature à mes messages et à mes réponses").bind_value(f, "SIG_ON")
-    make_editor(f["SIG_HTML"], lambda e: f.__setitem__("SIG_HTML", e.value or ""), "110px")
+    make_editor(f["SIG_HTML"], lambda e: f.__setitem__("SIG_HTML", e.value or ""), "110px", source=True)
     ui.label("Mise en forme libre (police, couleurs, liens, image de logo…). Elle est insérée dans l'éditeur, où vous pouvez la modifier.").classes("text-caption text-grey")
     ui.label("Signature de Noël").classes("text-subtitle2 q-mt-md")
     ui.switch("Utiliser automatiquement une signature de Noël en décembre", value=compose.christmas_auto(),

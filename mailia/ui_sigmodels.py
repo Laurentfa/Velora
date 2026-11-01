@@ -37,13 +37,24 @@ def signature_models_dialog(host=None, on_change=None) -> None:
             compose.save_user_model(None, f"{name} (copie)", compose.model_html(key))
             changed()
 
+        async def copy_main() -> None:
+            """Copie de la signature principale (Paramètres › Affichage et signature) en modèle : on modifie la copie, l'originale reste telle quelle."""
+            names = {n for n, _ in compose.all_models().values()}
+            name, n = "Ma signature (copie)", 1
+            while name in names:
+                n += 1
+                name = f"Ma signature (copie {n})"
+            key = compose.save_user_model(None, name, compose.signature_html(""))
+            changed()
+            await edit(key)
+
         async def edit(key: str | None) -> None:
             cur = compose.user_models().get(key) if key else None
             with ui.dialog() as ed, ui.card().style("width:760px;max-width:96vw"):
                 ui.label("Modifier le modèle" if cur else "Nouveau modèle").classes("text-h6")
                 name = ui.input("Nom du modèle", value=cur[0] if cur else "").props("outlined dense stack-label").classes("w-full").mark("sigm-name")
                 box = {"html": cur[1] if cur else "<p>{{nom}}</p>"}
-                make_editor(box["html"], lambda e: box.__setitem__("html", e.value or ""), "160px")
+                make_editor(box["html"], lambda e: box.__setitem__("html", e.value or ""), "160px", source=True)
                 with ui.row().classes("justify-end w-full"):
                     ui.button("Annuler", on_click=lambda: ed.submit(False)).props("flat no-caps")
                     ui.button("Enregistrer", on_click=lambda: ed.submit(True)).props("unelevated no-caps color=primary").mark("sigm-save")
@@ -53,6 +64,9 @@ def signature_models_dialog(host=None, on_change=None) -> None:
 
         listing()
         with ui.row().classes("justify-between w-full"):
-            ui.button("Nouveau modèle", icon="add", on_click=lambda: edit(None)).props("outline no-caps dense").mark("sigm-new")
+            with ui.row().classes("gap-2"):
+                ui.button("Nouveau modèle", icon="add", on_click=lambda: edit(None)).props("outline no-caps dense").mark("sigm-new")
+                ui.button("Copier ma signature", icon="content_copy", on_click=copy_main).props("outline no-caps dense").tooltip(
+                    "Crée un modèle à partir de votre signature principale, à modifier sans toucher à l'originale").mark("sigm-copy-main")
             ui.button("Fermer", on_click=lambda: dlg.close()).props("flat no-caps")
     dlg.open()
