@@ -121,3 +121,14 @@ def test_a_module_can_use_another_one_s_service_only_when_it_exists(mod_dir) -> 
     modules.set_enabled("fournisseur", False)
     modules.load_all()
     assert api_client.service("dates") is None  # fournisseur éteint : le client doit fonctionner sans
+
+
+async def test_a_module_can_ask_the_ai_through_velora(mod_dir, monkeypatch) -> None:
+    from mailia import ai, aipolicy
+    seen = []
+    monkeypatch.setattr(ai, "_ask", lambda system, user, **kw: (seen.append((system, user, kw["feature"])), "réponse")[1])
+    make(mod_dir, "alpha", "def register(api):\n    pass\n")
+    api = modules.ModuleAPI({"id": "alpha", "dir": mod_dir / "alpha", "name": "Alpha"})
+    assert await api.ask_ai("consigne", "faits") == "réponse"
+    assert seen == [("consigne", "faits", "module:alpha")]
+    assert aipolicy.feature_label("module:alpha") == "Module : alpha" and aipolicy.feature_label("analyze") == "Tri et résumé des mails"

@@ -103,6 +103,15 @@ class ModuleAPI:
         cfg[key] = value
         db.kv_set(f"module:{self.id}:cfg", json.dumps(cfg))
 
+    async def ask_ai(self, system: str, user: str, max_tokens: int = 400) -> str:
+        """Pose une question à l'IA de Velora : fournisseur, plafond de dépense et compteur de consommation sont ceux de Velora (la consommation apparaît
+        sous « Module : <identifiant> » dans Paramètres › Utilisation). Lève ai.AIError si l'IA est coupée ou si le plafond est atteint.
+        Ce que le module envoie quitte l'ordinateur : à lui de n'envoyer que le nécessaire (jamais d'identité de patient, par exemple)."""
+        from nicegui import run
+
+        from mailia import ai
+        return await run.io_bound(lambda: ai._ask(system, user, model=config.model("ANALYZE"), max_tokens=max_tokens, feature=f"module:{self.id}"))
+
     async def run_blocking(self, fn, *args):
         """Exécute fn(*args) hors du fil de la fenêtre (réseau, programmes externes) : l'interface ne se fige pas."""
         from nicegui import run

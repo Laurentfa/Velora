@@ -197,6 +197,11 @@ def init() -> None:
         for col in ("cc_addrs", "att_json", "conv_id", "ckey", "body_html", "unsub", "meeting", "rules_done", "bcc_addrs", "auth"):
             if col not in cols:
                 c.execute(f"ALTER TABLE messages ADD COLUMN {col} TEXT")
+        for tbl in ("usage", "usage_log"):  # crédits 1min.AI consommés (credits_est : la part estimée, quand le fournisseur ne donne pas le détail d'un appel)
+            have_u = {r["name"] for r in c.execute(f"PRAGMA table_info({tbl})")}
+            for col in ("credits", "credits_est"):
+                if col not in have_u:
+                    c.execute(f"ALTER TABLE {tbl} ADD COLUMN {col} INTEGER DEFAULT 0")
         have_t = {r["name"] for r in c.execute("PRAGMA table_info(templates)")}
         for col in ("to_addrs", "cc", "bcc"):  # destinataires mémorisés avec le modèle
             if col not in have_t:
@@ -495,18 +500,20 @@ def kv_set(k: str, v: str) -> None:
         c.execute("INSERT INTO kv(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, v))
 
 
-def record_usage(model: str, tokens_in: int, tokens_out: int, feature: str = "") -> None:
+def record_usage(model: str, tokens_in: int, tokens_out: int, feature: str = "", credits: int = 0, credits_est: int = 0) -> None:
+    """Consommation d'un appel à l'IA. credits : crédits 1min.AI dépensés (mesurés ou estimés) ; credits_est : la part qui est une estimation."""
+    day, month = datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%Y-%m")
     with conn() as c:
         c.execute(
-            "INSERT INTO usage_log(day,model,feature,calls,tokens_in,tokens_out) VALUES(?,?,?,1,?,?) "
+            "INSERT INTO usage_log(day,model,feature,calls,tokens_in,tokens_out,credits,credits_est) VALUES(?,?,?,1,?,?,?,?) "
             "ON CONFLICT(day,model,feature) DO UPDATE SET calls=calls+1, tokens_in=tokens_in+excluded.tokens_in, "
-            "tokens_out=tokens_out+excluded.tokens_out",
-            (datetime.now().strftime("%Y-%m-%d"), model, feature, tokens_in, tokens_out))
+            "tokens_out=tokens_out+excluded.tokens_out, credits=credits+excluded.credits, credits_est=credits_est+excluded.credits_est",
+            (day, model, feature, tokens_in, tokens_out, credits, credits_est))
         c.execute(
-            "INSERT INTO usage(month,model,calls,tokens_in,tokens_out) VALUES(?,?,1,?,?) "
+            "INSERT INTO usage(month,model,calls,tokens_in,tokens_out,credits,credits_est) VALUES(?,?,1,?,?,?,?) "
             "ON CONFLICT(month,model) DO UPDATE SET calls=calls+1, tokens_in=tokens_in+excluded.tokens_in, "
-            "tokens_out=tokens_out+excluded.tokens_out",
-            (datetime.now().strftime("%Y-%m"), model, tokens_in, tokens_out))
+            "tokens_out=tokens_out+excluded.tokens_out, credits=credits+excluded.credits, credits_est=credits_est+excluded.credits_est",
+            (month, model, tokens_in, tokens_out, credits, credits_est))
 
 
 # ---------- modèles de réponse ----------

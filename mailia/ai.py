@@ -76,10 +76,10 @@ def _run(model: str, system: str, user: str, max_tokens: int, effort: str, image
         from . import onemin
         if not config.provider_ready("onemin"):
             raise AIError("Clé 1min.AI absente (Paramètres › Intelligence artificielle).", fallback=True)
-        aipolicy.check_budget()
-        text, tin, tout = onemin.chat(model[len(config.ONEMIN_PREFIX):], system, user, max_tokens, images)
+        aipolicy.check_credits()
+        text, tin, tout, credits, estimated = onemin.chat_full(model[len(config.ONEMIN_PREFIX):], system, user, max_tokens, images)
         try:
-            db.record_usage(model, tin, tout, feature)
+            db.record_usage(model, tin, tout, feature, credits, credits if estimated else 0)
         except Exception:
             logging.getLogger("ai").warning("mesure de la consommation impossible", exc_info=True)
         return text

@@ -133,21 +133,37 @@ def usage_panel() -> None:
         ui.linear_progress(value=min(1, pct), show_value=False, color="negative" if pct >= 1 else ("warning" if pct >= 0.8 else "primary")).props("rounded size=10px")
     ui.label(f"Estimation d'après les jetons mesurés et les tarifs publics, au taux de {u['rate']:.2f} € pour 1 $. La facture réelle d'Anthropic fait foi. Les appels via 1min.AI sont comptés à 0 € ici : ils consomment vos crédits 1min.AI.").classes("text-caption text-grey")
 
-    from . import onemin
-    oc = onemin.credits_summary()
-    if oc:
-        ui.label((f"1min.AI ce mois-ci, mesuré par l'appli : {oc['credits']:,} crédits pour {oc['calls']} appel(s) (API native uniquement). "
-                  "Votre solde réel est affiché sur votre tableau de bord 1min.AI.").replace(",", " ")).classes("text-caption")
+    ui.label("Crédits 1min.AI").classes("text-subtitle2 q-mt-md")
+    cr, est, allow = u["credits"], u["credits_est"], u["allowance"]
+    ui.label(f"{cr:,} crédits ce mois-ci".replace(",", " ") + (f" sur {allow:,}".replace(",", " ") if allow else "")).style("font-size:22px;font-weight:700")
+    if allow:
+        cpct = cr / allow
+        ui.linear_progress(value=min(1, cpct), show_value=False, color="negative" if cpct >= 1 else ("warning" if cpct >= 0.8 else "primary")).props("rounded size=10px")
+    ui.label("Comptés appel par appel : l'API native de 1min.AI donne les crédits de chaque appel (mesurés). Les appels du point d'entrée OpenAI ne les donnent pas : ils sont "
+             "estimés avec le taux mesuré sur vos appels natifs" + (f" ({est:,} crédits estimés ce mois-ci)".replace(",", " ") if est else "") + ". "
+             "Le solde réel est sur votre tableau de bord 1min.AI.").classes("text-caption text-grey")
     with ui.row().classes("items-center gap-3 q-mt-sm"):
         bud = ui.number("Budget mensuel (€, 0 = aucun)", value=u["budget"], min=0, step=1, precision=2).props("outlined dense").style("width:230px")
+        allowance = ui.number("Crédits 1min.AI par mois (0 = aucun plafond)", value=allow, min=0, step=100000, precision=0).props("outlined dense").style("width:330px")
         hard = ui.switch("Bloquer l'IA au plafond", value=u["hard"])
 
     def save_budget() -> None:
         db.kv_set("ai_budget_eur", str(bud.value or 0))
+        db.kv_set("onemin_allowance", str(int(allowance.value or 0)))
         db.kv_set("ai_budget_hard", "1" if hard.value else "0")
-        ui.notify("Budget enregistré. Une alerte vous prévient à 80 %.", type="positive")
+        ui.notify("Plafonds enregistrés. Une alerte vous prévient à 80 %.", type="positive")
 
-    ui.button("Enregistrer le budget", icon="save", on_click=save_budget).props("outline no-caps dense")
+    ui.button("Enregistrer les plafonds", icon="save", on_click=save_budget).props("outline no-caps dense")
+    if u["credits_by_feature"]:
+        ui.label("Crédits par fonction, ce mois-ci").classes("text-caption q-mt-md")
+        for name, calls, credits in u["credits_by_feature"]:
+            with ui.row().classes("w-full items-center no-wrap gap-2"):
+                ui.label(name).classes("col")
+                ui.label(f"{calls} appel(s)").classes("text-caption text-grey")
+                ui.label(f"{credits:,}".replace(",", " ")).style("min-width:90px;text-align:right")
+    if len(u["credits_by_month"]) > 1:
+        ui.label("Crédits des mois précédents").classes("text-caption q-mt-md")
+        ui.label(" · ".join(f"{m[5:]}/{m[:4]} : {c:,}".replace(",", " ") for m, c in u["credits_by_month"] if m != u["credits_by_month"][0][0])).classes("text-body2")
 
     if u["by_feature"]:
         ui.label("Par fonction, ce mois-ci").classes("text-caption q-mt-md")

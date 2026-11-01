@@ -119,13 +119,47 @@ def can_see(model: str) -> bool:
     return any(h in model for h in VISION_HINTS)
 
 
+DEFAULT_CREDITS_PER_TOKEN = 5.0  # mesuré sur vos appels natifs (≈ 2,5 millions de crédits pour ≈ 0,5 million de jetons) ; remplacé par votre propre mesure dès qu'elle existe
+
+
+def credits_per_token() -> float:
+    """Crédits par jeton, mesurés sur les appels natifs (qui donnent le détail) : sert à estimer les appels du point d'entrée OpenAI, qui ne le donnent pas."""
+    try:
+        st = json.loads(db.kv_get("onemin_rate_stats") or "{}")
+        if st.get("calls", 0) >= 20 and st.get("tokens", 0) > 0:
+            return st["credits"] / st["tokens"]
+    except (ValueError, TypeError, ZeroDivisionError):
+        pass
+    return DEFAULT_CREDITS_PER_TOKEN
+
+
+def _learn_rate(credits: int, tokens: int) -> None:
+    if credits <= 0 or tokens <= 0:
+        return
+    try:
+        with _lock:
+            st = json.loads(db.kv_get("onemin_rate_stats") or "{}")
+            st = {"credits": st.get("credits", 0) + credits, "tokens": st.get("tokens", 0) + tokens, "calls": st.get("calls", 0) + 1}
+            db.kv_set("onemin_rate_stats", json.dumps(st))
+    except Exception:
+        log.warning("mesure du taux de crédits impossible", exc_info=True)
+
+
 def chat(model: str, system: str, user: str, max_tokens: int = 1500, images: list[bytes] | None = None) -> tuple[str, int, int]:
     """Une réponse de texte. Retourne (texte, jetons envoyés, jetons reçus). Avec des images (JPEG) ou un modèle absent du point d'entrée
     OpenAI, l'appel passe par l'API native."""
+    return chat_full(model, system, user, max_tokens, images)[:3]
+
+
+def chat_full(model: str, system: str, user: str, max_tokens: int = 1500, images: list[bytes] | None = None) -> tuple[str, int, int, int, bool]:
+    """Comme chat, avec les crédits dépensés : (texte, jetons envoyés, jetons reçus, crédits, estimé). L'API native donne les crédits de l'appel ;
+    le point d'entrée OpenAI ne les donne pas : on les estime avec le taux mesuré sur les appels natifs."""
     if len(system) + len(user) > MAX_CHARS:  # on coupe la partie variable (le message), jamais la consigne
         user = user[:max(1000, MAX_CHARS - len(system))] + "\n[… texte coupé : limite de taille du fournisseur]"
     if images or model not in _openai_ids():
-        return _native(model, system, user, images or [])
+        text, tin, tout, credits = _native(model, system, user, images or [])
+        _learn_rate(credits, tin + tout)
+        return text, tin, tout, credits, False
     body = {"model": model, "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             "max_tokens": max(16, min(int(max_tokens), MAX_OUT))}
     _throttle()
@@ -146,7 +180,8 @@ def chat(model: str, system: str, user: str, max_tokens: int = 1500, images: lis
     if choice.get("finish_reason") == "content_filter":
         raise AIError("La modération du fournisseur a refusé de traiter ce message.")
     u = d.get("usage") or {}
-    return text.strip(), int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
+    tin, tout = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
+    return text.strip(), tin, tout, round((tin + tout) * credits_per_token()), True
 
 
 def _upload(data: bytes, n: int) -> str:
@@ -163,7 +198,7 @@ def _upload(data: bytes, n: int) -> str:
         raise AIError("Réponse 1min.AI illisible (envoi d'image).", fallback=True) from e
 
 
-def _native(model: str, system: str, user: str, images: list[bytes]) -> tuple[str, int, int]:
+def _native(model: str, system: str, user: str, images: list[bytes]) -> tuple[str, int, int, int]:
     _headers()  # lève si la clé est absente
     keys = []
     for i, data in enumerate(images[:8], 1):
@@ -195,7 +230,7 @@ def _native(model: str, system: str, user: str, images: list[bytes]) -> tuple[st
     if meta.get("finishReason") == "content_filter":
         raise AIError("La modération du fournisseur a refusé de traiter ce message.")
     _note_credits(rec, meta)
-    return text.strip(), int(meta.get("inputToken") or 0), int(meta.get("totalToken") or 0) - int(meta.get("inputToken") or 0)
+    return text.strip(), int(meta.get("inputToken") or 0), int(meta.get("totalToken") or 0) - int(meta.get("inputToken") or 0), int(meta.get("credit") or 0)
 
 
 class FakeStatus:

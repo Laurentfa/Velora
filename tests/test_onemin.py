@@ -148,3 +148,61 @@ def test_long_input_truncated_and_models_list(env):
     assert ok and f"{len(onemin.NATIVE_MODELS) + 2} modèles" in msg
     ids = onemin.list_models()
     assert "a" in ids and "us.anthropic.claude-haiku-5-5" in ids
+
+
+CLAUDE = "1min:us.anthropic.claude-haiku-4-5-20251001-v1:0"
+
+
+def test_credits_are_counted_per_call_and_per_feature(env):
+    env.setenv("ONEMIN_API_KEY", "k")
+    env.setattr(httpx, "post", lambda url, headers, json, timeout: native_resp("ok", credit=500))
+    ai._ask("s", "u", model=CLAUDE, feature="analyze")
+    ai._ask("s", "u", model=CLAUDE, feature="module:patient_augmente")
+    assert aipolicy.month_credits() == (1000, 0)  # appels natifs : mesurés
+    s = aipolicy.usage_summary()
+    assert s["credits"] == 1000 and s["credits_est"] == 0
+    assert dict((n, c) for n, _calls, c in s["credits_by_feature"]) == {"Tri et résumé des mails": 500, "Module : patient_augmente": 500}
+
+
+def test_openai_entry_point_credits_are_estimated_with_the_measured_rate(env):
+    env.setenv("ONEMIN_API_KEY", "k")
+    env.setattr(httpx, "post", lambda url, headers, json, timeout: ok_chat())
+    ai._ask("s", "u", model="1min:gpt-x", feature="compare")  # 15 jetons x 5 crédits (taux par défaut, aucun appel natif mesuré)
+    assert aipolicy.month_credits() == (75, 75)
+    env.setattr(httpx, "post", lambda url, headers, json, timeout: native_resp("ok", credit=1300))
+    for _ in range(20):  # 20 appels natifs : 1300 crédits pour 130 jetons = 10 crédits par jeton
+        ai._ask("s", "u", model=CLAUDE, feature="analyze")
+    assert round(onemin.credits_per_token(), 2) == 10.0
+    env.setattr(httpx, "post", lambda url, headers, json, timeout: ok_chat())
+    before = aipolicy.month_credits()[0]
+    ai._ask("s", "u", model="1min:gpt-x", feature="compare")
+    assert aipolicy.month_credits()[0] - before == 150  # 15 jetons x 10
+
+
+def test_the_credit_cap_blocks_without_falling_back_to_paid_claude(env):
+    env.setenv("ONEMIN_API_KEY", "k")
+    env.setenv("ANTHROPIC_API_KEY", "a")  # une clé payante existe : le plafond ne doit pas y renvoyer en silence
+    env.setattr(httpx, "post", lambda url, headers, json, timeout: native_resp("ok", credit=500))
+    db.kv_set("onemin_allowance", "1000")
+    db.kv_set("ai_budget_hard", "1")
+    notes = []
+    from mailia import notify
+    env.setattr(notify, "once", lambda key, title, text: notes.append((key, text)))
+    ai._ask("s", "u", model=CLAUDE, feature="analyze")  # 500 / 1000
+    ai._ask("s", "u", model=CLAUDE, feature="analyze")  # 1000 / 1000 (le plafond est vérifié avant l'appel)
+    with pytest.raises(ai.AIError, match="Crédits 1min.AI du mois atteints") as e:
+        ai._ask("s", "u", model=CLAUDE, feature="analyze")
+    assert not e.value.fallback and aipolicy.month_credits()[0] == 1000
+    db.kv_set("ai_budget_hard", "0")  # plafond « souple » : on prévient, on ne bloque pas
+    ai._ask("s", "u", model=CLAUDE, feature="analyze")
+    assert aipolicy.month_credits()[0] == 1500 and any(k.startswith("credits:") for k, _ in notes)
+
+
+def test_no_credit_cap_means_no_limit_and_old_rows_still_load(env):
+    env.setenv("ONEMIN_API_KEY", "k")
+    env.setattr(httpx, "post", lambda url, headers, json, timeout: native_resp("ok", credit=10**6))
+    for _ in range(3):
+        ai._ask("s", "u", model=CLAUDE, feature="analyze")
+    assert aipolicy.credit_allowance() == 0 and aipolicy.month_credits()[0] == 3 * 10**6
+    db.record_usage("claude-haiku-4-5", 100, 10, "analyze")  # un appel Claude direct : aucun crédit
+    assert aipolicy.month_credits()[0] == 3 * 10**6

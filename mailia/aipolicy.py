@@ -45,6 +45,8 @@ def language_note(feature: str) -> str:
 
 
 def feature_label(name: str) -> str:
+    if name.startswith("module:"):
+        return "Module : " + name[7:]  # appel venu d'un module personnel (voir ModuleAPI.ask_ai)
     return FEATURES.get(name, name or "Autre")
 
 
@@ -144,6 +146,42 @@ def month_spent_eur(month: str | None = None) -> float:
     return sum(cost_usd(r["model"], r["tokens_in"], r["tokens_out"]) for r in rows) * usd_eur()
 
 
+DEFAULT_ALLOWANCE = 0  # 0 : aucun plafond de crédits tant que vous n'en avez pas réglé un (Paramètres › Utilisation)
+
+
+def credit_allowance() -> int:
+    """Crédits 1min.AI que votre abonnement vous donne chaque mois (0 = pas de plafond)."""
+    try:
+        return max(0, int(float(db.kv_get("onemin_allowance") or DEFAULT_ALLOWANCE)))
+    except ValueError:
+        return 0
+
+
+def month_credits(month: str | None = None) -> tuple[int, int]:
+    """(crédits 1min.AI dépensés ce mois-ci, dont estimés) : appels natifs mesurés, appels du point d'entrée OpenAI estimés."""
+    month = month or datetime.now().strftime("%Y-%m")
+    with db.conn() as c:
+        r = c.execute("SELECT SUM(credits) cr, SUM(credits_est) est FROM usage WHERE month=? AND model LIKE '1min:%'", (month,)).fetchone()
+    return int(r["cr"] or 0), int(r["est"] or 0)
+
+
+def check_credits() -> None:
+    """Avant chaque appel à 1min.AI : arrête l'IA si le plafond de crédits du mois est atteint (si « Bloquer l'IA au plafond » est choisi) ; prévient à 80 %.
+    Sans repli sur l'API Claude : ce serait dépenser de l'argent sans que vous l'ayez décidé."""
+    allowance = credit_allowance()
+    if not allowance:
+        return
+    used, _est = month_credits()
+    month = datetime.now().strftime("%Y-%m")
+    if used >= allowance and db.kv_get("ai_budget_hard") == "1":
+        raise AIError(f"Crédits 1min.AI du mois atteints ({used:,} sur {allowance:,}).".replace(",", " ") + " Ils se renouvellent le 1er du mois ; vous pouvez aussi "
+                      "relever le plafond dans Paramètres › Utilisation et données.")
+    if used >= allowance * 0.8:
+        from . import notify
+        notify.once(f"credits:{month}:{'100' if used >= allowance else '80'}", "Crédits 1min.AI",
+                    f"{used:,} crédits utilisés sur {allowance:,} ce mois-ci".replace(",", " ") + (" : le plafond est atteint." if used >= allowance else "."))
+
+
 def check_budget() -> None:
     """Avant chaque appel : arrête l'IA si le plafond choisi est atteint ; prévient une fois à 80 %."""
     budget = budget_eur()
@@ -181,7 +219,15 @@ def usage_summary() -> dict:
     for r in months:
         by_month[r["month"]] = by_month.get(r["month"], 0.0) + cost_usd(r["model"], r["tokens_in"], r["tokens_out"]) * rate
     series = [((datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")) for i in range(29, -1, -1)]
+    with db.conn() as c:
+        cf = c.execute("SELECT feature, SUM(calls) calls, SUM(credits) cr FROM usage_log WHERE substr(day,1,7)=? AND model LIKE '1min:%' GROUP BY feature "
+                       "HAVING SUM(calls) > 0 ORDER BY cr DESC", (month,)).fetchall()
+        cm = c.execute("SELECT month, SUM(credits) cr FROM usage WHERE model LIKE '1min:%' GROUP BY month ORDER BY month DESC LIMIT 6").fetchall()
+    used, est = month_credits()
     return {
+        "credits": used, "credits_est": est, "allowance": credit_allowance(),
+        "credits_by_feature": [(feature_label(r["feature"]), r["calls"] or 0, r["cr"] or 0) for r in cf],
+        "credits_by_month": [(r["month"], r["cr"] or 0) for r in cm],
         "month": month_spent_eur(), "budget": budget_eur(), "hard": db.kv_get("ai_budget_hard") == "1", "rate": rate,
         "by_feature": sorted(((k, v[0], v[1]) for k, v in by_feat.items()), key=lambda x: -x[2]),
         "by_day": [(d, by_day.get(d, 0.0)) for d in series],
