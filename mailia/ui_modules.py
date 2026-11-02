@@ -1,8 +1,10 @@
 """Paramètres › Modules : activer les modules personnels et voir leur état."""
-from nicegui import ui
+import tempfile
+from pathlib import Path
+
+from nicegui import app, run, ui
 
 from mailia import db, modules
-from mailia.ui_common import open_folder
 
 
 def modules_settings() -> None:
@@ -68,15 +70,64 @@ def modules_settings() -> None:
                         sw = ui.switch(value=wanted, on_change=lambda e, i=info["id"]: set_module(i, bool(e.value))).props("dense").mark(f"module-{info['id']}")
                         if info.get("error"):
                             sw.disable()
+                        ui.button(icon="delete_outline", on_click=lambda i=info: ask_remove(i)).props("flat round dense color=grey").tooltip("Supprimer ce module").mark(f"module-delete-{info['id']}")
             with ui.row().classes("items-center gap-3 q-mt-sm"):
-                ui.button("Ouvrir le dossier des modules", icon="folder_open", on_click=open_dir).props("outline no-caps color=primary")
-                with ui.column().classes("col gap-0"):
-                    ui.label("Pour ajouter un module, copiez son dossier ici ; pour le supprimer, désactivez-le puis mettez son dossier à la corbeille.").classes("text-caption text-grey")
-                    ui.label(str(modules.DIR)).classes("text-caption text-grey").style("user-select:text")
+                with ui.button("Importer un module", icon="upload").props("outline no-caps color=primary").mark("module-import"):
+                    with ui.menu():
+                        ui.menu_item("Depuis un dossier…", on_click=pick_folder)
+                        ui.menu_item("Depuis une archive .zip…", on_click=lambda: ui.run_javascript(f"getElement({up.id}).$refs.qRef.pickFiles()"))
+                ui.label("Un module importé est copié dans le dossier de Velora ; activez-le ensuite avec son interrupteur.").classes("text-caption text-grey col")
 
-    def open_dir() -> None:
-        modules.DIR.mkdir(parents=True, exist_ok=True)
-        if not open_folder(modules.DIR):
-            ui.notify(f"Le dossier n'a pas pu s'ouvrir : {modules.DIR}", type="warning")
+    async def import_from(path: Path) -> None:
+        try:
+            try:
+                mid = await run.io_bound(modules.import_module, path)
+            except FileExistsError as e:
+                with ui.dialog() as cd, ui.card():
+                    ui.label(f"Le module « {e} » existe déjà. Le remplacer ?").classes("text-subtitle1")
+                    ui.label("Ses fichiers sont remplacés ; ses réglages sont conservés.").classes("text-caption text-grey")
+                    with ui.row().classes("justify-end w-full gap-2"):
+                        ui.button("Annuler", on_click=lambda: cd.submit(False)).props("flat no-caps")
+                        ui.button("Remplacer", on_click=lambda: cd.submit(True)).props("unelevated no-caps color=primary")
+                if not await cd:
+                    return
+                mid = await run.io_bound(modules.import_module, path, True)
+        except (ValueError, OSError) as err:
+            return ui.notify(str(err), type="negative")
+        ui.notify(f"Module « {mid} » importé. Activez-le avec son interrupteur ; il se charge au prochain lancement.", type="positive", multi_line=True)
+        draw()
+
+    async def pick_folder() -> None:
+        try:
+            import webview
+            kind = webview.FileDialog.FOLDER if hasattr(webview, "FileDialog") else webview.FOLDER_DIALOG
+            res = await app.native.main_window.create_file_dialog(kind)
+        except Exception:
+            return ui.notify("La fenêtre de choix de dossier n'est pas disponible : importez plutôt une archive .zip.", type="warning")
+        if res:
+            await import_from(Path(res[0]))
+
+    async def on_zip(e) -> None:
+        data = await e.file.read()
+        e.sender.reset()
+        with tempfile.TemporaryDirectory() as d:
+            f = Path(d) / (Path(e.file.name).name or "module.zip")
+            f.write_bytes(data)
+            await import_from(f)
+
+    async def ask_remove(info: dict) -> None:
+        with ui.dialog() as dlg, ui.card().style("max-width:480px"):
+            ui.label(f"Supprimer le module « {info['name']} » ?").classes("text-h6")
+            ui.label("Son dossier et ses réglages sont supprimés, sans retour possible. Pour le reprendre, il faudra le réimporter.").classes("text-body2")
+            with ui.row().classes("justify-end w-full gap-2"):
+                ui.button("Annuler", on_click=lambda: dlg.submit(False)).props("flat no-caps")
+                ui.button("Supprimer", on_click=lambda: dlg.submit(True)).props("unelevated no-caps color=negative").mark("module-delete-confirm")
+        if await dlg:
+            await run.io_bound(modules.remove_module, info["id"])
+            ui.notify("Module supprimé. Il sera retiré de la mémoire au prochain lancement.", type="positive")
+            draw()
+
+    up = ui.upload(on_upload=on_zip, auto_upload=True).props("hide-upload-btn accept=.zip").style(
+        "position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden")
 
     draw()

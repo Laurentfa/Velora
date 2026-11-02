@@ -132,3 +132,62 @@ async def test_a_module_can_ask_the_ai_through_velora(mod_dir, monkeypatch) -> N
     assert await api.ask_ai("consigne", "faits") == "réponse"
     assert seen == [("consigne", "faits", "module:alpha")]
     assert aipolicy.feature_label("module:alpha") == "Module : alpha" and aipolicy.feature_label("analyze") == "Tri et résumé des mails"
+
+
+def test_a_module_folder_or_zip_can_be_imported_and_removed(mod_dir, tmp_path) -> None:
+    import zipfile
+    store = mod_dir / "store"
+    store.mkdir()
+    monkey = modules.DIR
+    modules.DIR = store
+    try:
+        src = tmp_path / "src" / "mon_module"
+        src.mkdir(parents=True)
+        (src / "module.json").write_text('{"name": "M"}', encoding="utf-8")
+        (src / "module.py").write_text("def register(api): pass\n", encoding="utf-8")
+        (src / "__pycache__").mkdir()
+        assert modules.import_module(src) == "mon_module"
+        assert (store / "mon_module" / "module.py").is_file() and not (store / "mon_module" / "__pycache__").exists()
+        with pytest.raises(FileExistsError):
+            modules.import_module(src)
+        assert modules.import_module(src, replace=True) == "mon_module"
+
+        z = tmp_path / "autre.zip"  # archive faite depuis le dossier : un seul dossier à la racine
+        with zipfile.ZipFile(z, "w") as zf:
+            zf.write(src / "module.json", "autre/module.json")
+            zf.write(src / "module.py", "autre/module.py")
+        assert modules.import_module(z) == "autre"
+
+        bad = tmp_path / "bad.zip"
+        with zipfile.ZipFile(bad, "w") as zf:
+            zf.writestr("../evil/module.json", "{}")
+        with pytest.raises(ValueError, match="chemins"):
+            modules.import_module(bad)
+        empty = tmp_path / "vide"
+        empty.mkdir()
+        with pytest.raises(ValueError, match="module.json"):
+            modules.import_module(empty)
+
+        modules.set_enabled("autre", True)
+        modules.remove_module("autre")
+        assert not (store / "autre").exists() and "autre" not in modules.enabled_ids()
+        with pytest.raises(ValueError):
+            modules.remove_module("../store")
+    finally:
+        modules.DIR = monkey
+
+
+async def test_settings_can_delete_a_module_after_confirmation(user: User, mod_dir) -> None:
+    make(mod_dir, "alpha", "def register(api): pass\n")
+    db.kv_set("modules_on", "1")
+
+    @ui.page("/settings-modules-del")
+    def page() -> None:
+        open_settings(ui.element("div"), lambda acct: None)
+    await user.open("/settings-modules-del")
+    await user.should_see("Importer un module")
+    user.find(marker="module-delete-alpha").click()
+    await user.should_see("sans retour possible")
+    user.find(marker="module-delete-confirm").click()
+    await user.should_see("Module supprimé")
+    assert not (mod_dir / "alpha").exists()

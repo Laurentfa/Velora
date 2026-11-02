@@ -11,6 +11,10 @@ import importlib.util
 import json
 import logging
 import re
+import shutil
+import tempfile
+import zipfile
+from pathlib import Path
 
 from mailia import config, db
 
@@ -39,6 +43,71 @@ def set_enabled(mid: str, on: bool) -> None:
     ids = enabled_ids()
     ids.add(mid) if on else ids.discard(mid)
     db.kv_set("modules_enabled", json.dumps(sorted(ids)))
+
+
+_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+MAX_UNZIPPED = 50 * 1024 * 1024  # un module est un peu de code : au-delà, ce n'est pas un module
+
+
+def _root_of(folder: Path) -> Path:
+    """Le dossier qui contient module.json : la racine, ou l'unique sous-dossier (archive faite depuis le dossier du module)."""
+    if (folder / "module.json").is_file():
+        return folder
+    subs = [d for d in folder.iterdir() if d.is_dir() and not d.name.startswith((".", "__"))]
+    if len(subs) == 1 and (subs[0] / "module.json").is_file():
+        return subs[0]
+    raise ValueError("Ce n'est pas un module : il manque le fichier module.json.")
+
+
+def import_module(src, replace: bool = False) -> str:
+    """Copie un module (dossier, ou archive .zip) dans le dossier des modules et rend son identifiant.
+    FileExistsError s'il y en a déjà un du même nom (replace=True le remplace) ; ValueError si ce n'est pas un module. Le module n'est pas activé."""
+    src = Path(src)
+    tmp = None
+    try:
+        name = src.stem if src.is_file() else src.name
+        if src.is_file():
+            if src.suffix.lower() != ".zip":
+                raise ValueError("Choisissez le dossier du module, ou une archive .zip.")
+            tmp = Path(tempfile.mkdtemp(prefix="velora-module-"))
+            with zipfile.ZipFile(src) as z:
+                if sum(i.file_size for i in z.infolist()) > MAX_UNZIPPED:
+                    raise ValueError("Archive trop volumineuse pour un module.")
+                for i in z.infolist():
+                    if i.filename.startswith(("/", "\\")) or ".." in Path(i.filename).parts or ":" in i.filename:
+                        raise ValueError("Archive refusée : chemins inattendus.")
+                z.extractall(tmp)
+            root = _root_of(tmp)
+            name = root.name if root != tmp else name
+        else:
+            root = _root_of(src)
+            name = root.name
+        if not (root / "module.py").is_file():
+            raise ValueError("Ce n'est pas un module : il manque le fichier module.py.")
+        mid = re.sub(r"[^A-Za-z0-9_-]", "_", name).strip("_-") or "module"
+        if not _ID.match(mid):
+            raise ValueError("Nom de module invalide.")
+        DIR.mkdir(parents=True, exist_ok=True)
+        dest = DIR / mid
+        if dest.exists():
+            if not replace:
+                raise FileExistsError(mid)
+            shutil.rmtree(dest)
+        shutil.copytree(root, dest, ignore=shutil.ignore_patterns("__pycache__", ".pytest_cache", ".DS_Store"))
+        return mid
+    finally:
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+def remove_module(mid: str) -> None:
+    """Supprime le dossier d'un module et ses réglages (sans retour possible). L'application le retire de la mémoire au prochain lancement."""
+    if not _ID.match(mid or ""):
+        raise ValueError("Nom de module invalide.")
+    set_enabled(mid, False)
+    shutil.rmtree(DIR / mid, ignore_errors=True)
+    db.kv_set(f"module:{mid}:cfg", "")
+    status.pop(mid, None)
 
 
 def discover() -> list[dict]:
