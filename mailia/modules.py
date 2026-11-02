@@ -44,6 +44,10 @@ def set_enabled(mid: str, on: bool) -> None:
 def discover() -> list[dict]:
     """Les modules présents dans le dossier : {id, name, version, description, api, error?}."""
     out = []
+    try:
+        DIR.mkdir(parents=True, exist_ok=True)  # le dossier existe toujours : l'utilisateur n'a rien à créer à la main
+    except OSError:
+        pass
     if not DIR.is_dir():
         return out
     for d in sorted(p for p in DIR.iterdir() if p.is_dir() and not p.name.startswith((".", "_"))):
