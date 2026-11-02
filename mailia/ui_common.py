@@ -178,7 +178,7 @@ def reveal(path: Path) -> None:
         if sys.platform == "darwin":
             subprocess.Popen(["open", "-R", str(path)])
         elif sys.platform.startswith("win"):
-            subprocess.Popen(["explorer", "/select,", str(path)])
+            subprocess.Popen(["explorer", "/select," + str(path)])
         else:
             subprocess.Popen(["xdg-open", str(path.parent)])
     except Exception:

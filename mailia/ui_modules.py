@@ -2,7 +2,7 @@
 from nicegui import ui
 
 from mailia import db, modules
-from mailia.ui_common import reveal
+from mailia.ui_common import open_folder
 
 
 def modules_settings() -> None:
@@ -70,7 +70,7 @@ def modules_settings() -> None:
                             sw.disable()
             with ui.row().classes("items-center gap-3 q-mt-sm"):
                 ui.button("Ouvrir le dossier des modules", icon="folder_open",
-                          on_click=lambda: (modules.DIR.mkdir(parents=True, exist_ok=True), reveal(modules.DIR))).props("outline no-caps color=primary")
+                          on_click=lambda: (modules.DIR.mkdir(parents=True, exist_ok=True), open_folder(modules.DIR))).props("outline no-caps color=primary")
                 ui.label("Pour ajouter un module, copiez son dossier ici ; pour le supprimer, désactivez-le puis mettez son dossier à la corbeille.").classes("text-caption text-grey col")
 
     draw()
