@@ -69,8 +69,14 @@ def modules_settings() -> None:
                         if info.get("error"):
                             sw.disable()
             with ui.row().classes("items-center gap-3 q-mt-sm"):
-                ui.button("Ouvrir le dossier des modules", icon="folder_open",
-                          on_click=lambda: (modules.DIR.mkdir(parents=True, exist_ok=True), open_folder(modules.DIR))).props("outline no-caps color=primary")
-                ui.label("Pour ajouter un module, copiez son dossier ici ; pour le supprimer, désactivez-le puis mettez son dossier à la corbeille.").classes("text-caption text-grey col")
+                ui.button("Ouvrir le dossier des modules", icon="folder_open", on_click=open_dir).props("outline no-caps color=primary")
+                with ui.column().classes("col gap-0"):
+                    ui.label("Pour ajouter un module, copiez son dossier ici ; pour le supprimer, désactivez-le puis mettez son dossier à la corbeille.").classes("text-caption text-grey")
+                    ui.label(str(modules.DIR)).classes("text-caption text-grey").style("user-select:text")
+
+    def open_dir() -> None:
+        modules.DIR.mkdir(parents=True, exist_ok=True)
+        if not open_folder(modules.DIR):
+            ui.notify(f"Le dossier n'a pas pu s'ouvrir : {modules.DIR}", type="warning")
 
     draw()

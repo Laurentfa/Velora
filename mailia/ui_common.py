@@ -185,8 +185,8 @@ def reveal(path: Path) -> None:
         pass
 
 
-def open_folder(path: Path) -> None:
-    """Ouvre un dossier dans le Finder / l'Explorateur."""
+def open_folder(path: Path) -> bool:
+    """Ouvre un dossier dans le Finder / l'Explorateur. Rend False (et garde la raison dans le journal) si le système n'a pas pu l'ouvrir."""
     try:
         if sys.platform == "darwin":
             subprocess.Popen(["open", str(path)])
@@ -194,8 +194,10 @@ def open_folder(path: Path) -> None:
             os.startfile(str(path))  # type: ignore[attr-defined]
         else:
             subprocess.Popen(["xdg-open", str(path)])
+        return True
     except Exception:
-        pass
+        logging.getLogger("mailia").warning("Ouverture du dossier impossible : %s", path, exc_info=True)
+        return False
 
 
 PRINTABLE = {"pdf", "png", "jpg", "jpeg", "gif", "webp", "bmp", "heic", "heif", "txt", "csv", "tsv", "log", "md", "json", "xml",
