@@ -50,6 +50,11 @@ if "--mcp-stdio" in sys.argv:  # pont pour les assistants qui lancent un program
     _bridge(sys.argv)
     sys.exit(0)
 
+if "--chrome-host" in sys.argv:  # relais lancé par Chrome pour l'extension Velora (messagerie native) : aucune interface
+    from mailia.chromebridge import run_host as _host
+    _host()
+    sys.exit(0)
+
 from mailia import perf  # en premier : le chronomètre de démarrage part d'ici
 from mailia import nicegui_tweaks
 nicegui_tweaks.install()
@@ -60,7 +65,7 @@ from nicegui import app, background_tasks, native, run, ui
 
 from mailia import ai, aipolicy, apiserver, compose, config, db, folder_order, folder_tree, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, vault, wizard
 from html import escape as html_escape
-from mailia import modules
+from mailia import chromebridge, modules
 from mailia.textutil import for_ai, split_links
 from mailia.ui_account import friendly_error
 from mailia.ui_agenda import AgendaMixin
@@ -156,6 +161,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         self.cids: dict[str, dict] = {}  # message -> {cid: url data:} des images incrustées
         self.rep_folder = ""  # dossier d'où la conversation a été ouverte : c'est là que s'appliquent archiver / supprimer
         self.tsum: dict[str, str] = {}
+        self.fwd_src: dict | None = None  # message en cours de transfert : les outils des modules (carte patient…) restent affichés
         self.new = False  # True : formulaire « nouveau message » affiché à la place d'un mail
         self.draft = {"account": "", "to": "", "cc": "", "bcc": "", "subject": "", "body": "", "ins": "", "tone": "neutre",
                       "files": [], "quote": True, "html": "", "gen": False, "id": "", "reply_to": None, "importance": 1}
@@ -796,6 +802,8 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                 ui.label("Nouveau message").classes("text-h6").style("font-weight:700")
             with ui.scroll_area().classes("rbody"):
                 with ui.column().classes("rcontent gap-3"):
+                    if self.fwd_src and str(self.draft.get("reply_to") or "").startswith("fwd:"):
+                        modules.render_slot("reader", self, self.fwd_src)
                     self.composer()
             return
         if not m and self.view == "brief":
@@ -1080,8 +1088,9 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         me = sync.ACCOUNTS[cur["account"]].email.lower()
         subject = re.sub(r"^\s*((re|tr|fwd?|rép?)\s*:\s*)+", "", th[-1]["subject"], flags=re.I) or th[-1]["subject"]
         names: list[str] = []
+        drafts = sync.drafts_folder(cur["account"])
         for x in th:
-            who = "Moi" if x["sender"].lower() == me else (x["sender_name"] or x["sender"])
+            who = "Moi" if x["sender"].lower() == me or x.get("folder") == drafts else (x["sender_name"] or x["sender"])
             if who not in names:
                 names.append(who)
         with ui.column().classes("rhead gap-1"):
@@ -1111,17 +1120,23 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                     self.thread_card(x, me)
 
     def thread_card(self, x: dict, me: str) -> None:
-        mine = x["sender"].lower() == me
+        draft = bool(x.get("folder")) and x["folder"] == sync.drafts_folder(x["account"])  # brouillon du fil : pas d'expéditeur, il n'est pas parti
+        mine = x["sender"].lower() == me or draft
         opened = x["id"] in self.expanded
         focus = " focus" if self.cur and self.cur["id"] == x["id"] else ""
         unread = not x["is_read"]
         with ui.element("div").classes("tcard" + focus):
             with ui.element("div").classes("thead").on("click", lambda _, i=x["id"]: self.toggle_card(i)):
-                ui.avatar(initials(x["sender_name"] or x["sender"]), color="blue-1", text_color="blue-9", size="32px")
+                if draft:
+                    ui.avatar("edit_note", color="blue-1", text_color="blue-9", size="32px")
+                else:
+                    ui.avatar(initials(x["sender_name"] or x["sender"]), color="blue-1", text_color="blue-9", size="32px")
                 with ui.element("div").classes("who"):
-                    with ui.element("div").classes("name" + (" unread" if unread else "")):
-                        ui.label(x["sender_name"] or x["sender"]).style("display:inline")
-                        if mine:
+                    with ui.element("div").classes("name" + (" unread" if unread and not draft else "")):
+                        ui.label("Moi" if draft else x["sender_name"] or x["sender"]).style("display:inline")
+                        if draft:
+                            ui.label("Brouillon").classes("me-badge")
+                        elif mine:
                             ui.label("Moi").classes("me-badge")
                     if opened:
                         ui.label("À : " + (x["to_addrs"] or "—")).classes("snip")
@@ -2055,6 +2070,7 @@ if not DB_ERROR:
     app.on_startup(lambda: background_tasks.create(_start_api()))
     app.add_static_files("/weather-icons", str(weather.ICONS))  # icônes météo animées (Meteocons, licence MIT)
     app.add_static_files("/pet", str(ui_pet.DIR))  # chat de compagnie
+    app.on_startup(chromebridge.start)  # liaison avec l'extension Chrome (Windows)
     modules.load_all()  # modules personnels activés dans les Paramètres (aucun par défaut)
 
     @app.get("/_velora/ping/{cid}")

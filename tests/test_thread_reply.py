@@ -44,3 +44,28 @@ async def test_each_message_has_reply_and_forward_and_replying_targets_that_mess
     from tests.conftest import wait_until
     await wait_until(lambda: b.compose)
     assert b.cur["id"] == "testbox|INBOX|0" and b.draft["reply_to"] == "testbox|INBOX|0" and "alice@example.com" in b.draft["to"]
+
+
+async def test_a_draft_in_the_thread_is_labelled_not_shown_as_an_unknown_sender(user, box) -> None:
+    from mailia import db
+    with db.conn() as c:
+        c.execute("INSERT OR REPLACE INTO folders(account,key,name,path,role,sync) VALUES('testbox','Drafts','Brouillons','Brouillons','drafts',0)")
+    add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv", date="2026-10-01T10:00:00+00:00")
+    add_message("testbox|Drafts|1", sender="", subject="Dossier X", ckey="testbox|conv", date="2026-10-02T10:00:00+00:00", folder="Drafts")
+    await user.open("/")
+    await box[-1].open("testbox|INBOX|0")
+    await user.should_see("Brouillon")
+    await user.should_see("Moi")
+
+
+async def test_module_tools_stay_visible_when_forwarding(user, box, monkeypatch) -> None:
+    from mailia import modules
+    monkeypatch.setitem(modules.slots, "reader", [{"module": "essai", "order": 1, "build": lambda api, mb, msg: ui.label(f"CARTE {msg['id']}")}])
+    add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv")
+    await user.open("/")
+    b = box[-1]
+    await b.open("testbox|INBOX|0")
+    await user.should_see("CARTE testbox|INBOX|0")
+    await b.forward()
+    assert b.new
+    await user.should_see("CARTE testbox|INBOX|0")

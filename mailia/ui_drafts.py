@@ -170,7 +170,7 @@ class DraftsMixin:
             return ui.notify("Aucun compte configuré (⚙ Paramètres).", type="warning")
         self.draft.update(account=self.account if self.account in accounts else accounts[0], to="", cc="", bcc="", subject="",
                           body="", ins="", tone="neutre", files=[], quote=False, importance=1, html=compose.initial_html(account=self.account if self.account in accounts else accounts[0]), gen=False)
-        self.new, self.cur, self.compose = True, None, True
+        self.new, self.cur, self.compose, self.fwd_src = True, None, True, None
         self.draft.update(id=uuid.uuid4().hex, reply_to=None)
         self._saved_sig = self._files_sig = None
         self.root.classes(add="reading")
@@ -210,6 +210,7 @@ class DraftsMixin:
         # « TR: » sans espace avant les deux-points : Exchange ne reconnaît pas « TR : » et ouvrirait une autre conversation
         self.draft.update(account=acct, subject=subject if re.match(r"(?i)\s*(tr|fwd?)\s*:", subject) else "TR: " + subject, files=files, importance=1,
                           html=compose.initial_html(reply_to=m, account=acct, images=True), reply_to="fwd:" + m["id"])  # « fwd: » : à l'envoi, l'original est marqué « transféré »
+        self.fwd_src = m
         self.files_view.refresh()
         self.reader.refresh()
 
