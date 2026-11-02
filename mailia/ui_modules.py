@@ -10,15 +10,17 @@ from mailia import db, modules
 def modules_settings() -> None:
     ui.label("Modules").classes("text-h6").style("font-weight:700")
     ui.label("Fonctionnalités personnelles ajoutées à Velora, rangées dans un dossier à part. Un module s'exécute avec vos droits : "
-             "n'activez que ceux dont vous êtes sûr. Un changement s'applique au prochain lancement de Velora.").classes("text-body2 text-grey")
+             "n'activez que ceux dont vous êtes sûr. Un changement s'applique tout de suite.").classes("text-body2 text-grey")
     box = ui.column().classes("w-full gap-2 q-mt-sm")
 
     def set_master(on: bool) -> None:
         db.kv_set("modules_on", "1" if on else "0")
+        modules.apply()
         draw()
 
     def set_module(mid: str, on: bool) -> None:
         modules.set_enabled(mid, on)
+        modules.apply(mid)
         draw()
 
     def state_of(info: dict, wanted: bool) -> tuple[str, str]:
@@ -32,9 +34,9 @@ def modules_settings() -> None:
         if wanted and loaded:
             return "Chargé", "positive"
         if wanted:
-            return "S'activera au prochain lancement", "primary"
+            return "En cours d'activation", "primary"
         if loaded:
-            return "Sera retiré au prochain lancement", "primary"
+            return "En cours de retrait", "primary"
         return "Désactivé", "grey"
 
     def draw() -> None:
@@ -94,7 +96,8 @@ def modules_settings() -> None:
                 mid = await run.io_bound(modules.import_module, path, True)
         except (ValueError, OSError) as err:
             return ui.notify(str(err), type="negative")
-        ui.notify(f"Module « {mid} » importé. Activez-le avec son interrupteur ; il se charge au prochain lancement.", type="positive", multi_line=True)
+        ui.notify(f"Module « {mid} » importé. Activez-le avec son interrupteur.", type="positive", multi_line=True)
+        modules.apply(mid)  # un module remplacé est rechargé tout de suite
         draw()
 
     async def pick_folder() -> None:
@@ -124,7 +127,8 @@ def modules_settings() -> None:
                 ui.button("Supprimer", on_click=lambda: dlg.submit(True)).props("unelevated no-caps color=negative").mark("module-delete-confirm")
         if await dlg:
             await run.io_bound(modules.remove_module, info["id"])
-            ui.notify("Module supprimé. Il sera retiré de la mémoire au prochain lancement.", type="positive")
+            modules.apply(info["id"])
+            ui.notify("Module supprimé.", type="positive")
             draw()
 
     up = ui.upload(on_upload=on_zip, auto_upload=True).props("hide-upload-btn accept=.zip").style(

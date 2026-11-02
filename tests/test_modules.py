@@ -191,3 +191,26 @@ async def test_settings_can_delete_a_module_after_confirmation(user: User, mod_d
     user.find(marker="module-delete-confirm").click()
     await user.should_see("Module supprimé")
     assert not (mod_dir / "alpha").exists()
+
+
+def test_a_module_can_be_enabled_and_removed_without_restarting(mod_dir, monkeypatch) -> None:
+    make(mod_dir, "alpha", "def register(api):\n    api.add_view('v', 'Alpha', 'star', lambda a: None)\n    api.add_reader_widget(lambda a, m, msg: None)\n    api.provide('s', lambda: 1)\n")
+    db.kv_set("modules_on", "1")
+    seen = []
+    monkeypatch.setattr(modules, "on_change", lambda: seen.append(1))
+    modules.apply("alpha")  # pas activé : rien ne se charge
+    assert not modules.views and not modules.slots["reader"] and seen == [1]
+    modules.set_enabled("alpha", True)
+    modules.apply("alpha")
+    assert list(modules.views) == ["mod_alpha_v"] and "mod_alpha_v" in VIEWS and len(modules.slots["reader"]) == 1 and "s" in modules.services
+    assert modules.status["alpha"] == "ok"
+    modules.set_enabled("alpha", False)
+    modules.apply("alpha")
+    assert not modules.views and "mod_alpha_v" not in VIEWS and not modules.slots["reader"] and not modules.services and "alpha" not in modules.status
+    modules.set_enabled("alpha", True)
+    modules.apply("alpha")
+    modules.apply()  # l'interrupteur général : tout est rechargé, rien n'est en double
+    assert len(modules.slots["reader"]) == 1 and len(modules.views) == 1
+    db.kv_set("modules_on", "0")
+    modules.apply()
+    assert not modules.views and not modules.slots["reader"]

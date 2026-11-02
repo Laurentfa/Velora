@@ -101,7 +101,7 @@ def import_module(src, replace: bool = False) -> str:
 
 
 def remove_module(mid: str) -> None:
-    """Supprime le dossier d'un module et ses réglages (sans retour possible). L'application le retire de la mémoire au prochain lancement."""
+    """Supprime le dossier d'un module et ses réglages (sans retour possible). Pour qu'il disparaisse tout de suite, appeler apply(mid)."""
     if not _ID.match(mid or ""):
         raise ValueError("Nom de module invalide.")
     set_enabled(mid, False)
@@ -191,8 +191,47 @@ class ModuleAPI:
         return await run.io_bound(fn, *args)
 
 
+on_change = lambda: None  # posé par l'interface : redessine la barre latérale et le message affiché quand un module apparaît ou disparaît
+
+
+def unload(mid: str) -> None:
+    """Retire de Velora tout ce qu'un module avait ajouté (vues, outils sous les messages, services). Ses tâches de fond éventuelles tournent jusqu'au prochain lancement."""
+    from mailia.ui_common import NOLIST_VIEWS, VIEWS
+    for vid in [v for v, d in views.items() if d["module"] == mid]:
+        views.pop(vid, None)
+        VIEWS.pop(vid, None)
+        NOLIST_VIEWS.discard(vid)
+    for lst in slots.values():
+        lst[:] = [x for x in lst if x["module"] != mid]
+    for name in [n for n, it in services.items() if it["module"] == mid]:
+        services.pop(name, None)
+    status.pop(mid, None)
+
+
+def _load(info: dict) -> None:
+    mid = info["id"]
+    if info.get("error"):
+        status[mid] = info["error"]
+        return
+    if int(info.get("api") or 1) > API_VERSION:
+        status[mid] = "demande une version plus récente de Velora"
+        return
+    try:
+        spec = importlib.util.spec_from_file_location(f"velora_module_{mid}", info["dir"] / "module.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.register(ModuleAPI(info))
+        status[mid] = "ok"
+    except Exception as e:  # noqa: BLE001 — un module ne doit jamais empêcher Velora de démarrer
+        log.exception("module %s : échec au chargement", mid)
+        unload(mid)  # ses vues et outils à moitié ajoutés sont retirés
+        status[mid] = f"{type(e).__name__} : {str(e)[:160]}"
+
+
 def load_all() -> None:
-    """Charge les modules activés. Appelé une fois au démarrage ; un changement dans les Paramètres s'applique au redémarrage."""
+    """Charge les modules activés (au démarrage, ou quand l'interrupteur général change)."""
+    for mid in list(status) + [d["module"] for d in views.values()]:
+        unload(mid)
     views.clear()
     status.clear()
     services.clear()
@@ -202,30 +241,24 @@ def load_all() -> None:
         return
     on = enabled_ids()
     for info in discover():
-        mid = info["id"]
-        if mid not in on:
-            continue
-        if info.get("error"):
-            status[mid] = info["error"]
-            continue
-        if int(info.get("api") or 1) > API_VERSION:
-            status[mid] = "demande une version plus récente de Velora"
-            continue
-        try:
-            spec = importlib.util.spec_from_file_location(f"velora_module_{mid}", info["dir"] / "module.py")
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            mod.register(ModuleAPI(info))
-            status[mid] = "ok"
-        except Exception as e:  # noqa: BLE001 — un module ne doit jamais empêcher Velora de démarrer
-            log.exception("module %s : échec au chargement", mid)
-            status[mid] = f"{type(e).__name__} : {str(e)[:160]}"
-            for vid in [v for v, d in views.items() if d["module"] == mid]:  # ses vues et outils à moitié ajoutés sont retirés
-                views.pop(vid, None)
-            for lst in slots.values():
-                lst[:] = [x for x in lst if x["module"] != mid]
-            for name in [n for n, it in services.items() if it["module"] == mid]:
-                services.pop(name, None)
+        if info["id"] in on:
+            _load(info)
+
+
+def apply(mid: str | None = None) -> None:
+    """Applique tout de suite un changement (activation, suppression, import) sans redémarrer : un module, ou tous si mid est None."""
+    if mid is None:
+        load_all()
+    else:
+        unload(mid)
+        if master_on() and mid in enabled_ids():
+            info = next((i for i in discover() if i["id"] == mid), None)
+            if info:
+                _load(info)
+    try:
+        on_change()
+    except Exception:  # noqa: BLE001 — l'interface n'est peut-être pas affichée
+        log.debug("rafraîchissement après changement de module impossible", exc_info=True)
 
 
 def render(view_id: str) -> None:

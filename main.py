@@ -61,7 +61,7 @@ nicegui_tweaks.install()
 from mailia import config as _config  # léger : sert à ranger le stockage de session de l'interface dans le dossier de données
 os.environ.setdefault("NICEGUI_STORAGE_PATH", str(_config.DATA_DIR / ".nicegui"))
 
-from nicegui import app, background_tasks, native, run, ui
+from nicegui import Client, app, background_tasks, native, run, ui
 
 from mailia import ai, aipolicy, apiserver, compose, config, db, folder_order, folder_tree, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, vault, wizard
 from html import escape as html_escape
@@ -1945,6 +1945,16 @@ async def index_page() -> None:
     ui.on("uiready", lambda e: perf.browser_marks(e.args))
     ui.run_javascript("""requestAnimationFrame(() => requestAnimationFrame(() => { const n = performance.getEntriesByType('navigation')[0] || {};
       emitEvent('uiready', {origin: performance.timeOrigin, dcl: n.domContentLoadedEventEnd || 0, load: n.loadEventEnd || 0, now: performance.now()}); }))""")
+    page_client = ui.context.client
+
+    def modules_changed() -> None:  # un module vient d'apparaître ou de disparaître : barre latérale et message affiché sont redessinés
+        if page_client.id not in Client.instances:  # la fenêtre qui avait posé ce rappel est fermée
+            return
+        if box.view not in VIEWS:
+            box.view = "inbox"
+        box.side.refresh()
+        box.reader.refresh()
+    modules.on_change = modules_changed
     ui.timer(3, box.tick)
     ui.timer(5, box.autosave)
     ui.timer(2, box.watch_outbox)
