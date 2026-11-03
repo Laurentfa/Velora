@@ -78,7 +78,7 @@ from mailia import apple_writer, icons, weather
 from mailia.brand import logo_big, logo_img
 from mailia.ui_bulk import BulkMixin
 from mailia.ui_cleanup import CleanupMixin
-from mailia.ui_common import CAT, JOURS_LONG, MOIS, NOLIST_VIEWS, SERVER_MODE, VIEWS, ago, full_date, human_size, initial_view, initials, label_of, log, short_date
+from mailia.ui_common import CAT, JOURS_LONG, MOIS, NOLIST_VIEWS, SERVER_MODE, VIEWS, ago, full_date, human_size, initial_view, initials, label_of, log, open_file, print_message_file, short_date
 from mailia.ui_compose_ai import ComposeAiMixin
 from mailia.ui_dictation import DictationMixin
 from mailia.ui_drafts import DraftsMixin
@@ -1159,6 +1159,8 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                             "Répondre à tous").mark(f"tc-replyall-{x['id']}")
                     ui.button(icon="forward").props("flat dense round size=sm color=primary").on("click.stop", lambda _, x=x: self.forward(x)).tooltip(
                         "Transférer ce message").mark(f"tc-forward-{x['id']}")
+                    ui.button(icon="print").props("flat dense round size=sm color=primary").on("click.stop", lambda _, x=x: self.print_message(x)).tooltip(
+                        "Imprimer ce message").mark(f"tc-print-{x['id']}")
             if opened:
                 with ui.element("div").classes("tbody"):
                     if x["cc_addrs"]:
@@ -1178,6 +1180,23 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                                     ui.button(icon="visibility", on_click=lambda _, a=a, x=x: self.preview(a, x)).props(
                                         "flat dense round size=sm color=grey-8").tooltip(f"Aperçu de {a['name']}")
                             self.attachments_zip_button(atts, x)
+
+    def print_message(self, x: dict) -> None:
+        """Imprime CE message seul (pas toute la conversation) : une page propre est ouverte dans le navigateur du système, qui lance la boîte d'impression."""
+        html = x.get("body_html")
+        clean, allow = None, False
+        if html:
+            clean, _ = htmlmail.strip_trackers(htmlmail.sanitize(html))
+            sender = (x.get("sender") or "").strip().lower()
+            allow = x["id"] in self.images or (bool(sender) and sender in self.trusted_senders())  # mêmes règles que l'affichage : images distantes seulement si autorisées
+        who = (f"{x['sender_name']} <{x['sender']}>" if x.get("sender_name") and x.get("sender_name") != x.get("sender") else x.get("sender") or "")
+        atts = json.loads(x["att_json"]) if x.get("att_json") else []
+        head = {"subject": x.get("subject"), "from": who, "to": x.get("to_addrs"), "cc": x.get("cc_addrs"), "bcc": x.get("bcc_addrs"),
+                "date": full_date(x["date"]) if x.get("date") else "", "attachments": [a.get("name", "") for a in atts]}
+        doc = htmlmail.build_print_doc(head, clean, x.get("body") or "", allow, self.cids.get(x["id"]))
+        path = print_message_file(x.get("subject") or "message", doc)
+        if not open_file(path):
+            ui.notify(f"Le message n'a pas pu s'ouvrir pour l'impression : {path}", type="warning")
 
     async def reply_message(self, x: dict, all_: bool = False) -> None:
         """Répondre à un message précis de la conversation (et non au dernier) : il devient le message de référence, cité dans la réponse."""

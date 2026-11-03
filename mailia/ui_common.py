@@ -269,6 +269,39 @@ def open_to_print(name: str, data: bytes) -> Path:
     return path
 
 
+def print_message_file(subject: str, doc: str) -> Path:
+    """Enregistre la page d'impression d'un message dans un dossier temporaire (supprimé au bout d'un jour, comme pour les pièces jointes) et rend son chemin."""
+    import shutil
+    import tempfile
+    import time
+    root = Path(tempfile.gettempdir())
+    for old in root.glob(PRINT_DIR_PREFIX + "*"):
+        try:
+            if time.time() - old.stat().st_mtime > 86400:
+                shutil.rmtree(old, ignore_errors=True)
+        except OSError:
+            pass
+    safe = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", subject or "message").strip(". ")[:80] or "message"
+    path = Path(tempfile.mkdtemp(prefix=PRINT_DIR_PREFIX)) / f"{safe}.html"
+    path.write_text(doc, encoding="utf-8")
+    return path
+
+
+def open_file(path: Path) -> bool:
+    """Ouvre un fichier avec l'application du système (pour une page .html : le navigateur par défaut). Rend False si le système n'a pas pu."""
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        elif sys.platform.startswith("win"):
+            os.startfile(str(path))  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+        return True
+    except Exception:
+        log.warning("Ouverture du fichier impossible : %s", path, exc_info=True)
+        return False
+
+
 _launched = {"done": False}  # la première ouverture d'une fenêtre depuis le lancement de l'appli applique la boîte par défaut
 
 

@@ -69,3 +69,23 @@ async def test_module_tools_stay_visible_when_forwarding(user, box, monkeypatch)
     await b.forward()
     assert b.new
     await user.should_see("CARTE testbox|INBOX|0")
+
+
+async def test_each_message_of_a_conversation_can_be_printed_on_its_own(user, box, monkeypatch) -> None:
+    import shutil
+    from pathlib import Path
+    opened = []
+    monkeypatch.setattr(main, "open_file", lambda p: opened.append(Path(p)) or True)
+    add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv", date="2026-10-01T10:00:00+00:00", body="Premier message")
+    add_message("testbox|INBOX|1", sender="bob@example.com", subject="Re: Dossier X", ckey="testbox|conv", date="2026-10-02T10:00:00+00:00", body="Deuxième message")
+    await user.open("/")
+    await box[-1].open("testbox|INBOX|1")
+    await user.should_see("Dossier X")
+    el = user.find(marker="tc-print-testbox|INBOX|0").elements.pop()
+    with user.client:  # le bouton écoute « click.stop » : on envoie l'événement tel quel
+        for lid in list(el._event_listeners):
+            el._handle_event({"listener_id": lid, "args": {}})
+    assert len(opened) == 1
+    page = opened[0].read_text(encoding="utf-8")
+    shutil.rmtree(opened[0].parent, ignore_errors=True)
+    assert "Premier message" in page and "Deuxième message" not in page and "alice@example.com" in page and "window.print()" in page

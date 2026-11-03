@@ -165,6 +165,47 @@ def build_doc(clean: str, allow_images: bool = False, cid_map: dict[str, str] | 
             f'<style>{BASE_CSS}{MARK_CSS}{dark_css}</style></head><body>{clean}<script nonce="{nonce}">{PAGE_JS}</script>{hl}</body></html>')
 
 
+PRINT_CSS = """
+@page{margin:16mm}
+body{font:14px/1.5 -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111;background:#fff;margin:0 auto;max-width:900px;padding:24px}
+h1{font-size:20px;margin:0 0 12px}
+.head{border-bottom:2px solid #999;padding-bottom:10px;margin-bottom:16px}
+.head div{margin:2px 0}
+.head b{display:inline-block;min-width:62px;color:#555}
+.att{margin-top:18px;padding-top:8px;border-top:1px solid #ccc;font-size:13px}
+.plain{white-space:pre-wrap;word-wrap:break-word}
+img{max-width:100%;height:auto}
+a{color:#111}
+@media screen{.hint{background:#eef3ff;border:1px solid #c9d7ff;border-radius:6px;padding:8px 12px;margin-bottom:16px;font-size:13px}}
+@media print{.hint{display:none}}
+"""
+
+
+def build_print_doc(head: dict, clean: str | None, text: str, allow_images: bool = False, cid_map: dict[str, str] | None = None) -> str:
+    """Page à imprimer pour UN message : en-tête (objet, de, à, cc, date), corps (HTML nettoyé, sinon texte brut) et noms des pièces jointes.
+    Ouverte dans le navigateur du système, elle lance la boîte d'impression ; le contenu du mail ne peut rien exécuter (politique de sécurité à jeton)."""
+    esc = _html.escape
+    nonce = secrets.token_urlsafe(12)
+    if clean:
+        for cid, uri in (cid_map or {}).items():
+            clean = re.sub(r"cid:" + re.escape(cid), lambda _: uri, clean, flags=re.I)
+            clean = re.sub(r"cid:%3C" + re.escape(cid) + "%3E", lambda _: uri, clean, flags=re.I)
+        body = f'<div class="body">{clean}</div>'
+    else:
+        body = f'<div class="plain">{esc(text or "")}</div>'
+    rows = "".join(f'<div><b>{esc(label)}</b> {esc(value)}</div>' for label, value in
+                   (("De :", head.get("from")), ("À :", head.get("to")), ("Cc :", head.get("cc")), ("Cci :", head.get("bcc")), ("Date :", head.get("date"))) if value)
+    atts = head.get("attachments") or []
+    att_html = ('<div class="att"><b>Pièces jointes :</b> ' + esc(" · ".join(atts)) + "</div>") if atts else ""
+    imgs = "data: https: http:" if allow_images else "data:"
+    csp = f"default-src 'none'; img-src {imgs}; style-src 'unsafe-inline'; font-src data:; script-src 'nonce-{nonce}'"
+    return (f'<!doctype html><html><head><meta charset="utf-8"><title>{esc(head.get("subject") or "(sans objet)")}</title>'
+            f'<meta http-equiv="Content-Security-Policy" content="{esc(csp, quote=True)}"><style>{PRINT_CSS}</style></head><body>'
+            f'<div class="hint">La boîte d\'impression s\'ouvre toute seule. Si ce n\'est pas le cas : ⌘P (Mac) ou Ctrl+P (Windows).</div>'
+            f'<div class="head"><h1>{esc(head.get("subject") or "(sans objet)")}</h1>{rows}</div>{body}{att_html}'
+            f'<script nonce="{nonce}">window.addEventListener("load", () => setTimeout(() => window.print(), 400));</script></body></html>')
+
+
 # ---------- rédaction : HTML sortant ----------
 OUT_ATTRS = {**ATTRS, "img": {"src", "alt", "width", "height", "style"}, "td": {"style", "colspan", "rowspan", "width", "align", "valign", "bgcolor"},
              "table": {"style", "border", "cellpadding", "cellspacing", "width", "align", "bgcolor"}}
