@@ -66,7 +66,7 @@ class OutboxMixin:
             replying = bool(m) and not self.new  # une réponse : on peut ranger la conversation d'origine en même temps
             arch = None
             if replying:
-                arch = ui.checkbox("Archiver la conversation après l'envoi", value=db.kv_get("send_archive") == "1").props("dense").mark("send-archive")
+                arch = ui.checkbox("Archiver la conversation après l'envoi", value=False).props("dense").mark("send-archive")
 
             def confirm() -> None:
                 dlg.submit({"when": when.value, "custom": custom.value, "follow": int(follow.value or 0), "archive": bool(arch and arch.value), "receipt": bool(receipt.value)})
@@ -92,8 +92,6 @@ class OutboxMixin:
             at = opts[choice["when"]]
         oid = outgoing.queue(account, d["to"], d["cc"], d.get("bcc", ""), d["subject"], d["html"], d["files"], at, draft_id=d.get("id"),
                              reply_to=d.get("reply_to"), followup_days=choice["follow"], importance=d.get("importance", 1), receipt=choice["receipt"])
-        if replying:
-            db.kv_set("send_archive", "1" if choice["archive"] else "0")  # le choix est repris la prochaine fois
         self.close_compose()
         self._watch[oid] = d["subject"] or "(sans objet)"
         with self.host:  # le bouton cliqué a disparu avec l'éditeur : on repart d'un élément stable

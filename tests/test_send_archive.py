@@ -43,14 +43,24 @@ async def test_the_reply_dialog_offers_to_archive_and_does_it(user, box, monkeyp
     user.find(marker="send-go").click()
     await asyncio.wait_for(task, 10)
     assert calls == [("archive", ["testbox|INBOX|1"])]
-    assert db.kv_get("send_archive") == "1"  # le choix est repris la fois suivante
+    assert db.kv_get("send_archive") != "1"  # le choix n'est pas gardé : la case redevient décochée la fois suivante
 
 
 async def test_without_the_box_ticked_the_conversation_stays(user, box, monkeypatch) -> None:
     await user.open("/")
-    db.kv_set("send_archive", "0")
     b, task, calls = await _reply_dialog(box, monkeypatch, False)
     await user.should_see("Archiver la conversation après l'envoi")
+    user.find(marker="send-go").click()
+    await asyncio.wait_for(task, 10)
+    assert calls == []
+
+
+async def test_the_box_is_unticked_by_default_even_if_an_older_version_remembered_it(user, box, monkeypatch) -> None:
+    await user.open("/")
+    db.kv_set("send_archive", "1")  # ancien réglage mémorisé : ignoré
+    b, task, calls = await _reply_dialog(box, monkeypatch, False)
+    await user.should_see("Archiver la conversation après l'envoi")
+    assert user.find(marker="send-archive").elements.pop().value is False
     user.find(marker="send-go").click()
     await asyncio.wait_for(task, 10)
     assert calls == []
