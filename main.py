@@ -2154,6 +2154,11 @@ if __name__ in {"__main__", "__mp_main__"}:
         except Exception as e:  # noqa: BLE001
             log.info("App Nap : non désactivé (%s)", type(e).__name__)
     app.native.start_args["func"] = _native_context_menu  # s'exécute dans le processus de la fenêtre native
+    if sys.platform.startswith("win"):
+        # Windows : WebView2 n'a le menu clic droit standard (couper, copier, coller, orthographe) qu'en mode débogage de la fenêtre. On l'active, sans ouvrir la fenêtre
+        # des outils de développement au démarrage. Aucun code natif : c'est un réglage de la bibliothèque de fenêtre.
+        app.native.start_args["debug"] = True
+        app.native.settings["OPEN_DEVTOOLS_IN_DEBUG"] = False
     app.native.start_args.update(_webview_args())
     _conn = {}  # moment de la dernière déconnexion de la fenêtre : de quoi expliquer un rechargement dans le journal
 
