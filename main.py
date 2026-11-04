@@ -78,7 +78,7 @@ from mailia import apple_writer, icons, weather
 from mailia.brand import logo_big, logo_img
 from mailia.ui_bulk import BulkMixin
 from mailia.ui_cleanup import CleanupMixin
-from mailia.ui_common import CAT, JOURS_LONG, MOIS, NOLIST_VIEWS, SERVER_MODE, VIEWS, ago, full_date, human_size, initial_view, initials, label_of, log, open_file, print_message_file, short_date
+from mailia.ui_common import CAT, JOURS_LONG, MOIS, NOLIST_VIEWS, SERVER_MODE, VIEWS, ago, full_date, human_size, initial_view, initials, label_of, log, native_html_to_pdf, open_file, print_message_file, short_date
 from mailia.ui_compose_ai import ComposeAiMixin
 from mailia.ui_dictation import DictationMixin
 from mailia.ui_drafts import DraftsMixin
@@ -1181,7 +1181,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                                         "flat dense round size=sm color=grey-8").tooltip(f"Aperçu de {a['name']}")
                             self.attachments_zip_button(atts, x)
 
-    def print_message(self, x: dict) -> None:
+    async def print_message(self, x: dict) -> None:
         """Imprime CE message seul (pas toute la conversation) : un aperçu s'ouvre dans Velora (bouton « Imprimer » = boîte d'impression de la fenêtre) ;
         « Ouvrir dans le navigateur » ouvre la même page dans le navigateur du système, qui lance la boîte d'impression."""
         html = x.get("body_html")
@@ -1195,6 +1195,12 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         head = {"subject": x.get("subject"), "from": who, "to": x.get("to_addrs"), "cc": x.get("cc_addrs"), "bcc": x.get("bcc_addrs"),
                 "date": full_date(x["date"]) if x.get("date") else "", "attachments": [a.get("name", "") for a in atts]}
         cids = self.cids.get(x["id"])
+        if sys.platform == "darwin" and not SERVER_MODE:  # Mac : WebKit fabrique un PDF paginé, montré dans l'aperçu de Velora (bouton « Imprimer » = boîte d'impression du système)
+            html_path = print_message_file(x.get("subject") or "message", htmlmail.build_print_doc(head, clean, x.get("body") or "", allow, cids, autoprint=False))
+            pdf_path = html_path.with_suffix(".pdf")
+            if await run.io_bound(native_html_to_pdf, html_path, pdf_path):
+                data = pdf_path.read_bytes()
+                return await self.show_preview(pdf_path.name, data, f"print:{x['id']}", lambda: self._save_download(pdf_path.name, data), excluded=True)
 
         def browser() -> None:
             path = print_message_file(x.get("subject") or "message", htmlmail.build_print_doc(head, clean, x.get("body") or "", allow, cids))

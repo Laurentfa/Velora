@@ -377,6 +377,56 @@ def print_native(path: str) -> None:
         op.runOperation()
 
 
+def html_to_pdf(html_path: str, pdf_path: str, timeout: float = 30.0) -> None:
+    """macOS : PDF paginé d'une page HTML locale, produit par WebKit (le moteur de la fenêtre) dans une fenêtre cachée. À exécuter sur le fil principal.
+    L'impression de WebKit se fait en « feuille » sur une fenêtre : en mode bloquant elle ne finit jamais (WebKit calcule les pages en laissant tourner la boucle d'événements)."""
+    from AppKit import NSPrintInfo, NSPrintJobSavingURL, NSPrintSaveJob, NSWindow
+    from Foundation import NSDate, NSDefaultRunLoopMode, NSMakeRect, NSRunLoop, NSURL
+    from WebKit import WKWebView, WKWebViewConfiguration
+
+    def spin(seconds: float) -> None:
+        NSRunLoop.currentRunLoop().runMode_beforeDate_(NSDefaultRunLoopMode, NSDate.dateWithTimeIntervalSinceNow_(seconds))
+
+    html, out = Path(html_path), Path(pdf_path)
+    out.unlink(missing_ok=True)
+    info = NSPrintInfo.sharedPrintInfo().copy()
+    paper, left, right, top, bottom = info.paperSize(), info.leftMargin(), info.rightMargin(), info.topMargin(), info.bottomMargin()
+    size = NSMakeRect(0, 0, paper.width - left - right, paper.height - top - bottom)
+    web = WKWebView.alloc().initWithFrame_configuration_(size, WKWebViewConfiguration.alloc().init())
+    win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(NSMakeRect(-4000, -4000, size.size.width, size.size.height), 0, 2, False)
+    win.setContentView_(web)
+    win.orderBack_(None)
+    try:
+        web.loadFileURL_allowingReadAccessToURL_(NSURL.fileURLWithPath_(str(html)), NSURL.fileURLWithPath_(str(html.parent)))
+        end = time.time() + timeout
+        while (web.isLoading() or web.estimatedProgress() < 1.0) and time.time() < end:
+            spin(0.05)
+        if web.isLoading():
+            raise RuntimeError("page trop longue à charger")
+        for _ in range(10):  # laisse la mise en page se terminer
+            spin(0.05)
+        info.setJobDisposition_(NSPrintSaveJob)
+        info.dictionary()[NSPrintJobSavingURL] = NSURL.fileURLWithPath_(str(out))
+        op = web.printOperationWithPrintInfo_(info)
+        op.setShowsPrintPanel_(False)
+        op.setShowsProgressPanel_(False)
+        op.runOperationModalForWindow_delegate_didRunSelector_contextInfo_(win, None, None, None)
+        last, stable = -1, 0
+        while time.time() < end:
+            spin(0.1)
+            size_now = out.stat().st_size if out.exists() else 0
+            if size_now > 50_000_000:  # garde-fou : un PDF de page ne pèse jamais autant
+                out.unlink(missing_ok=True)
+                raise RuntimeError("PDF anormalement volumineux")
+            stable = stable + 1 if (size_now and size_now == last) else 0
+            last = size_now
+            if stable >= 4:
+                return
+        raise RuntimeError("PDF non produit à temps")
+    finally:
+        win.close()
+
+
 def watch_print(stop: threading.Event | None = None, every: float = 0.3, call_on_main=None) -> None:
     """Le programme principal demande une impression en écrivant « print_request » ; on l'exécute ici (fenêtre native) et on répond dans
     « print_status » : « <id>:ok » ou « <id>:échec … » (alors le programme ouvre le fichier dans Aperçu comme avant)."""
@@ -400,6 +450,10 @@ def watch_print(stop: threading.Event | None = None, every: float = 0.3, call_on
 
                 def run(req=req) -> None:
                     try:
+                        if req.get("html"):  # conversion d'une page HTML en PDF : la réponse est écrite une fois le fichier prêt
+                            html_to_pdf(req["html"], req["path"])
+                            db.kv_set("print_status", f"{req['id']}:ok")
+                            return
                         db.kv_set("print_status", f"{req['id']}:ok")  # écrit avant d'ouvrir : la boîte garde la main tant qu'elle est affichée
                         print_native(req["path"])
                     except Exception as e:

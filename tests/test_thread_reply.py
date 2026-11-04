@@ -76,6 +76,7 @@ async def test_each_message_of_a_conversation_can_be_printed_on_its_own(user, bo
     from pathlib import Path
     opened = []
     monkeypatch.setattr(main, "open_file", lambda p: opened.append(Path(p)) or True)
+    monkeypatch.setattr(main, "native_html_to_pdf", lambda html, pdf, timeout=40.0: False)  # la fenêtre native ne répond pas : repli sur l'aperçu de la page
     add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv", date="2026-10-01T10:00:00+00:00", body="Premier message")
     add_message("testbox|INBOX|1", sender="bob@example.com", subject="Re: Dossier X", ckey="testbox|conv", date="2026-10-02T10:00:00+00:00", body="Deuxième message")
     await user.open("/")
@@ -94,3 +95,35 @@ async def test_each_message_of_a_conversation_can_be_printed_on_its_own(user, bo
     page = opened[0].read_text(encoding="utf-8")
     shutil.rmtree(opened[0].parent, ignore_errors=True)
     assert "Premier message" in page and "Deuxième message" not in page and "alice@example.com" in page and "window.print()" in page
+
+
+async def test_on_mac_a_message_is_previewed_as_a_pdf_made_by_the_window(user, box, monkeypatch) -> None:
+    import shutil
+    monkeypatch.setattr(main.sys, "platform", "darwin")
+    monkeypatch.setattr(main, "SERVER_MODE", False)
+    made = []
+
+    def fake(html, pdf, timeout=40.0):
+        made.append((html.read_text(encoding="utf-8"), pdf))
+        pdf.write_bytes(b"%PDF-1.4 fake")
+        return True
+    monkeypatch.setattr(main, "native_html_to_pdf", fake)
+    shown = []
+
+    async def show_preview(self, name, data, key, download, excluded=False, send=None):
+        shown.append((name, data, excluded))
+    monkeypatch.setattr(main.Mailbox, "show_preview", show_preview)
+    add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv", date="2026-10-01T10:00:00+00:00", body="Premier message")
+    add_message("testbox|INBOX|1", sender="bob@example.com", subject="Re: Dossier X", ckey="testbox|conv", date="2026-10-02T10:00:00+00:00", body="Deuxième message")
+    await user.open("/")
+    await box[-1].open("testbox|INBOX|1")
+    await user.should_see("Dossier X")
+    el = user.find(marker="tc-print-testbox|INBOX|0").elements.pop()
+    with user.client:
+        for lid in list(el._event_listeners):
+            el._handle_event({"listener_id": lid, "args": {}})
+    from tests.conftest import wait_until
+    await wait_until(lambda: shown)
+    shutil.rmtree(made[0][1].parent, ignore_errors=True)
+    assert "Premier message" in made[0][0] and "Deuxième message" not in made[0][0]
+    assert shown[0][0].endswith(".pdf") and shown[0][1].startswith(b"%PDF") and shown[0][2] is True  # aperçu sans résumé IA
