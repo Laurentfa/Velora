@@ -537,6 +537,51 @@ def enable_windows_context_menu() -> None:
     threading.Thread(target=apply_to_ready_windows, daemon=True, name="menu-clic-droit").start()
 
 
+def watch_print_windows(stop: threading.Event | None = None, every: float = 0.3) -> None:
+    """Windows : le programme principal demande « print_request » avec {"ui": true} ; on ouvre la boîte d'impression de WebView2 (ShowPrintUI) sur la page de la
+    fenêtre et on répond dans « print_status » (« <id>:ok » ou « <id>:échec … » : le programme essaie alors window.print())."""
+    log = logging.getLogger("mailia")
+
+    def current() -> dict:
+        with db.conn() as c:
+            row = c.execute("SELECT v FROM kv WHERE k='print_request'").fetchone()
+        try:
+            return json.loads(row["v"]) if row else {}
+        except ValueError:
+            return {}
+
+    def show(rid: str) -> None:
+        try:
+            from System import Func, Type
+            from webview.platforms import winforms
+            view = next(iter(winforms.BrowserView.instances.values()))
+            core = view.browser.webview.CoreWebView2
+
+            def go():
+                try:
+                    from Microsoft.Web.WebView2.Core import CoreWebView2PrintDialogKind
+                    core.ShowPrintUI(CoreWebView2PrintDialogKind.Browser)  # aperçu avant impression de WebView2 (enregistrer en PDF, choix de l'imprimante…)
+                except ImportError:
+                    core.ShowPrintUI()
+            view.Invoke(Func[Type](go))
+            db.kv_set("print_status", f"{rid}:ok")
+        except Exception as e:  # noqa: BLE001
+            log.warning("impression (Windows) : %s", e)
+            db.kv_set("print_status", f"{rid}:échec {type(e).__name__} {str(e)[:100]}")
+
+    done = current().get("id")  # une demande restée d'un lancement précédent ne doit pas être rejouée
+    while not (stop and stop.is_set()):
+        try:
+            req = current()
+            if req.get("id") and req["id"] != done:
+                done = req["id"]
+                if req.get("ui"):
+                    show(req["id"])
+        except Exception as e:  # noqa: BLE001
+            log.warning("surveillance de l'impression (Windows) : %s", e)
+        time.sleep(every)
+
+
 def setup() -> None:
     """Fenêtre native (macOS) : la bibliothèque de fenêtre supprime tout menu clic droit hors mode débogage.
     On rétablit le menu standard (couper, copier, coller, orthographe…) sans les entrées qui feraient quitter l'appli."""
@@ -547,6 +592,7 @@ def setup() -> None:
         threading.Thread(target=watch_print, daemon=True, name="impression").start()
         threading.Thread(target=watch_iphone, daemon=True, name="iphone").start()
     if sys.platform.startswith("win"):
+        threading.Thread(target=watch_print_windows, daemon=True, name="impression").start()
         enable_windows_context_menu()
         return
     if sys.platform != "darwin":

@@ -78,7 +78,7 @@ from mailia import apple_writer, icons, weather
 from mailia.brand import logo_big, logo_img
 from mailia.ui_bulk import BulkMixin
 from mailia.ui_cleanup import CleanupMixin
-from mailia.ui_common import CAT, JOURS_LONG, MOIS, NOLIST_VIEWS, SERVER_MODE, VIEWS, ago, full_date, human_size, initial_view, initials, label_of, log, native_html_to_pdf, open_file, print_message_file, short_date
+from mailia.ui_common import CAT, JOURS_LONG, MOIS, NOLIST_VIEWS, SERVER_MODE, VIEWS, ago, full_date, human_size, initial_view, initials, label_of, log, native_html_to_pdf, native_print_ui, open_file, print_message_file, short_date
 from mailia.ui_compose_ai import ComposeAiMixin
 from mailia.ui_dictation import DictationMixin
 from mailia.ui_drafts import DraftsMixin
@@ -130,6 +130,18 @@ perf.install()
 
 
 _PAGE_LOADS = [0]  # nombre de pages affichées depuis le lancement (voir restore_open)
+
+
+PRINT_INJECT_JS = """(frag => {
+  for (const id of ['velora-print-root', 'velora-print-css']) { const old = document.getElementById(id); if (old) old.remove(); }
+  const css = document.createElement('style'); css.id = 'velora-print-css';
+  css.textContent = '#velora-print-root{display:none} @media print{body > *:not(#velora-print-root){display:none !important} #velora-print-root{display:block !important} html,body{background:#fff !important;overflow:visible !important;height:auto !important}}';
+  document.head.appendChild(css);
+  const host = document.createElement('div'); host.id = 'velora-print-root';
+  host.attachShadow({mode: 'open'}).innerHTML = frag;
+  document.body.appendChild(host);
+  window.addEventListener('afterprint', () => { host.remove(); css.remove(); }, {once: true});
+})(%s)"""  # le message est placé dans la page, dans un « shadow DOM » (ses styles ne débordent pas) ; masqué à l'écran, seul visible à l'impression
 
 
 class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin, AppleWriterMixin, WeatherMixin, AgendaMixin, FeedMixin, ServerRulesMixin):
@@ -1203,6 +1215,15 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                 data = pdf_path.read_bytes()
                 return await self.show_preview(pdf_path.name, data, f"print:{x['id']}", lambda: self._save_download(pdf_path.name, data), excluded=True)
 
+        async def do_print() -> None:
+            if sys.platform.startswith("win") and not SERVER_MODE:  # Windows : WebView2 n'imprime que la page de la fenêtre : on y place le message, seul visible à l'impression
+                fragment = htmlmail.build_print_fragment(head, clean, x.get("body") or "", allow, cids)
+                await ui.run_javascript(PRINT_INJECT_JS % json.dumps(fragment))
+                if not await run.io_bound(native_print_ui):
+                    await ui.run_javascript("window.print()")
+                return
+            browser()  # autre système : la fenêtre native ne sait pas imprimer une page
+
         def browser() -> None:
             path = print_message_file(x.get("subject") or "message", htmlmail.build_print_doc(head, clean, x.get("body") or "", allow, cids))
             if not open_file(path):
@@ -1212,8 +1233,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
             with ui.row().classes("w-full items-center no-wrap q-px-md q-py-sm gap-2").style("border-bottom:1px solid var(--line)"):
                 ui.icon("print", size="20px").style("color:var(--accent)")
                 ui.label("Aperçu avant impression").style("font-weight:600").classes("col")
-                ui.button("Imprimer", icon="print", on_click=browser).props("unelevated no-caps color=primary").tooltip(
-                    "Ouvre la page dans le navigateur du système, qui lance la boîte d'impression (la fenêtre de Velora ne sait pas imprimer une page)").mark("print-go")
+                ui.button("Imprimer", icon="print", on_click=do_print).props("unelevated no-caps color=primary").mark("print-go")
                 ui.button(icon="close", on_click=dlg.close).props("flat round dense")
             frame = ui.element("iframe").style("width:100%;flex:1;border:0;background:#fff")
             frame._props.update({"sandbox": "allow-scripts allow-modals", "srcdoc": htmlmail.build_print_doc(head, clean, x.get("body") or "", allow, cids, autoprint=False)})

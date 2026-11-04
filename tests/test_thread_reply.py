@@ -91,6 +91,8 @@ async def test_each_message_of_a_conversation_can_be_printed_on_its_own(user, bo
     assert frames and "Premier message" in frames[-1]._props["srcdoc"] and "Deuxième message" not in frames[-1]._props["srcdoc"]
     assert "window.print()" in frames[-1]._props["srcdoc"] and 'load", () =>' not in frames[-1]._props["srcdoc"]  # l'aperçu n'imprime pas tout seul
     user.find(marker="print-go").click()
+    from tests.conftest import wait_until
+    await wait_until(lambda: opened)
     assert len(opened) == 1
     page = opened[0].read_text(encoding="utf-8")
     shutil.rmtree(opened[0].parent, ignore_errors=True)
@@ -127,3 +129,37 @@ async def test_on_mac_a_message_is_previewed_as_a_pdf_made_by_the_window(user, b
     shutil.rmtree(made[0][1].parent, ignore_errors=True)
     assert "Premier message" in made[0][0] and "Deuxième message" not in made[0][0]
     assert shown[0][0].endswith(".pdf") and shown[0][1].startswith(b"%PDF") and shown[0][2] is True  # aperçu sans résumé IA
+
+
+async def test_on_windows_printing_puts_the_message_in_the_page_and_opens_the_window_print_dialog(user, box, monkeypatch) -> None:
+    monkeypatch.setattr(main.sys, "platform", "win32")
+    monkeypatch.setattr(main, "SERVER_MODE", False)
+    asked = []
+    monkeypatch.setattr(main, "native_print_ui", lambda timeout=6.0: asked.append(1) or True)
+    scripts = []
+    monkeypatch.setattr(main.ui, "run_javascript", lambda code, **k: scripts.append(code) or _done())
+    add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv", date="2026-10-01T10:00:00+00:00", body="Premier message")
+    add_message("testbox|INBOX|1", sender="bob@example.com", subject="Re: Dossier X", ckey="testbox|conv", date="2026-10-02T10:00:00+00:00", body="Deuxième message")
+    await user.open("/")
+    await box[-1].open("testbox|INBOX|1")
+    await user.should_see("Dossier X")
+    el = user.find(marker="tc-print-testbox|INBOX|0").elements.pop()
+    with user.client:
+        for lid in list(el._event_listeners):
+            el._handle_event({"listener_id": lid, "args": {}})
+    await user.should_see("Aperçu avant impression")
+    user.find(marker="print-go").click()
+    from tests.conftest import wait_until
+    await wait_until(lambda: asked)
+    injected = [c for c in scripts if "velora-print-root" in c]
+    assert injected and "Premier message" in injected[-1] and "Deuxième message" not in injected[-1]
+    assert not any("window.print()" == c for c in scripts)  # ShowPrintUI a répondu : pas besoin du repli
+
+
+class _Done:
+    def __await__(self):
+        return iter(())
+
+
+def _done() -> _Done:
+    return _Done()

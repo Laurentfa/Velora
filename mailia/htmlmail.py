@@ -181,6 +181,47 @@ a{color:#111}
 """
 
 
+PRINT_FRAGMENT_CSS = """
+.page{font:14px/1.5 -apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#111;background:#fff;max-width:900px;margin:0 auto}
+h1{font-size:20px;margin:0 0 12px}
+.head{border-bottom:2px solid #999;padding-bottom:10px;margin-bottom:16px}
+.head div{margin:2px 0}
+.head b{display:inline-block;min-width:62px;color:#555}
+.att{margin-top:18px;padding-top:8px;border-top:1px solid #ccc;font-size:13px}
+.plain{white-space:pre-wrap;word-wrap:break-word}
+img{max-width:100%;height:auto}
+a{color:#111}
+"""
+_REMOTE_URL = re.compile(r"""url\(\s*["']?\s*(?:https?:)?//[^)]*\)""", re.I)
+_IMPORT = re.compile(r"@import[^;]*;?", re.I)
+_REMOTE_IMG = re.compile(r"<img\b[^>]*\bsrc\s*=\s*[\"']?\s*(?:https?:)?//[^>]*>", re.I)
+
+
+def no_remote_content(clean: str) -> str:
+    """HTML nettoyé sans rien qui se charge depuis Internet (images distantes, fonds CSS, @import) : pour l'afficher hors du cadre isolé, sans politique de sécurité."""
+    return _IMPORT.sub("", _REMOTE_URL.sub("none", _REMOTE_IMG.sub("", clean)))
+
+
+def build_print_fragment(head: dict, clean: str | None, text: str, allow_images: bool = False, cid_map: dict[str, str] | None = None) -> str:
+    """Comme build_print_doc mais en simple morceau de page (style + contenu), à placer dans un « shadow DOM » de la page de Velora : ses styles ne débordent pas.
+    Sans autorisation des images distantes, rien ne se charge depuis Internet."""
+    esc = _html.escape
+    if clean:
+        for cid, uri in (cid_map or {}).items():
+            clean = re.sub(r"cid:" + re.escape(cid), lambda _: uri, clean, flags=re.I)
+            clean = re.sub(r"cid:%3C" + re.escape(cid) + "%3E", lambda _: uri, clean, flags=re.I)
+        if not allow_images:
+            clean = no_remote_content(clean)
+        body = f'<div class="body">{clean}</div>'
+    else:
+        body = f'<div class="plain">{esc(text or "")}</div>'
+    rows = "".join(f'<div><b>{esc(label)}</b> {esc(value)}</div>' for label, value in
+                   (("De :", head.get("from")), ("À :", head.get("to")), ("Cc :", head.get("cc")), ("Cci :", head.get("bcc")), ("Date :", head.get("date"))) if value)
+    atts = head.get("attachments") or []
+    att_html = ('<div class="att"><b>Pièces jointes :</b> ' + esc(" · ".join(atts)) + "</div>") if atts else ""
+    return (f'<style>{PRINT_FRAGMENT_CSS}</style><div class="page"><div class="head"><h1>{esc(head.get("subject") or "(sans objet)")}</h1>{rows}</div>{body}{att_html}</div>')
+
+
 def build_print_doc(head: dict, clean: str | None, text: str, allow_images: bool = False, cid_map: dict[str, str] | None = None, autoprint: bool = True) -> str:
     """Page à imprimer pour UN message : en-tête (objet, de, à, cc, date), corps (HTML nettoyé, sinon texte brut) et noms des pièces jointes.
     autoprint : la boîte d'impression s'ouvre à l'ouverture (page ouverte dans le navigateur) ; sinon elle attend le message {mailiaPrint} de l'aperçu de Velora.
