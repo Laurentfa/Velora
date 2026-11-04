@@ -133,6 +133,11 @@ perf.install()
 _PAGE_LOADS = [0]  # nombre de pages affichées depuis le lancement (voir restore_open)
 
 
+def print_platform() -> str:
+    """Système pour le choix du moyen d'imprimer un message (les tests le remplacent : changer sys.platform casserait le reste de l'interface)."""
+    return sys.platform
+
+
 class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin, AppleWriterMixin, WeatherMixin, AgendaMixin, FeedMixin, ServerRulesMixin):
     """État et interface d'une fenêtre (chaque client a la sienne)."""
 
@@ -1191,7 +1196,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                 "date": full_date(x["date"]) if x.get("date") else "", "attachments": [a.get("name", "") for a in atts]}
         name = (re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", x.get("subject") or "message").strip(". ")[:80] or "message") + ".pdf"
         data = None
-        if sys.platform == "darwin" and not SERVER_MODE:
+        if print_platform() == "darwin" and not SERVER_MODE:
             clean, allow = None, False
             if x.get("body_html"):
                 clean, _ = htmlmail.strip_trackers(htmlmail.sanitize(x["body_html"]))

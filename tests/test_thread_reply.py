@@ -73,7 +73,7 @@ async def test_module_tools_stay_visible_when_forwarding(user, box, monkeypatch)
 
 async def _print_first_message(user, box, monkeypatch, platform: str, native):
     """Clique sur l'imprimante du premier message d'une conversation de deux ; rend ce que l'aperçu a reçu : [(nom, octets, sans_resume_ia)]."""
-    monkeypatch.setattr(main.sys, "platform", platform)
+    monkeypatch.setattr(main, "print_platform", lambda: platform)
     monkeypatch.setattr(main, "SERVER_MODE", False)
     monkeypatch.setattr(main, "native_html_to_pdf", native)
     shown = []
