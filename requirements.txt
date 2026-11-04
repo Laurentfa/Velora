@@ -1,4 +1,5 @@
-nicegui
+nicegui>=3.18,<4  # la 4.0 (novembre 2026) remplace httpx par httpx2 et n'est pas testée avec Velora
+httpx
 pywebview
 exchangelib
 imap-tools
