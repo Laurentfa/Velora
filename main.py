@@ -1182,7 +1182,8 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                             self.attachments_zip_button(atts, x)
 
     def print_message(self, x: dict) -> None:
-        """Imprime CE message seul (pas toute la conversation) : une page propre est ouverte dans le navigateur du système, qui lance la boîte d'impression."""
+        """Imprime CE message seul (pas toute la conversation) : un aperçu s'ouvre dans Velora (bouton « Imprimer » = boîte d'impression de la fenêtre) ;
+        « Ouvrir dans le navigateur » ouvre la même page dans le navigateur du système, qui lance la boîte d'impression."""
         html = x.get("body_html")
         clean, allow = None, False
         if html:
@@ -1193,10 +1194,25 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         atts = json.loads(x["att_json"]) if x.get("att_json") else []
         head = {"subject": x.get("subject"), "from": who, "to": x.get("to_addrs"), "cc": x.get("cc_addrs"), "bcc": x.get("bcc_addrs"),
                 "date": full_date(x["date"]) if x.get("date") else "", "attachments": [a.get("name", "") for a in atts]}
-        doc = htmlmail.build_print_doc(head, clean, x.get("body") or "", allow, self.cids.get(x["id"]))
-        path = print_message_file(x.get("subject") or "message", doc)
-        if not open_file(path):
-            ui.notify(f"Le message n'a pas pu s'ouvrir pour l'impression : {path}", type="warning")
+        cids = self.cids.get(x["id"])
+
+        def browser() -> None:
+            path = print_message_file(x.get("subject") or "message", htmlmail.build_print_doc(head, clean, x.get("body") or "", allow, cids))
+            if not open_file(path):
+                ui.notify(f"Le message n'a pas pu s'ouvrir pour l'impression : {path}", type="warning")
+
+        with self.host, ui.dialog() as dlg, ui.card().classes("no-wrap q-pa-none").style("width:min(900px,96vw);max-width:96vw;height:min(90vh,900px)"):
+            with ui.row().classes("w-full items-center no-wrap q-px-md q-py-sm gap-2").style("border-bottom:1px solid var(--line)"):
+                ui.icon("print", size="20px").style("color:var(--accent)")
+                ui.label("Aperçu avant impression").style("font-weight:600").classes("col")
+                ui.button("Imprimer", icon="print", on_click=lambda: ui.run_javascript(
+                    f"getElement({frame.id}).$el.contentWindow.postMessage({{mailiaPrint: 1}}, '*')")).props("unelevated no-caps color=primary").mark("print-go")
+                ui.button("Ouvrir dans le navigateur", icon="open_in_new", on_click=browser).props("flat dense no-caps color=primary").tooltip(
+                    "Si la boîte d'impression ne s'ouvre pas ici : la même page s'ouvre dans le navigateur du système").mark("print-browser")
+                ui.button(icon="close", on_click=dlg.close).props("flat round dense")
+            frame = ui.element("iframe").style("width:100%;flex:1;border:0;background:#fff")
+            frame._props.update({"sandbox": "allow-scripts allow-modals", "srcdoc": htmlmail.build_print_doc(head, clean, x.get("body") or "", allow, cids, autoprint=False)})
+        dlg.open()
 
     async def reply_message(self, x: dict, all_: bool = False) -> None:
         """Répondre à un message précis de la conversation (et non au dernier) : il devient le message de référence, cité dans la réponse."""

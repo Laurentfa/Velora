@@ -181,9 +181,10 @@ a{color:#111}
 """
 
 
-def build_print_doc(head: dict, clean: str | None, text: str, allow_images: bool = False, cid_map: dict[str, str] | None = None) -> str:
+def build_print_doc(head: dict, clean: str | None, text: str, allow_images: bool = False, cid_map: dict[str, str] | None = None, autoprint: bool = True) -> str:
     """Page à imprimer pour UN message : en-tête (objet, de, à, cc, date), corps (HTML nettoyé, sinon texte brut) et noms des pièces jointes.
-    Ouverte dans le navigateur du système, elle lance la boîte d'impression ; le contenu du mail ne peut rien exécuter (politique de sécurité à jeton)."""
+    autoprint : la boîte d'impression s'ouvre à l'ouverture (page ouverte dans le navigateur) ; sinon elle attend le message {mailiaPrint} de l'aperçu de Velora.
+    Le contenu du mail ne peut rien exécuter (politique de sécurité à jeton)."""
     esc = _html.escape
     nonce = secrets.token_urlsafe(12)
     if clean:
@@ -201,9 +202,10 @@ def build_print_doc(head: dict, clean: str | None, text: str, allow_images: bool
     csp = f"default-src 'none'; img-src {imgs}; style-src 'unsafe-inline'; font-src data:; script-src 'nonce-{nonce}'"
     return (f'<!doctype html><html><head><meta charset="utf-8"><title>{esc(head.get("subject") or "(sans objet)")}</title>'
             f'<meta http-equiv="Content-Security-Policy" content="{esc(csp, quote=True)}"><style>{PRINT_CSS}</style></head><body>'
-            f'<div class="hint">La boîte d\'impression s\'ouvre toute seule. Si ce n\'est pas le cas : ⌘P (Mac) ou Ctrl+P (Windows).</div>'
+            + ('<div class="hint">La boîte d\'impression s\'ouvre toute seule. Si ce n\'est pas le cas : ⌘P (Mac) ou Ctrl+P (Windows).</div>' if autoprint else '') +
             f'<div class="head"><h1>{esc(head.get("subject") or "(sans objet)")}</h1>{rows}</div>{body}{att_html}'
-            f'<script nonce="{nonce}">window.addEventListener("load", () => setTimeout(() => window.print(), 400));</script></body></html>')
+            f'<script nonce="{nonce}">addEventListener("message", e => {{ if (e.data && e.data.mailiaPrint) window.print(); }});'
+            + ('addEventListener("load", () => setTimeout(() => window.print(), 400));' if autoprint else '') + '</script></body></html>')
 
 
 # ---------- rédaction : HTML sortant ----------

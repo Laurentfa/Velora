@@ -85,6 +85,11 @@ async def test_each_message_of_a_conversation_can_be_printed_on_its_own(user, bo
     with user.client:  # le bouton écoute « click.stop » : on envoie l'événement tel quel
         for lid in list(el._event_listeners):
             el._handle_event({"listener_id": lid, "args": {}})
+    await user.should_see("Aperçu avant impression")
+    frames = [e for e in user.find(kind=ui.element).elements if e.tag == "iframe"]
+    assert frames and "Premier message" in frames[-1]._props["srcdoc"] and "Deuxième message" not in frames[-1]._props["srcdoc"]
+    assert "window.print()" in frames[-1]._props["srcdoc"] and 'load", () =>' not in frames[-1]._props["srcdoc"]  # l'aperçu n'imprime pas tout seul
+    user.find(marker="print-browser").click()
     assert len(opened) == 1
     page = opened[0].read_text(encoding="utf-8")
     shutil.rmtree(opened[0].parent, ignore_errors=True)
