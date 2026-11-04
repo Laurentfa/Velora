@@ -468,120 +468,6 @@ def watch_print(stop: threading.Event | None = None, every: float = 0.3, call_on
         time.sleep(every)
 
 
-# Entrées du menu clic droit de WebView2 qu'on garde : édition, orthographe, copie d'un lien ou d'une image. Le reste (retour, actualiser, enregistrer sous, imprimer,
-# partager, inspecter, afficher le source…) n'a rien à faire dans l'appli : « Actualiser » rechargerait la page en perdant ce qui est ouvert.
-WIN_MENU_KEEP = {"cut", "copy", "paste", "pasteAsPlainText", "selectAll", "undo", "redo", "spellcheck", "emoji", "copyLinkLocation", "copyImage", "copyImageLocation"}
-
-
-def enable_windows_context_menu() -> None:
-    """Windows (WebView2) : la bibliothèque de fenêtre supprime le menu clic droit hors mode débogage. On le rétablit (couper, copier, coller, orthographe…),
-    sans les entrées qui feraient quitter la page ni les outils de développement. S'applique aux fenêtres déjà prêtes et à celles qui le seront."""
-    log = logging.getLogger("mailia")
-    try:
-        from webview.platforms import edgechromium, winforms
-    except Exception:  # noqa: BLE001
-        log.warning("menu clic droit (Windows) : moteur d'affichage introuvable", exc_info=True)
-        return
-
-    def tune(core) -> None:
-        core.Settings.AreDefaultContextMenusEnabled = True
-        core.Settings.AreDevToolsEnabled = False
-
-        def prune(sender, args) -> None:
-            try:
-                items = args.MenuItems
-                for i in range(items.Count - 1, -1, -1):
-                    if items[i].Name not in WIN_MENU_KEEP and items[i].Kind.ToString() != "Separator":
-                        items.RemoveAt(i)
-                for i in range(items.Count - 1, -1, -1):  # séparateurs en tête, en queue ou en double
-                    first, last = i == 0, i == items.Count - 1
-                    if items[i].Kind.ToString() == "Separator" and (first or last or items[i - 1].Kind.ToString() == "Separator"):
-                        items.RemoveAt(i)
-            except Exception:  # noqa: BLE001 — au pire, le menu d'origine s'affiche
-                log.debug("menu clic droit (Windows) : nettoyage impossible", exc_info=True)
-        try:
-            core.ContextMenuRequested += prune
-        except Exception:  # noqa: BLE001 — version de WebView2 sans cet événement : menu d'origine
-            log.debug("menu clic droit (Windows) : événement indisponible", exc_info=True)
-
-    original = edgechromium.EdgeChrome.on_webview_ready
-
-    def ready(self, sender, args):
-        original(self, sender, args)
-        try:
-            if args.IsSuccess:
-                tune(sender.CoreWebView2)
-        except Exception:  # noqa: BLE001
-            log.warning("menu clic droit (Windows)", exc_info=True)
-
-    edgechromium.EdgeChrome.on_webview_ready = ready
-
-    def apply_to_ready_windows() -> None:  # la fenêtre est parfois déjà prête quand ce réglage arrive : on l'applique aussi à celles-là
-        import time
-        from System import Func, Type
-        done: set = set()
-        end = time.time() + 30
-        while time.time() < end:
-            for uid, view in list(winforms.BrowserView.instances.items()):
-                try:
-                    web = view.browser.webview
-                    if uid not in done and web.CoreWebView2 is not None:
-                        view.Invoke(Func[Type](lambda web=web: tune(web.CoreWebView2)))
-                        done.add(uid)
-                except Exception:  # noqa: BLE001
-                    log.debug("menu clic droit (Windows) : fenêtre pas prête", exc_info=True)
-            if done:
-                return
-            time.sleep(0.5)
-
-    threading.Thread(target=apply_to_ready_windows, daemon=True, name="menu-clic-droit").start()
-
-
-def watch_print_windows(stop: threading.Event | None = None, every: float = 0.3) -> None:
-    """Windows : le programme principal demande « print_request » avec {"ui": true} ; on ouvre la boîte d'impression de WebView2 (ShowPrintUI) sur la page de la
-    fenêtre et on répond dans « print_status » (« <id>:ok » ou « <id>:échec … » : le programme essaie alors window.print())."""
-    log = logging.getLogger("mailia")
-
-    def current() -> dict:
-        with db.conn() as c:
-            row = c.execute("SELECT v FROM kv WHERE k='print_request'").fetchone()
-        try:
-            return json.loads(row["v"]) if row else {}
-        except ValueError:
-            return {}
-
-    def show(rid: str) -> None:
-        try:
-            from System import Func, Type
-            from webview.platforms import winforms
-            view = next(iter(winforms.BrowserView.instances.values()))
-            core = view.browser.webview.CoreWebView2
-
-            def go():
-                try:
-                    from Microsoft.Web.WebView2.Core import CoreWebView2PrintDialogKind
-                    core.ShowPrintUI(CoreWebView2PrintDialogKind.Browser)  # aperçu avant impression de WebView2 (enregistrer en PDF, choix de l'imprimante…)
-                except ImportError:
-                    core.ShowPrintUI()
-            view.Invoke(Func[Type](go))
-            db.kv_set("print_status", f"{rid}:ok")
-        except Exception as e:  # noqa: BLE001
-            log.warning("impression (Windows) : %s", e)
-            db.kv_set("print_status", f"{rid}:échec {type(e).__name__} {str(e)[:100]}")
-
-    done = current().get("id")  # une demande restée d'un lancement précédent ne doit pas être rejouée
-    while not (stop and stop.is_set()):
-        try:
-            req = current()
-            if req.get("id") and req["id"] != done:
-                done = req["id"]
-                if req.get("ui"):
-                    show(req["id"])
-        except Exception as e:  # noqa: BLE001
-            log.warning("surveillance de l'impression (Windows) : %s", e)
-        time.sleep(every)
-
-
 def setup() -> None:
     """Fenêtre native (macOS) : la bibliothèque de fenêtre supprime tout menu clic droit hors mode débogage.
     On rétablit le menu standard (couper, copier, coller, orthographe…) sans les entrées qui feraient quitter l'appli."""
@@ -591,10 +477,6 @@ def setup() -> None:
     if sys.platform == "darwin":
         threading.Thread(target=watch_print, daemon=True, name="impression").start()
         threading.Thread(target=watch_iphone, daemon=True, name="iphone").start()
-    if sys.platform.startswith("win"):
-        threading.Thread(target=watch_print_windows, daemon=True, name="impression").start()
-        enable_windows_context_menu()
-        return
     if sys.platform != "darwin":
         return
     try:

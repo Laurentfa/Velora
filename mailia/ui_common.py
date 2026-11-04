@@ -251,25 +251,6 @@ def native_html_to_pdf(html_path: Path, pdf_path: Path, timeout: float = 40.0) -
     return False
 
 
-def native_print_ui(timeout: float = 6.0) -> bool:
-    """Windows : demande à la fenêtre native d'ouvrir la boîte d'impression de WebView2 (ShowPrintUI) sur la page affichée. False si elle ne répond pas ou échoue."""
-    import json
-    import time
-    import uuid
-    if not sys.platform.startswith("win"):
-        return False
-    rid = uuid.uuid4().hex
-    db.kv_set("print_request", json.dumps({"id": rid, "ui": True}))
-    end = time.time() + timeout
-    while time.time() < end:
-        with db.conn() as c:
-            row = c.execute("SELECT v FROM kv WHERE k='print_status'").fetchone()
-        if row and row["v"].startswith(rid + ":"):
-            return row["v"] == rid + ":ok"
-        time.sleep(0.1)
-    return False
-
-
 def open_to_print(name: str, data: bytes) -> Path:
     """Enregistre la pièce jointe dans un dossier temporaire. Sur Mac, un PDF ou une image ouvre directement la boîte d'impression du système (dans la
     fenêtre de Velora, sans Aperçu). Sinon (Word, Excel, Windows…) le fichier est ouvert dans l'application du système, où l'on imprime avec ⌘P / Ctrl+P. Le fichier est marqué « téléchargé » pour que Word et Excel l'ouvrent en mode protégé. Les dossiers de plus d'un jour sont supprimés."""

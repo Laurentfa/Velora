@@ -132,11 +132,9 @@ async def test_on_mac_a_message_is_previewed_as_a_pdf_made_by_the_window(user, b
     assert shown[0][0].endswith(".pdf") and shown[0][1].startswith(b"%PDF") and shown[0][2] is True  # aperçu sans résumé IA
 
 
-async def test_on_windows_printing_puts_the_message_in_the_page_and_opens_the_window_print_dialog(user, box, monkeypatch) -> None:
+async def test_on_windows_printing_puts_the_message_in_the_page_and_calls_window_print(user, box, monkeypatch) -> None:
     monkeypatch.setattr(main.sys, "platform", "win32")
     monkeypatch.setattr(main, "SERVER_MODE", False)
-    asked = []
-    monkeypatch.setattr(main, "native_print_ui", lambda timeout=6.0: asked.append(1) or True)
     scripts = []
     monkeypatch.setattr(main.ui, "run_javascript", lambda code, **k: scripts.append(code) or _done())
     add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv", date="2026-10-01T10:00:00+00:00", body="Premier message")
@@ -151,10 +149,10 @@ async def test_on_windows_printing_puts_the_message_in_the_page_and_opens_the_wi
     await user.should_see("Aperçu avant impression")
     user.find(marker="print-go").click()
     from tests.conftest import wait_until
-    await wait_until(lambda: asked)
+    await wait_until(lambda: "window.print()" in scripts)
     injected = [c for c in scripts if "velora-print-root" in c]
     assert injected and "Premier message" in injected[-1] and "Deuxième message" not in injected[-1]
-    assert not any("window.print()" == c for c in scripts)  # ShowPrintUI a répondu : pas besoin du repli
+    assert scripts.index("window.print()") > scripts.index(injected[-1])  # le message est en place avant l'impression
 
 
 class _Done:

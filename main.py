@@ -78,7 +78,7 @@ from mailia import apple_writer, icons, weather
 from mailia.brand import logo_big, logo_img
 from mailia.ui_bulk import BulkMixin
 from mailia.ui_cleanup import CleanupMixin
-from mailia.ui_common import CAT, JOURS_LONG, MOIS, NOLIST_VIEWS, SERVER_MODE, VIEWS, ago, full_date, human_size, initial_view, initials, label_of, log, native_html_to_pdf, native_print_ui, open_file, print_message_file, short_date
+from mailia.ui_common import CAT, JOURS_LONG, MOIS, NOLIST_VIEWS, SERVER_MODE, VIEWS, ago, full_date, human_size, initial_view, initials, label_of, log, native_html_to_pdf, open_file, print_message_file, short_date
 from mailia.ui_compose_ai import ComposeAiMixin
 from mailia.ui_dictation import DictationMixin
 from mailia.ui_drafts import DraftsMixin
@@ -1219,8 +1219,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
             if sys.platform.startswith("win") and not SERVER_MODE:  # Windows : WebView2 n'imprime que la page de la fenêtre : on y place le message, seul visible à l'impression
                 fragment = htmlmail.build_print_fragment(head, clean, x.get("body") or "", allow, cids)
                 await ui.run_javascript(PRINT_INJECT_JS % json.dumps(fragment))
-                if not await run.io_bound(native_print_ui):
-                    await ui.run_javascript("window.print()")
+                await ui.run_javascript("window.print()")  # WebView2 : boîte d'impression de la page (le message est seul visible à l'impression)
                 return
             browser()  # autre système : la fenêtre native ne sait pas imprimer une page
 
