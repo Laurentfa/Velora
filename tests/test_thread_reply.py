@@ -71,14 +71,17 @@ async def test_module_tools_stay_visible_when_forwarding(user, box, monkeypatch)
     await user.should_see("CARTE testbox|INBOX|0")
 
 
-async def test_each_message_of_a_conversation_can_be_printed_on_its_own(user, box, monkeypatch) -> None:
-    import shutil
-    from pathlib import Path
-    opened = []
-    monkeypatch.setattr(main.sys, "platform", "linux")  # ni Mac (PDF) ni Windows (impression de la fenêtre) : aperçu de la page, « Imprimer » ouvre le navigateur
-    monkeypatch.setattr(main, "open_file", lambda p: opened.append(Path(p)) or True)
-    monkeypatch.setattr(main, "native_html_to_pdf", lambda html, pdf, timeout=40.0: False)
-    add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv", date="2026-10-01T10:00:00+00:00", body="Premier message")
+async def _print_first_message(user, box, monkeypatch, platform: str, native):
+    """Clique sur l'imprimante du premier message d'une conversation de deux ; rend ce que l'aperçu a reçu : [(nom, octets, sans_resume_ia)]."""
+    monkeypatch.setattr(main.sys, "platform", platform)
+    monkeypatch.setattr(main, "SERVER_MODE", False)
+    monkeypatch.setattr(main, "native_html_to_pdf", native)
+    shown = []
+
+    async def show_preview(self, name, data, key, download, excluded=False, send=None):
+        shown.append((name, data, excluded))
+    monkeypatch.setattr(main.Mailbox, "show_preview", show_preview)
+    add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv", date="2026-10-01T10:00:00+00:00", body="Premier message d’Alice")
     add_message("testbox|INBOX|1", sender="bob@example.com", subject="Re: Dossier X", ckey="testbox|conv", date="2026-10-02T10:00:00+00:00", body="Deuxième message")
     await user.open("/")
     await box[-1].open("testbox|INBOX|1")
@@ -87,78 +90,40 @@ async def test_each_message_of_a_conversation_can_be_printed_on_its_own(user, bo
     with user.client:  # le bouton écoute « click.stop » : on envoie l'événement tel quel
         for lid in list(el._event_listeners):
             el._handle_event({"listener_id": lid, "args": {}})
-    await user.should_see("Aperçu avant impression")
-    frames = [e for e in user.find(kind=ui.element).elements if e.tag == "iframe"]
-    assert frames and "Premier message" in frames[-1]._props["srcdoc"] and "Deuxième message" not in frames[-1]._props["srcdoc"]
-    assert "window.print()" in frames[-1]._props["srcdoc"] and 'load", () =>' not in frames[-1]._props["srcdoc"]  # l'aperçu n'imprime pas tout seul
-    user.find(marker="print-go").click()
     from tests.conftest import wait_until
-    await wait_until(lambda: opened)
-    assert len(opened) == 1
-    page = opened[0].read_text(encoding="utf-8")
-    shutil.rmtree(opened[0].parent, ignore_errors=True)
-    assert "Premier message" in page and "Deuxième message" not in page and "alice@example.com" in page and "window.print()" in page
+    await wait_until(lambda: shown)
+    return shown
 
 
-async def test_on_mac_a_message_is_previewed_as_a_pdf_made_by_the_window(user, box, monkeypatch) -> None:
+def _pdf_text(data: bytes) -> str:
+    from io import BytesIO
+
+    from pypdf import PdfReader
+    return "".join(p.extract_text() for p in PdfReader(BytesIO(data)).pages)
+
+
+async def test_on_windows_and_elsewhere_a_pdf_of_the_message_text_is_previewed(user, box, monkeypatch) -> None:
+    for platform in ("win32", "linux"):
+        shown = await _print_first_message(user, box, monkeypatch, platform, lambda html, pdf, timeout=40.0: False)
+        name, data, excluded = shown[-1]
+        text = _pdf_text(data)
+        assert name == "Dossier X.pdf" and data.startswith(b"%PDF") and excluded is True  # aperçu sans résumé IA
+        assert "Premier message" in text and "Deuxième message" not in text and "alice@example.com" in text
+        shown.clear()
+
+
+async def test_on_mac_the_window_makes_the_pdf_and_python_takes_over_if_it_cannot(user, box, monkeypatch) -> None:
     import shutil
-    monkeypatch.setattr(main.sys, "platform", "darwin")
-    monkeypatch.setattr(main, "SERVER_MODE", False)
     made = []
 
     def fake(html, pdf, timeout=40.0):
         made.append((html.read_text(encoding="utf-8"), pdf))
-        pdf.write_bytes(b"%PDF-1.4 fake")
+        pdf.write_bytes(b"%PDF-1.4 fait par WebKit")
         return True
-    monkeypatch.setattr(main, "native_html_to_pdf", fake)
-    shown = []
-
-    async def show_preview(self, name, data, key, download, excluded=False, send=None):
-        shown.append((name, data, excluded))
-    monkeypatch.setattr(main.Mailbox, "show_preview", show_preview)
-    add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv", date="2026-10-01T10:00:00+00:00", body="Premier message")
-    add_message("testbox|INBOX|1", sender="bob@example.com", subject="Re: Dossier X", ckey="testbox|conv", date="2026-10-02T10:00:00+00:00", body="Deuxième message")
-    await user.open("/")
-    await box[-1].open("testbox|INBOX|1")
-    await user.should_see("Dossier X")
-    el = user.find(marker="tc-print-testbox|INBOX|0").elements.pop()
-    with user.client:
-        for lid in list(el._event_listeners):
-            el._handle_event({"listener_id": lid, "args": {}})
-    from tests.conftest import wait_until
-    await wait_until(lambda: shown)
+    shown = await _print_first_message(user, box, monkeypatch, "darwin", fake)
     shutil.rmtree(made[0][1].parent, ignore_errors=True)
     assert "Premier message" in made[0][0] and "Deuxième message" not in made[0][0]
-    assert shown[0][0].endswith(".pdf") and shown[0][1].startswith(b"%PDF") and shown[0][2] is True  # aperçu sans résumé IA
-
-
-async def test_on_windows_printing_puts_the_message_in_the_page_and_calls_window_print(user, box, monkeypatch) -> None:
-    monkeypatch.setattr(main.sys, "platform", "win32")
-    monkeypatch.setattr(main, "SERVER_MODE", False)
-    scripts = []
-    monkeypatch.setattr(main.ui, "run_javascript", lambda code, **k: scripts.append(code) or _done())
-    add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv", date="2026-10-01T10:00:00+00:00", body="Premier message")
-    add_message("testbox|INBOX|1", sender="bob@example.com", subject="Re: Dossier X", ckey="testbox|conv", date="2026-10-02T10:00:00+00:00", body="Deuxième message")
-    await user.open("/")
-    await box[-1].open("testbox|INBOX|1")
-    await user.should_see("Dossier X")
-    el = user.find(marker="tc-print-testbox|INBOX|0").elements.pop()
-    with user.client:
-        for lid in list(el._event_listeners):
-            el._handle_event({"listener_id": lid, "args": {}})
-    await user.should_see("Aperçu avant impression")
-    user.find(marker="print-go").click()
-    from tests.conftest import wait_until
-    await wait_until(lambda: "window.print()" in scripts)
-    injected = [c for c in scripts if "velora-print-root" in c]
-    assert injected and "Premier message" in injected[-1] and "Deuxième message" not in injected[-1]
-    assert scripts.index("window.print()") > scripts.index(injected[-1])  # le message est en place avant l'impression
-
-
-class _Done:
-    def __await__(self):
-        return iter(())
-
-
-def _done() -> _Done:
-    return _Done()
+    assert shown[0][1].startswith(b"%PDF-1.4 fait par")  # le PDF de la fenêtre native est montré tel quel
+    shown.clear()
+    shown = await _print_first_message(user, box, monkeypatch, "darwin", lambda html, pdf, timeout=40.0: False)
+    assert "Premier message" in _pdf_text(shown[-1][1])  # conversion impossible : PDF du texte

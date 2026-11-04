@@ -306,21 +306,6 @@ def print_message_file(subject: str, doc: str) -> Path:
     return path
 
 
-def open_file(path: Path) -> bool:
-    """Ouvre un fichier avec l'application du système (pour une page .html : le navigateur par défaut). Rend False si le système n'a pas pu."""
-    try:
-        if sys.platform == "darwin":
-            subprocess.Popen(["open", str(path)])
-        elif sys.platform.startswith("win"):
-            os.startfile(str(path))  # type: ignore[attr-defined]
-        else:
-            subprocess.Popen(["xdg-open", str(path)])
-        return True
-    except Exception:
-        log.warning("Ouverture du fichier impossible : %s", path, exc_info=True)
-        return False
-
-
 _launched = {"done": False}  # la première ouverture d'une fenêtre depuis le lancement de l'appli applique la boîte par défaut
 
 

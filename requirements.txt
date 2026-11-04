@@ -15,6 +15,7 @@ openpyxl
 python-pptx
 pillow-heif
 pypdf
+fpdf2  # PDF du texte d'un message (impression sous Windows)
 zeroconf
 segno
 sqlcipher3-wheels

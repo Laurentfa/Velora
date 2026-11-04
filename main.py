@@ -66,6 +66,7 @@ from nicegui import Client, app, background_tasks, native, run, ui
 from mailia import ai, aipolicy, apiserver, compose, config, db, folder_order, folder_tree, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, vault, wizard
 from html import escape as html_escape
 from mailia import chromebridge, modules
+from mailia.mailpdf import message_pdf
 from mailia.textutil import for_ai, split_links
 from mailia.ui_account import friendly_error
 from mailia.ui_agenda import AgendaMixin
@@ -78,7 +79,7 @@ from mailia import apple_writer, icons, weather
 from mailia.brand import logo_big, logo_img
 from mailia.ui_bulk import BulkMixin
 from mailia.ui_cleanup import CleanupMixin
-from mailia.ui_common import CAT, JOURS_LONG, MOIS, NOLIST_VIEWS, SERVER_MODE, VIEWS, ago, full_date, human_size, initial_view, initials, label_of, log, native_html_to_pdf, open_file, print_message_file, short_date
+from mailia.ui_common import CAT, JOURS_LONG, MOIS, NOLIST_VIEWS, SERVER_MODE, VIEWS, ago, full_date, human_size, initial_view, initials, label_of, log, native_html_to_pdf, print_message_file, short_date
 from mailia.ui_compose_ai import ComposeAiMixin
 from mailia.ui_dictation import DictationMixin
 from mailia.ui_drafts import DraftsMixin
@@ -130,18 +131,6 @@ perf.install()
 
 
 _PAGE_LOADS = [0]  # nombre de pages affichées depuis le lancement (voir restore_open)
-
-
-PRINT_INJECT_JS = """(frag => {
-  for (const id of ['velora-print-root', 'velora-print-css']) { const old = document.getElementById(id); if (old) old.remove(); }
-  const css = document.createElement('style'); css.id = 'velora-print-css';
-  css.textContent = '#velora-print-root{display:none} @media print{body > *:not(#velora-print-root){display:none !important} #velora-print-root{display:block !important} html,body{background:#fff !important;overflow:visible !important;height:auto !important}}';
-  document.head.appendChild(css);
-  const host = document.createElement('div'); host.id = 'velora-print-root';
-  host.attachShadow({mode: 'open'}).innerHTML = frag;
-  document.body.appendChild(host);
-  window.addEventListener('afterprint', () => { host.remove(); css.remove(); }, {once: true});
-})(%s)"""  # le message est placé dans la page, dans un « shadow DOM » (ses styles ne débordent pas) ; masqué à l'écran, seul visible à l'impression
 
 
 class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin, AppleWriterMixin, WeatherMixin, AgendaMixin, FeedMixin, ServerRulesMixin):
@@ -1194,49 +1183,35 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                             self.attachments_zip_button(atts, x)
 
     async def print_message(self, x: dict) -> None:
-        """Imprime CE message seul (pas toute la conversation). Mac : WebKit en fait un PDF, montré dans l'aperçu de Velora (« Imprimer » = boîte d'impression du système).
-        Ailleurs (ou si la conversion échoue) : un aperçu de la page ; « Imprimer » l'ouvre dans le navigateur du système, qui lance la boîte d'impression
-        (la fenêtre native ne sait pas imprimer une page : window.print() n'y fait rien)."""
-        html = x.get("body_html")
-        clean, allow = None, False
-        if html:
-            clean, _ = htmlmail.strip_trackers(htmlmail.sanitize(html))
-            sender = (x.get("sender") or "").strip().lower()
-            allow = x["id"] in self.images or (bool(sender) and sender in self.trusted_senders())  # mêmes règles que l'affichage : images distantes seulement si autorisées
+        """Imprime CE message seul (pas toute la conversation) : un PDF du message s'ouvre dans l'aperçu de Velora, d'où on l'imprime comme une pièce jointe.
+        Mac : WebKit fabrique le PDF (mise en forme et images du message). Ailleurs, ou si la conversion échoue : PDF du texte du message, fabriqué en Python."""
         who = (f"{x['sender_name']} <{x['sender']}>" if x.get("sender_name") and x.get("sender_name") != x.get("sender") else x.get("sender") or "")
         atts = json.loads(x["att_json"]) if x.get("att_json") else []
         head = {"subject": x.get("subject"), "from": who, "to": x.get("to_addrs"), "cc": x.get("cc_addrs"), "bcc": x.get("bcc_addrs"),
                 "date": full_date(x["date"]) if x.get("date") else "", "attachments": [a.get("name", "") for a in atts]}
-        cids = self.cids.get(x["id"])
-        if sys.platform == "darwin" and not SERVER_MODE:  # Mac : WebKit fabrique un PDF paginé, montré dans l'aperçu de Velora (bouton « Imprimer » = boîte d'impression du système)
-            html_path = print_message_file(x.get("subject") or "message", htmlmail.build_print_doc(head, clean, x.get("body") or "", allow, cids, autoprint=False))
+        name = (re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", x.get("subject") or "message").strip(". ")[:80] or "message") + ".pdf"
+        data = None
+        if sys.platform == "darwin" and not SERVER_MODE:
+            clean, allow = None, False
+            if x.get("body_html"):
+                clean, _ = htmlmail.strip_trackers(htmlmail.sanitize(x["body_html"]))
+                sender = (x.get("sender") or "").strip().lower()
+                allow = x["id"] in self.images or (bool(sender) and sender in self.trusted_senders())  # mêmes règles que l'affichage : images distantes seulement si autorisées
+            html_path = print_message_file(name[:-4], htmlmail.build_print_doc(head, clean, x.get("body") or "", allow, self.cids.get(x["id"]), autoprint=False))
             pdf_path = html_path.with_suffix(".pdf")
             if await run.io_bound(native_html_to_pdf, html_path, pdf_path):
                 data = pdf_path.read_bytes()
-                return await self.show_preview(pdf_path.name, data, f"print:{x['id']}", lambda: self._save_download(pdf_path.name, data), excluded=True)
-
-        async def do_print() -> None:
-            if sys.platform.startswith("win") and not SERVER_MODE:  # Windows : WebView2 n'imprime que la page de la fenêtre : on y place le message, seul visible à l'impression
-                fragment = htmlmail.build_print_fragment(head, clean, x.get("body") or "", allow, cids)
-                await ui.run_javascript(PRINT_INJECT_JS % json.dumps(fragment))
-                await ui.run_javascript("window.print()")  # WebView2 : boîte d'impression de la page (le message est seul visible à l'impression)
-                return
-            browser()  # autre système : la fenêtre native ne sait pas imprimer une page
-
-        def browser() -> None:
-            path = print_message_file(x.get("subject") or "message", htmlmail.build_print_doc(head, clean, x.get("body") or "", allow, cids))
-            if not open_file(path):
-                ui.notify(f"Le message n'a pas pu s'ouvrir pour l'impression : {path}", type="warning")
-
-        with self.host, ui.dialog() as dlg, ui.card().classes("no-wrap q-pa-none").style("width:min(900px,96vw);max-width:96vw;height:min(90vh,900px)"):
-            with ui.row().classes("w-full items-center no-wrap q-px-md q-py-sm gap-2").style("border-bottom:1px solid var(--line)"):
-                ui.icon("print", size="20px").style("color:var(--accent)")
-                ui.label("Aperçu avant impression").style("font-weight:600").classes("col")
-                ui.button("Imprimer", icon="print", on_click=do_print).props("unelevated no-caps color=primary").mark("print-go")
-                ui.button(icon="close", on_click=dlg.close).props("flat round dense")
-            frame = ui.element("iframe").style("width:100%;flex:1;border:0;background:#fff")
-            frame._props.update({"sandbox": "allow-scripts allow-modals", "srcdoc": htmlmail.build_print_doc(head, clean, x.get("body") or "", allow, cids, autoprint=False)})
-        dlg.open()
+        if data is None:
+            text = x.get("body") or ""
+            short = for_ai(text, 20000)  # comme à l'écran : le message cité est masqué tant qu'on ne l'a pas affiché
+            if x["id"] not in self.full and len(short) < len(text) * 0.9:
+                text = short
+            try:
+                data = await run.io_bound(message_pdf, head, text)
+            except Exception as e:  # noqa: BLE001
+                log.warning("PDF du message impossible : %s", e, exc_info=True)
+                return ui.notify(f"Impression impossible : {e}", type="negative", multi_line=True)
+        await self.show_preview(name, data, f"print:{x['id']}", lambda: self._save_download(name, data), excluded=True)
 
     async def reply_message(self, x: dict, all_: bool = False) -> None:
         """Répondre à un message précis de la conversation (et non au dernier) : il devient le message de référence, cité dans la réponse."""
