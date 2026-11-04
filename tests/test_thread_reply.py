@@ -102,17 +102,16 @@ def _pdf_text(data: bytes) -> str:
     return "".join(p.extract_text() for p in PdfReader(BytesIO(data)).pages)
 
 
-async def test_on_windows_and_elsewhere_a_pdf_of_the_message_text_is_previewed(user, box, monkeypatch) -> None:
-    for platform in ("win32", "linux"):
-        shown = await _print_first_message(user, box, monkeypatch, platform, lambda html, pdf, timeout=40.0: False)
-        name, data, excluded = shown[-1]
-        text = _pdf_text(data)
-        assert name == "Dossier X.pdf" and data.startswith(b"%PDF") and excluded is True  # aperçu sans résumé IA
-        assert "Premier message" in text and "Deuxième message" not in text and "alice@example.com" in text
-        shown.clear()
+@pytest.mark.parametrize("platform", ["win32", "linux"])
+async def test_on_windows_and_elsewhere_a_pdf_of_the_message_text_is_previewed(user, box, monkeypatch, platform) -> None:
+    shown = await _print_first_message(user, box, monkeypatch, platform, lambda html, pdf, timeout=40.0: False)
+    name, data, excluded = shown[-1]
+    text = _pdf_text(data)
+    assert name == "Dossier X.pdf" and data.startswith(b"%PDF") and excluded is True  # aperçu sans résumé IA
+    assert "Premier message" in text and "Deuxième message" not in text and "alice@example.com" in text
 
 
-async def test_on_mac_the_window_makes_the_pdf_and_python_takes_over_if_it_cannot(user, box, monkeypatch) -> None:
+async def test_on_mac_the_pdf_made_by_the_window_is_shown_as_it_is(user, box, monkeypatch) -> None:
     import shutil
     made = []
 
@@ -123,7 +122,9 @@ async def test_on_mac_the_window_makes_the_pdf_and_python_takes_over_if_it_canno
     shown = await _print_first_message(user, box, monkeypatch, "darwin", fake)
     shutil.rmtree(made[0][1].parent, ignore_errors=True)
     assert "Premier message" in made[0][0] and "Deuxième message" not in made[0][0]
-    assert shown[0][1].startswith(b"%PDF-1.4 fait par")  # le PDF de la fenêtre native est montré tel quel
-    shown.clear()
+    assert shown[0][1].startswith(b"%PDF-1.4 fait par")
+
+
+async def test_on_mac_python_takes_over_when_the_window_cannot_make_the_pdf(user, box, monkeypatch) -> None:
     shown = await _print_first_message(user, box, monkeypatch, "darwin", lambda html, pdf, timeout=40.0: False)
-    assert "Premier message" in _pdf_text(shown[-1][1])  # conversion impossible : PDF du texte
+    assert "Premier message" in _pdf_text(shown[-1][1])
