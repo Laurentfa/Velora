@@ -580,14 +580,21 @@ SWIPE_JS = """<script>
     const files = [...e.dataTransfer.files].filter(f => f.size > 0);
     if (up && up.$refs.qRef && files.length) up.$refs.qRef.addFiles(files);
   });
+  // collage : fichiers copiés (PDF, Word…) -> pièces jointes de la rédaction ; image collée dans le texte -> image incorporée (hors du texte : pièce jointe)
   document.addEventListener('paste', async e => {
+    const files = [...((e.clipboardData && e.clipboardData.files) || [])].filter(f => f.size > 0);
+    if (!files.length) return;
     const content = e.target && e.target.closest && e.target.closest('.q-editor__content');
-    if (!content) return;
-    const imgs = [...((e.clipboardData && e.clipboardData.files) || [])].filter(f => f.type.startsWith('image/'));
-    if (!imgs.length) return;
+    const inline = content ? files.filter(f => f.type.startsWith('image/')) : [];
+    const attach = files.filter(f => !inline.includes(f));
+    const up = composerEl() && window.__mailiaUp ? getElement(window.__mailiaUp) : null;
+    if (attach.length && !(up && up.$refs.qRef)) { if (!inline.length) return; }  // pas de rédaction ouverte : on laisse faire (rien à joindre)
     e.preventDefault();
-    const rootId = content.closest('.q-editor').id;
-    for (const f of imgs) await window.mailiaAddImage(f, rootId);
+    if (attach.length && up && up.$refs.qRef) up.$refs.qRef.addFiles(attach);
+    if (inline.length && content) {
+      const rootId = content.closest('.q-editor').id;
+      for (const f of inline) await window.mailiaAddImage(f, rootId);
+    }
   });
   // raccourcis clavier : ignorés quand on écrit, ou qu'une fenêtre est ouverte
   document.addEventListener('keydown', e => {
