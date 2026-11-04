@@ -1065,13 +1065,10 @@ SWIPE_JS = """<script>
     const show = (x, y, o) => {
       close();
       const items = [];
-      if (o.items) items.push(...o.items);  // champ de saisie (Windows) : couper, copier, coller, tout sélectionner
-      else {
-        if (o.link) items.push(["Copier l'adresse du lien", () => copy(o.link)]);
-        if (o.sel) items.push(['Copier', () => copy(o.sel)]);
-        items.push(['Tout sélectionner', o.all]);
-        items.push(null, ['Répondre', () => key('r')], ['Répondre à tous', () => key('a')], ['Transférer…', () => key('f')]);
-      }
+      if (o.link) items.push(["Copier l'adresse du lien", () => copy(o.link)]);
+      if (o.sel) items.push(['Copier', () => copy(o.sel)]);
+      items.push(['Tout sélectionner', o.all]);
+      items.push(null, ['Répondre', () => key('r')], ['Répondre à tous', () => key('a')], ['Transférer…', () => key('f')]);
       menu = document.createElement('div');
       menu.className = 'ctxm';
       for (const it of items) {
@@ -1097,35 +1094,6 @@ SWIPE_JS = """<script>
       const box = t.closest('.mailbody,.tcard');
       show(e.clientX, e.clientY, {sel: String(getSelection()), link: a ? a.href : '', all: () => {
         const r = document.createRange(); r.selectNodeContents(box || t); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }});
-    });
-    // Windows (fenêtre native) : WebView2 n'a pas de menu clic droit pour les champs de saisie et la rédaction ; on en fournit un (couper, copier, coller, tout sélectionner)
-    const FIELD = 'input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=file]),textarea,[contenteditable="true"],[contenteditable=""]';
-    document.addEventListener('contextmenu', e => {
-      if (!(navigator.userAgent.includes('Windows') && window.pywebview)) return;
-      const field = e.target.closest && e.target.closest(FIELD);
-      if (!field) return;
-      e.preventDefault();
-      const plain = 'value' in field;
-      const sel = plain ? String(field.value).substring(field.selectionStart || 0, field.selectionEnd || 0) : String(getSelection());
-      const items = [];
-      if (sel) items.push(['Couper', () => {
-        const g = getSelection();
-        const st = plain ? [field.selectionStart, field.selectionEnd] : (g.rangeCount ? g.getRangeAt(0).cloneRange() : null);
-        copy(sel);  // la copie passe par un champ provisoire : la sélection est rétablie avant de supprimer
-        field.focus();
-        if (plain) field.setSelectionRange(st[0], st[1]); else if (st) { g.removeAllRanges(); g.addRange(st); }
-        document.execCommand('delete');
-      }]);
-      if (sel) items.push(['Copier', () => copy(sel)]);
-      items.push(['Coller', () => {
-        field.focus();
-        if (navigator.clipboard && navigator.clipboard.readText) navigator.clipboard.readText().then(t => { field.focus(); document.execCommand('insertText', false, t); }).catch(() => {});
-      }]);
-      items.push(['Tout sélectionner', () => {
-        field.focus();
-        if (plain) field.select(); else { const root = field.closest('.q-editor__content') || field; const r = document.createRange(); r.selectNodeContents(root); const s = getSelection(); s.removeAllRanges(); s.addRange(r); }
-      }]);
-      show(e.clientX, e.clientY, {items});
     });
     document.addEventListener('click', close);
     document.addEventListener('scroll', close, true);
