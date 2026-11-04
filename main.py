@@ -1182,8 +1182,9 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                             self.attachments_zip_button(atts, x)
 
     async def print_message(self, x: dict) -> None:
-        """Imprime CE message seul (pas toute la conversation) : un aperçu s'ouvre dans Velora (bouton « Imprimer » = boîte d'impression de la fenêtre) ;
-        « Ouvrir dans le navigateur » ouvre la même page dans le navigateur du système, qui lance la boîte d'impression."""
+        """Imprime CE message seul (pas toute la conversation). Mac : WebKit en fait un PDF, montré dans l'aperçu de Velora (« Imprimer » = boîte d'impression du système).
+        Ailleurs (ou si la conversion échoue) : un aperçu de la page ; « Imprimer » l'ouvre dans le navigateur du système, qui lance la boîte d'impression
+        (la fenêtre native ne sait pas imprimer une page : window.print() n'y fait rien)."""
         html = x.get("body_html")
         clean, allow = None, False
         if html:
@@ -1211,10 +1212,8 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
             with ui.row().classes("w-full items-center no-wrap q-px-md q-py-sm gap-2").style("border-bottom:1px solid var(--line)"):
                 ui.icon("print", size="20px").style("color:var(--accent)")
                 ui.label("Aperçu avant impression").style("font-weight:600").classes("col")
-                ui.button("Imprimer", icon="print", on_click=lambda: ui.run_javascript(
-                    f"getElement({frame.id}).$el.contentWindow.postMessage({{mailiaPrint: 1}}, '*')")).props("unelevated no-caps color=primary").mark("print-go")
-                ui.button("Ouvrir dans le navigateur", icon="open_in_new", on_click=browser).props("flat dense no-caps color=primary").tooltip(
-                    "Si la boîte d'impression ne s'ouvre pas ici : la même page s'ouvre dans le navigateur du système").mark("print-browser")
+                ui.button("Imprimer", icon="print", on_click=browser).props("unelevated no-caps color=primary").tooltip(
+                    "Ouvre la page dans le navigateur du système, qui lance la boîte d'impression (la fenêtre de Velora ne sait pas imprimer une page)").mark("print-go")
                 ui.button(icon="close", on_click=dlg.close).props("flat round dense")
             frame = ui.element("iframe").style("width:100%;flex:1;border:0;background:#fff")
             frame._props.update({"sandbox": "allow-scripts allow-modals", "srcdoc": htmlmail.build_print_doc(head, clean, x.get("body") or "", allow, cids, autoprint=False)})
