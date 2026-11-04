@@ -394,6 +394,7 @@ def html_to_pdf(html_path: str, pdf_path: str, timeout: float = 30.0) -> None:
     size = NSMakeRect(0, 0, paper.width - left - right, paper.height - top - bottom)
     web = WKWebView.alloc().initWithFrame_configuration_(size, WKWebViewConfiguration.alloc().init())
     win = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(NSMakeRect(-4000, -4000, size.size.width, size.size.height), 0, 2, False)
+    win.setReleasedWhenClosed_(False)  # sinon « close » libère la fenêtre une fois de trop (PyObjC la possède déjà) : plantage de l'appli au tour suivant
     win.setContentView_(web)
     win.orderBack_(None)
     try:
@@ -424,6 +425,8 @@ def html_to_pdf(html_path: str, pdf_path: str, timeout: float = 30.0) -> None:
                 return
         raise RuntimeError("PDF non produit à temps")
     finally:
+        win.orderOut_(None)
+        win.setContentView_(None)
         win.close()
 
 
