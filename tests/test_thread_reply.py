@@ -75,8 +75,9 @@ async def test_each_message_of_a_conversation_can_be_printed_on_its_own(user, bo
     import shutil
     from pathlib import Path
     opened = []
+    monkeypatch.setattr(main.sys, "platform", "linux")  # ni Mac (PDF) ni Windows (impression de la fenêtre) : aperçu de la page, « Imprimer » ouvre le navigateur
     monkeypatch.setattr(main, "open_file", lambda p: opened.append(Path(p)) or True)
-    monkeypatch.setattr(main, "native_html_to_pdf", lambda html, pdf, timeout=40.0: False)  # la fenêtre native ne répond pas : repli sur l'aperçu de la page
+    monkeypatch.setattr(main, "native_html_to_pdf", lambda html, pdf, timeout=40.0: False)
     add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv", date="2026-10-01T10:00:00+00:00", body="Premier message")
     add_message("testbox|INBOX|1", sender="bob@example.com", subject="Re: Dossier X", ckey="testbox|conv", date="2026-10-02T10:00:00+00:00", body="Deuxième message")
     await user.open("/")
