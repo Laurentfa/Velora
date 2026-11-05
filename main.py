@@ -79,7 +79,7 @@ from mailia import apple_writer, icons, weather
 from mailia.brand import logo_big, logo_img
 from mailia.ui_bulk import BulkMixin
 from mailia.ui_cleanup import CleanupMixin
-from mailia.ui_common import CAT, JOURS_LONG, MOIS, NOLIST_VIEWS, SERVER_MODE, VIEWS, ago, full_date, human_size, initial_view, initials, label_of, log, native_html_to_pdf, print_message_file, short_date
+from mailia.ui_common import CAT, JOURS_LONG, MOIS, NOLIST_VIEWS, SERVER_MODE, VIEWS, ago, full_date, human_size, initial_view, initials, label_of, log, native_html_to_pdf, open_to_print, print_message_file, short_date
 from mailia.ui_compose_ai import ComposeAiMixin
 from mailia.ui_dictation import DictationMixin
 from mailia.ui_drafts import DraftsMixin
@@ -1188,8 +1188,9 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                             self.attachments_zip_button(atts, x)
 
     async def print_message(self, x: dict) -> None:
-        """Imprime CE message seul (pas toute la conversation) : un PDF du message s'ouvre dans l'aperçu de Velora, d'où on l'imprime comme une pièce jointe.
-        Mac : WebKit fabrique le PDF (mise en forme et images du message). Ailleurs, ou si la conversion échoue : PDF du texte du message, fabriqué en Python."""
+        """Imprime CE message seul (pas toute la conversation) : un PDF du message est fabriqué. Mac : WebKit le fabrique (mise en forme et images du message) et il s'ouvre dans
+        l'aperçu de Velora, d'où on l'imprime comme une pièce jointe. Windows : PDF du texte du message, fabriqué en Python, ouvert dans l'application PDF par défaut.
+        Autres systèmes, ou si la conversion Mac échoue : PDF du texte dans l'aperçu de Velora."""
         who = (f"{x['sender_name']} <{x['sender']}>" if x.get("sender_name") and x.get("sender_name") != x.get("sender") else x.get("sender") or "")
         atts = json.loads(x["att_json"]) if x.get("att_json") else []
         head = {"subject": x.get("subject"), "from": who, "to": x.get("to_addrs"), "cc": x.get("cc_addrs"), "bcc": x.get("bcc_addrs"),
@@ -1216,8 +1217,14 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
             except Exception as e:  # noqa: BLE001
                 log.warning("PDF du message impossible : %s", e, exc_info=True)
                 return ui.notify(f"Impression impossible : {e}", type="negative", multi_line=True)
-        # Windows : le PDF est seulement affiché dans l'aperçu de Velora (pas de bouton « Imprimer » : il ouvrirait une autre application) ; Mac et autres : inchangé
-        await self.show_preview(name, data, f"print:{x['id']}", lambda: self._save_download(name, data), excluded=True, printable=not print_platform().startswith("win"))
+        if print_platform().startswith("win"):  # Windows : le PDF s'ouvre dans l'application PDF par défaut, d'où on imprime comme on veut
+            try:
+                await run.io_bound(open_to_print, name, data)
+            except Exception as e:  # noqa: BLE001
+                log.warning("ouverture du PDF du message : %s", e, exc_info=True)
+                ui.notify(f"Le PDF n'a pas pu s'ouvrir : {e}", type="negative", multi_line=True)
+            return
+        await self.show_preview(name, data, f"print:{x['id']}", lambda: self._save_download(name, data), excluded=True)
 
     async def reply_message(self, x: dict, all_: bool = False) -> None:
         """Répondre à un message précis de la conversation (et non au dernier) : il devient le message de référence, cité dans la réponse."""

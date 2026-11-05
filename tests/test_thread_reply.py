@@ -78,8 +78,8 @@ async def _print_first_message(user, box, monkeypatch, platform: str, native):
     monkeypatch.setattr(main, "native_html_to_pdf", native)
     shown = []
 
-    async def show_preview(self, name, data, key, download, excluded=False, send=None, printable=True):
-        shown.append((name, data, excluded, printable))
+    async def show_preview(self, name, data, key, download, excluded=False, send=None):
+        shown.append((name, data, excluded))
     monkeypatch.setattr(main.Mailbox, "show_preview", show_preview)
     add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv", date="2026-10-01T10:00:00+00:00", body="Premier message d’Alice")
     add_message("testbox|INBOX|1", sender="bob@example.com", subject="Re: Dossier X", ckey="testbox|conv", date="2026-10-02T10:00:00+00:00", body="Deuxième message")
@@ -102,12 +102,10 @@ def _pdf_text(data: bytes) -> str:
     return "".join(p.extract_text() for p in PdfReader(BytesIO(data)).pages)
 
 
-@pytest.mark.parametrize("platform", ["win32", "linux"])
-async def test_on_windows_and_elsewhere_a_pdf_of_the_message_text_is_previewed(user, box, monkeypatch, platform) -> None:
-    shown = await _print_first_message(user, box, monkeypatch, platform, lambda html, pdf, timeout=40.0: False)
-    name, data, excluded, printable = shown[-1]
+async def test_elsewhere_a_pdf_of_the_message_text_is_previewed(user, box, monkeypatch) -> None:
+    shown = await _print_first_message(user, box, monkeypatch, "linux", lambda html, pdf, timeout=40.0: False)
+    name, data, excluded = shown[-1]
     text = _pdf_text(data)
-    assert printable is (platform != "win32")  # Windows : le PDF est seulement affiché, sans bouton « Imprimer »
     assert name == "Dossier X.pdf" and data.startswith(b"%PDF") and excluded is True  # aperçu sans résumé IA
     assert "Premier message" in text and "Deuxième message" not in text and "alice@example.com" in text
 
@@ -129,3 +127,30 @@ async def test_on_mac_the_pdf_made_by_the_window_is_shown_as_it_is(user, box, mo
 async def test_on_mac_python_takes_over_when_the_window_cannot_make_the_pdf(user, box, monkeypatch) -> None:
     shown = await _print_first_message(user, box, monkeypatch, "darwin", lambda html, pdf, timeout=40.0: False)
     assert "Premier message" in _pdf_text(shown[-1][1])
+
+
+async def test_on_windows_the_pdf_of_the_message_opens_in_the_default_pdf_application(user, box, monkeypatch) -> None:
+    opened = []
+    monkeypatch.setattr(main, "open_to_print", lambda name, data: opened.append((name, data)))
+    # l'aperçu de Velora ne doit pas s'ouvrir : _print_first_message attend un aperçu, on lui en donne la trace sans le déclencher
+    monkeypatch.setattr(main, "print_platform", lambda: "win32")
+    monkeypatch.setattr(main, "SERVER_MODE", False)
+    previews = []
+
+    async def show_preview(self, *a, **k):
+        previews.append(a)
+    monkeypatch.setattr(main.Mailbox, "show_preview", show_preview)
+    add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv", date="2026-10-01T10:00:00+00:00", body="Premier message")
+    add_message("testbox|INBOX|1", sender="bob@example.com", subject="Re: Dossier X", ckey="testbox|conv", date="2026-10-02T10:00:00+00:00", body="Deuxième message")
+    await user.open("/")
+    await box[-1].open("testbox|INBOX|1")
+    await user.should_see("Dossier X")
+    el = user.find(marker="tc-print-testbox|INBOX|0").elements.pop()
+    with user.client:
+        for lid in list(el._event_listeners):
+            el._handle_event({"listener_id": lid, "args": {}})
+    from tests.conftest import wait_until
+    await wait_until(lambda: opened)
+    name, data = opened[0]
+    assert name == "Dossier X.pdf" and data.startswith(b"%PDF") and "Premier message" in _pdf_text(data) and "Deuxième message" not in _pdf_text(data)
+    assert not previews  # pas d'aperçu dans Velora : le PDF s'ouvre dans l'application par défaut
