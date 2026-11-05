@@ -65,7 +65,7 @@ from nicegui import Client, app, background_tasks, native, run, ui
 
 from mailia import ai, aipolicy, apiserver, compose, config, db, folder_order, folder_tree, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, vault, wizard
 from html import escape as html_escape
-from mailia import chromebridge, modules
+from mailia import alerts, chromebridge, modules
 from mailia.mailpdf import message_pdf
 from mailia.textutil import for_ai, split_links
 from mailia.ui_account import friendly_error
@@ -167,6 +167,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         self.cids: dict[str, dict] = {}  # message -> {cid: url data:} des images incrustées
         self.rep_folder = ""  # dossier d'où la conversation a été ouverte : c'est là que s'appliquent archiver / supprimer
         self.tsum: dict[str, str] = {}
+        self._alert_open = ""  # clé de l'alerte affichée en ce moment (voir show_alerts)
         self.fwd_src: dict | None = None  # message en cours de transfert : les outils des modules (carte patient…) restent affichés
         self.new = False  # True : formulaire « nouveau message » affiché à la place d'un mail
         self.draft = {"account": "", "to": "", "cc": "", "bcc": "", "subject": "", "body": "", "ins": "", "tone": "neutre",
@@ -1460,7 +1461,31 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         perf.record("liste : lignes ajoutées", time.perf_counter() - t)
         return True
 
+    def show_alerts(self) -> None:
+        """Une alerte en attente (1min.AI refuse la connexion…) s'affiche dans une fenêtre qu'on ne ferme qu'avec « OK » ; une seule à la fois."""
+        if self._alert_open:
+            return
+        a = next(iter(alerts.pending()), None)
+        if not a:
+            return
+        self._alert_open = a["key"]
+
+        def ok() -> None:
+            alerts.acknowledge(a["key"])
+            self._alert_open = ""
+            dlg.close()
+
+        with self.host, ui.dialog().props("persistent") as dlg, ui.card().style("width:min(520px,96vw)"):
+            with ui.row().classes("items-center no-wrap gap-2"):
+                ui.icon("warning", size="28px").style("color:#c62828")
+                ui.label(a["title"]).classes("text-h6")
+            ui.label(a["text"]).classes("text-body2").style("white-space:pre-line")
+            with ui.row().classes("justify-end w-full"):
+                ui.button("OK", on_click=ok).props("unelevated no-caps color=primary").mark("alert-ok")
+        dlg.open()
+
     async def tick(self) -> None:
+        self.show_alerts()
         v = await run.io_bound(queries.version)  # hors du fil de l'interface : si une synchro occupe la base, la fenêtre n'attend pas
         if v != self.ver:
             # le dessin de la liste fige la fenêtre pendant sa durée : sur un ordinateur lent (1,5 s), l'analyse IA du retard de mails la

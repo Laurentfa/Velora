@@ -10,9 +10,11 @@ from . import config, db, i18n
 class AIError(Exception):
     """Erreur d'IA. `fallback=True` : l'autre fournisseur peut prendre le relais (panne, clé refusée, crédits épuisés, budget atteint…)."""
 
-    def __init__(self, message: str = "", fallback: bool = False) -> None:
+    def __init__(self, message: str = "", fallback: bool = False, alert: str = "", detail: str = "") -> None:
         super().__init__(message)
         self.fallback = fallback
+        self.alert = alert  # « key » (clé refusée ou absente), « credits » (crédits épuisés) : à montrer à l'utilisateur jusqu'à ce qu'il clique sur OK ; vide : panne passagère
+        self.detail = detail  # ce que le fournisseur a répondu
 
 
 # $ par million de jetons (entrée, sortie) : sert aux estimations affichées

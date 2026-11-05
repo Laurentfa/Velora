@@ -47,7 +47,7 @@ def api_key() -> str:
 def _headers(key: str = "") -> dict:
     key = key or api_key()
     if not key:
-        raise AIError("Clé 1min.AI absente (Paramètres › Intelligence artificielle).", fallback=True)
+        raise AIError("Clé 1min.AI absente (Paramètres › Intelligence artificielle).", fallback=True, alert="key")
     return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
 
 
@@ -76,9 +76,9 @@ def _error(r: httpx.Response) -> AIError:
     msg = str(msg or r.text[:200] or "").strip()
     low = msg.lower()
     if r.status_code in (401, 403):
-        return AIError("Clé 1min.AI refusée ou invalide.", fallback=True)
+        return AIError("Clé 1min.AI refusée ou invalide.", fallback=True, alert="key", detail=msg[:200])
     if r.status_code == 402 or "credit" in low or "crédit" in low or "insufficient" in low or "quota" in low:
-        return AIError("Crédits 1min.AI insuffisants" + (f" ({msg[:120]})" if msg else "") + ".", fallback=True)
+        return AIError("Crédits 1min.AI insuffisants" + (f" ({msg[:120]})" if msg else "") + ".", fallback=True, alert="credits", detail=msg[:200])
     if r.status_code == 429:
         return AIError("Limite de débit 1min.AI atteinte : réessayez dans un instant.", fallback=True)
     if r.status_code >= 500:

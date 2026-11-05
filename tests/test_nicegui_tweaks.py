@@ -57,7 +57,7 @@ async def test_background_redraws_are_spaced_by_build_cost():
 
     async def reload():
         reloads.append(1)
-    box = types.SimpleNamespace(ver=("a",), _last_bg=0.0, _build_cost=0.0, reload=reload)
+    box = types.SimpleNamespace(ver=("a",), _last_bg=0.0, _build_cost=0.0, reload=reload, show_alerts=lambda: None)
     import mailia.queries as q
     real = q.version
     q.version = lambda: ("b",)

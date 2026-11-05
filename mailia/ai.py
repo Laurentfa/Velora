@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 import anthropic
 
-from . import aipolicy, db
+from . import aipolicy, alerts, db
 from . import config, htmlmail
 from .config import STYLE
 from .textutil import for_ai
@@ -65,6 +65,10 @@ def _ask(system: str, user: str, *, model: str, max_tokens: int = 1500, effort: 
         return _run(model, system, user, max_tokens, effort, images, feature)
     except AIError as e:
         alt = _alternative(model) if e.fallback else None
+        if e.alert and model.startswith(config.ONEMIN_PREFIX):  # 1min.AI refuse la connexion : à montrer jusqu'au clic sur OK (voir alerts, Mailbox.show_alerts)
+            alerts.raise_alert(f"onemin:{e.alert}", "1min.AI refuse la connexion",
+                               f"{e}" + (f"\n\nRéponse de 1min.AI : {e.detail}" if e.detail else "") + "\n\n"
+                               + ("En attendant, Velora utilise Claude (API payante)." if alt else "La fonction d'IA demandée n'a pas pu s'exécuter."))
         if not alt or (images and alt.startswith(config.ONEMIN_PREFIX) and not config.provider_ready("onemin")):
             raise
         logging.getLogger("ai").warning("repli sur %s après : %s", alt, e)
@@ -75,9 +79,10 @@ def _run(model: str, system: str, user: str, max_tokens: int, effort: str, image
     if model.startswith(config.ONEMIN_PREFIX):
         from . import onemin
         if not config.provider_ready("onemin"):
-            raise AIError("Clé 1min.AI absente (Paramètres › Intelligence artificielle).", fallback=True)
+            raise AIError("Clé 1min.AI absente (Paramètres › Intelligence artificielle).", fallback=True, alert="key")
         aipolicy.check_credits()
         text, tin, tout, credits, estimated = onemin.chat_full(model[len(config.ONEMIN_PREFIX):], system, user, max_tokens, images)
+        alerts.resolve("onemin:")  # la connexion fonctionne : une alerte déjà acquittée pourra reparaître si le problème revient
         try:
             db.record_usage(model, tin, tout, feature, credits, credits if estimated else 0)
         except Exception:
