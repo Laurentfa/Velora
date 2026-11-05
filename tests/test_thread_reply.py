@@ -78,8 +78,8 @@ async def _print_first_message(user, box, monkeypatch, platform: str, native):
     monkeypatch.setattr(main, "native_html_to_pdf", native)
     shown = []
 
-    async def show_preview(self, name, data, key, download, excluded=False, send=None):
-        shown.append((name, data, excluded))
+    async def show_preview(self, name, data, key, download, excluded=False, send=None, printable=True):
+        shown.append((name, data, excluded, printable))
     monkeypatch.setattr(main.Mailbox, "show_preview", show_preview)
     add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv", date="2026-10-01T10:00:00+00:00", body="Premier message d’Alice")
     add_message("testbox|INBOX|1", sender="bob@example.com", subject="Re: Dossier X", ckey="testbox|conv", date="2026-10-02T10:00:00+00:00", body="Deuxième message")
@@ -105,8 +105,9 @@ def _pdf_text(data: bytes) -> str:
 @pytest.mark.parametrize("platform", ["win32", "linux"])
 async def test_on_windows_and_elsewhere_a_pdf_of_the_message_text_is_previewed(user, box, monkeypatch, platform) -> None:
     shown = await _print_first_message(user, box, monkeypatch, platform, lambda html, pdf, timeout=40.0: False)
-    name, data, excluded = shown[-1]
+    name, data, excluded, printable = shown[-1]
     text = _pdf_text(data)
+    assert printable is (platform != "win32")  # Windows : le PDF est seulement affiché, sans bouton « Imprimer »
     assert name == "Dossier X.pdf" and data.startswith(b"%PDF") and excluded is True  # aperçu sans résumé IA
     assert "Premier message" in text and "Deuxième message" not in text and "alice@example.com" in text
 

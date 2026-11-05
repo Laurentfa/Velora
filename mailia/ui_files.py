@@ -187,7 +187,7 @@ class FilesMixin:
         self.files_view.refresh()
         self.reader.refresh()
 
-    async def show_preview(self, name: str, data: bytes, key: str, download, excluded: bool = False, send=None) -> None:
+    async def show_preview(self, name: str, data: bytes, key: str, download, excluded: bool = False, send=None, printable: bool = True) -> None:
         import shutil
         import tempfile
         kind = self.preview_kind(name)
@@ -225,7 +225,7 @@ class FilesMixin:
                     sum_btn = ui.button("Résumer", icon="auto_awesome").props("unelevated no-caps color=primary size=sm").tooltip(
                         "Résumé par l'IA. Le texte du fichier est envoyé à votre fournisseur d'IA (une image, pour une photo ou un document numérisé : "
                         "6 pages au plus). Quelques centimes au plus, une seule fois par fichier.")
-                if not SERVER_MODE and can_print(name):
+                if printable and not SERVER_MODE and can_print(name):
                     async def print_it() -> None:
                         try:
                             await run.io_bound(open_to_print, name, data)

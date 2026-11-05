@@ -1216,7 +1216,8 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
             except Exception as e:  # noqa: BLE001
                 log.warning("PDF du message impossible : %s", e, exc_info=True)
                 return ui.notify(f"Impression impossible : {e}", type="negative", multi_line=True)
-        await self.show_preview(name, data, f"print:{x['id']}", lambda: self._save_download(name, data), excluded=True)
+        # Windows : le PDF est seulement affiché dans l'aperçu de Velora (pas de bouton « Imprimer » : il ouvrirait une autre application) ; Mac et autres : inchangé
+        await self.show_preview(name, data, f"print:{x['id']}", lambda: self._save_download(name, data), excluded=True, printable=not print_platform().startswith("win"))
 
     async def reply_message(self, x: dict, all_: bool = False) -> None:
         """Répondre à un message précis de la conversation (et non au dernier) : il devient le message de référence, cité dans la réponse."""
