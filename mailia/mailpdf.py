@@ -1,6 +1,7 @@
 """PDF d'un message (impression sous Windows, repli ailleurs) : en-tête (objet, de, à, cc, date), texte du message, noms des pièces jointes.
 Fabriqué en Python (fpdf2), sans navigateur ni fenêtre : le PDF s'affiche ensuite dans l'aperçu de Velora, d'où on l'imprime comme une pièce jointe.
 Seul le texte du message est imprimé (pas sa mise en forme HTML ni ses images)."""
+import logging
 import os
 from pathlib import Path
 
@@ -28,9 +29,19 @@ def _base_font_text(s: str) -> str:
 
 
 def message_pdf(head: dict, text: str) -> bytes:
-    """head : {subject, from, to, cc, bcc, date, attachments: [noms]} ; text : texte du message tel qu'affiché. Rend le PDF (octets)."""
-    from fpdf import FPDF
+    """head : {subject, from, to, cc, bcc, date, attachments: [noms]} ; text : texte du message tel qu'affiché. Rend le PDF (octets).
+    Avec une police Unicode du système ; si elle ne peut pas être intégrée (module de polices absent de l'appli empaquetée, police illisible…), police de base du PDF."""
     files = _font_files()
+    if files:
+        try:
+            return _build(head, text, files)
+        except Exception:  # noqa: BLE001
+            logging.getLogger("mailia").warning("PDF du message : police du système inutilisable, police de base", exc_info=True)
+    return _build(head, text, None)
+
+
+def _build(head: dict, text: str, files: tuple[Path, Path] | None) -> bytes:
+    from fpdf import FPDF
     pdf = FPDF(format="A4")
     pdf.set_margins(PAGE_MARGIN, PAGE_MARGIN, PAGE_MARGIN)
     pdf.set_auto_page_break(True, PAGE_MARGIN)

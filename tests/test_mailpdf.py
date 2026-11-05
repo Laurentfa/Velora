@@ -35,3 +35,15 @@ def test_an_empty_message_and_odd_characters_never_break_the_pdf(monkeypatch) ->
     assert "(message vide)" in "".join(pages(data))
     data = mailpdf.message_pdf({"subject": "😀 日本語"}, "texte 😀 日本語\t\ttabulation\r\nligne")
     assert "tabulation" in "".join(pages(data))
+
+
+def test_when_the_system_font_cannot_be_embedded_the_pdf_still_comes_out_with_the_base_font(monkeypatch) -> None:
+    """Appli Windows empaquetée sans le module de polices (fontTools) : l'impression ne doit pas échouer pour autant."""
+    from fpdf import FPDF
+    monkeypatch.setattr(mailpdf, "_font_files", lambda: (mailpdf.Path("/x/regular.ttf"), mailpdf.Path("/x/bold.ttf")))
+
+    def broken(self, *a, **k):
+        raise ModuleNotFoundError("No module named 'fontTools.misc.bezierTools'")
+    monkeypatch.setattr(FPDF, "add_font", broken)
+    data = mailpdf.message_pdf(HEAD, TEXT)
+    assert "Contrôle manuel" in "".join(pages(data))
