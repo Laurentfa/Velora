@@ -55,6 +55,11 @@ if "--chrome-host" in sys.argv:  # relais lancé par Chrome pour l'extension Vel
     _host()
     sys.exit(0)
 
+if __name__ == "__main__" and multiprocessing.current_process().name == "MainProcess" and not os.environ.get("VELORA_MULTI"):
+    from mailia import instance as _instance  # une seule copie de Velora : une deuxième copie ramène la fenêtre de la première au premier plan, puis s'arrête
+    if not _instance.claim():
+        sys.exit(0)
+
 from mailia import perf  # en premier : le chronomètre de démarrage part d'ici
 from mailia import nicegui_tweaks
 nicegui_tweaks.install()
@@ -2186,6 +2191,16 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware  # noqa: E402
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"] if SERVER_MODE else ["127.0.0.1", "localhost", "[::1]", "::1"])
 app.on_shutdown(_stop_children)
 atexit.register(_stop_children)
+if "_instance" in globals():
+    app.on_shutdown(_instance.closing)  # une copie lancée pendant la fermeture attend la fin de celle-ci
+
+    def _show_window() -> None:
+        """Une deuxième copie vient d'être lancée : la fenêtre de celle-ci revient au premier plan (restaurée si elle était réduite)."""
+        w = app.native.main_window
+        if w:
+            w.restore()
+            w.show()
+    _instance.on_show = _show_window
 if not DB_ERROR:
     sync.start_push()
 
