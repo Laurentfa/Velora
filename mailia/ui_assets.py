@@ -584,9 +584,14 @@ SWIPE_JS = """<script>
   document.addEventListener('paste', async e => {
     const files = [...((e.clipboardData && e.clipboardData.files) || [])].filter(f => f.size > 0);
     if (!files.length) return;
+    // Word, Excel, Outlook, un navigateur… placent dans le presse-papiers le texte mis en forme ET une image de ce texte : on laisse alors le collage normal,
+    // sinon c'est l'image qui serait insérée à la place du texte (ou rien du tout, dans les fenêtres de signature)
+    const hasHtml = [...((e.clipboardData && e.clipboardData.types) || [])].includes('text/html');
     const content = e.target && e.target.closest && e.target.closest('.q-editor__content');
-    const inline = content ? files.filter(f => f.type.startsWith('image/')) : [];
-    const attach = files.filter(f => !inline.includes(f));
+    const images = files.filter(f => f.type.startsWith('image/')), others = files.filter(f => !f.type.startsWith('image/'));
+    const inline = content && !hasHtml ? images : [];
+    const attach = others.concat(!content && !hasHtml ? images : []);
+    if (!inline.length && !attach.length) return;
     const up = composerEl() && window.__mailiaUp ? getElement(window.__mailiaUp) : null;
     if (attach.length && !(up && up.$refs.qRef)) { if (!inline.length) return; }  // pas de rédaction ouverte : on laisse faire (rien à joindre)
     e.preventDefault();
