@@ -366,8 +366,21 @@ def _notify_if_urgent(mid: str, d: dict) -> None:
         log.exception("notification")
 
 
+_ai_pause = {"until": 0.0, "fp": ""}  # analyse suspendue après un refus de l'IA (clé refusée, quota…) : sans cela le même mail serait retenté à chaque cycle, toutes les quelques secondes
+AI_PAUSE_REFUSED, AI_PAUSE_OTHER = 600, 90  # secondes : refus de clé ou de crédits / autre erreur (réseau, surcharge)
+
+
+def _ai_fingerprint() -> str:
+    """Change dès que l'utilisateur modifie les clés ou le fournisseur : la suspension tombe alors tout de suite."""
+    import hashlib
+    raw = "|".join(str(config.env(k, "") or "") for k in ("ONEMIN_API_KEY", "ANTHROPIC_API_KEY", "AI_PROVIDER", "AI_FALLBACK"))
+    return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
 def analyze_pending() -> int:
     if not config.ai_enabled():
+        return 0
+    if time.monotonic() < _ai_pause["until"] and _ai_pause["fp"] == _ai_fingerprint():
         return 0
     if db.kv_get("requeue_bodyless_v1") != "1":  # une seule fois : les résumés faits sans le texte du message sont refaits
         n = queries.requeue_bodyless_summaries()
@@ -401,8 +414,12 @@ def analyze_pending() -> int:
                 if queries.get_message(r["id"]):
                     _notify_if_urgent(r["id"], d)
         except ai.AIError as e:
-            log.warning("analyse %s : %s", r["id"], e)
-            break  # clé absente / quota : inutile d'insister ce cycle
+            wait = AI_PAUSE_REFUSED if e.alert else AI_PAUSE_OTHER
+            _ai_pause.update(until=time.monotonic() + wait, fp=_ai_fingerprint())
+            log.warning("analyse %s : %s (nouvel essai dans %d min)", r["id"], e, max(1, wait // 60))
+            break  # clé absente / quota : inutile d'insister (ni ce cycle, ni les suivants avant la fin de la pause)
+    if done:
+        _ai_pause["until"] = 0.0
     return done
 
 

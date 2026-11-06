@@ -49,9 +49,9 @@ def offer(info: dict) -> None:
 async def auto_check() -> None:
     """Au démarrage, une fois par jour au plus : une simple notification, jamais de fenêtre qui interrompt le travail."""
     info = await run.io_bound(updater.check)
-    if info:
-        ui.notify(f"Velora {info['version']} est disponible.", type="info", timeout=0, close_button="Plus tard",
-                  actions=[{"label": "Voir", "color": "white", "handler": lambda: offer(info)}])
+    if info:  # (NiceGUI ne sait pas transmettre une fonction Python dans les « actions » d'une notification : l'envoi échouait avec « Type is not JSON serializable »)
+        ui.notification(f"Velora {info['version']} est disponible.", type="info", timeout=0, close_button="Voir",
+                        on_dismiss=lambda _=None: offer(info))
 
 
 def panel() -> None:
