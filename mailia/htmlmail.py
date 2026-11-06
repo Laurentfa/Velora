@@ -66,7 +66,7 @@ for (const t of ['mousedown', 'wheel', 'keydown']) document.addEventListener(t, 
 def sanitize(raw: str, limit: int = MAX_HTML) -> str:
     return nh3.clean(
         raw[:limit], tags=TAGS, attributes=ATTRS, url_schemes={"http", "https", "mailto", "tel", "cid", "data"},
-        link_rel="noopener noreferrer", clean_content_tags={"script"}, strip_comments=True,
+        link_rel="noopener noreferrer", clean_content_tags={"script", "title"}, strip_comments=True,
     )
 
 
@@ -218,7 +218,7 @@ def sanitize_outgoing(raw: str) -> str:
     """Nettoie ce que l'utilisateur a écrit ou collé (Word, pages web…) : plus de scripts ni de <style> importés."""
     clean = nh3.clean(
         raw[:3_000_000], tags=TAGS - {"style"}, attributes=OUT_ATTRS, url_schemes={"http", "https", "mailto", "tel", "cid", "data"},
-        link_rel="noopener noreferrer", clean_content_tags={"script", "style"}, strip_comments=True,
+        link_rel="noopener noreferrer", clean_content_tags={"script", "style", "title"}, strip_comments=True,
     )
     # Roboto (la police de l'appli) n'est pas installée partout : sans police de secours, certaines messageries afficheraient du Times
     clean = re.sub(r"font-family:\s*(?:&quot;|\"|')?Roboto(?:&quot;|\"|')?\s*(?=[;\"'])", "font-family: Roboto, Arial, sans-serif", clean, flags=re.I)
@@ -304,7 +304,7 @@ def sanitize_quote(raw: str, images: bool = False) -> str:
     converties en data:, jamais les images distantes (pixels de suivi)."""
     if not images:
         return nh3.clean(raw[:200_000], tags=TAGS - {"style", "img"}, attributes=ATTRS, url_schemes={"http", "https", "mailto", "tel"},
-                         link_rel="noopener noreferrer", clean_content_tags={"script", "style"}, strip_comments=True)
+                         link_rel="noopener noreferrer", clean_content_tags={"script", "style", "title"}, strip_comments=True)
     clean = nh3.clean(raw[:20_000_000], tags=(TAGS - {"style"}) | {"img"}, attributes=OUT_ATTRS, url_schemes={"http", "https", "mailto", "tel", "data"},
-                      link_rel="noopener noreferrer", clean_content_tags={"script", "style"}, strip_comments=True)
+                      link_rel="noopener noreferrer", clean_content_tags={"script", "style", "title"}, strip_comments=True)
     return _IMG_TAG.sub(lambda m: m.group(0) if _DATA_SRC.search(m.group(0)) else "", clean)

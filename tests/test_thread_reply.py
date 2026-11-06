@@ -4,13 +4,14 @@ from conftest import add_message
 from nicegui import ui
 
 import main
-from mailia import config, queries, sync
+from mailia import ai, config, queries, sync
 
 
 @pytest.fixture
 def box(monkeypatch):
     monkeypatch.setattr(sync, "run_cycle", lambda: None)
     monkeypatch.setattr(config, "ai_enabled", lambda: True)
+    monkeypatch.setattr(ai, "summarize_thread", lambda ckey: "Alice, Bob et Carol règlent le dossier X.")
     monkeypatch.setattr(queries, "_refresh_headline", lambda sig, items: None)
     prov = type("P", (), {"calendar_events": lambda self, a, b: [], "tasks": lambda self: []})()
     real_provider = sync.provider
@@ -154,3 +155,19 @@ async def test_on_windows_the_pdf_of_the_message_opens_in_the_default_pdf_applic
     name, data = opened[0]
     assert name == "Dossier X.pdf" and data.startswith(b"%PDF") and "Premier message" in _pdf_text(data) and "Deuxième message" not in _pdf_text(data)
     assert not previews  # pas d'aperçu dans Velora : le PDF s'ouvre dans l'application par défaut
+
+
+async def test_a_conversation_is_summarised_on_opening_without_any_click(user, box) -> None:
+    _thread()
+    await user.open("/")
+    await box[-1].open("testbox|INBOX|2")
+    await user.should_see("Résumé de la conversation")
+    await user.should_see("règlent le dossier X")
+
+
+async def test_a_single_message_gets_no_conversation_summary(user, box) -> None:
+    add_message("testbox|INBOX|0", sender="alice@example.com", subject="Seul", ckey="testbox|seul", date="2026-10-01T10:00:00+00:00")
+    await user.open("/")
+    await box[-1].open("testbox|INBOX|0")
+    await user.should_see("Seul")
+    await user.should_not_see("Résumé de la conversation")

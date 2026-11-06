@@ -153,6 +153,16 @@ class ComposeAiMixin:
                                        for q in items if q["label"].strip() and q["text"].strip()], ensure_ascii=False))
             self.reader.refresh()
 
+    async def auto_summarize_thread(self, ckey: str) -> None:
+        """Résumé d'une conversation ouverte, sans clic : silencieux en cas d'échec (l'icône « Résumer la conversation » reste disponible)."""
+        try:
+            self.tsum[ckey] = await run.io_bound(ai.summarize_thread, ckey)
+        except Exception:  # noqa: BLE001  (IA indisponible, mail protégé…)
+            self.tsum_tried.add(ckey)
+            self.tsum.pop(ckey, None)
+        if (self.cur or {}).get("ckey") == ckey:
+            self.reader.refresh()
+
     async def summarize_thread(self) -> None:
         ckey = self.cur["ckey"]
         try:

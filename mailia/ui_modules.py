@@ -15,12 +15,20 @@ def modules_settings() -> None:
 
     def set_master(on: bool) -> None:
         db.kv_set("modules_on", "1" if on else "0")
-        modules.apply()
+        try:
+            modules.apply()
+        except Exception as e:  # noqa: BLE001
+            modules.log.exception("modules : échec de l'application du changement")
+            ui.notify(f"Le changement est enregistré, mais n'a pas pu être appliqué tout de suite ({type(e).__name__}). Relancez Velora.", type="warning")
         draw()
 
     def set_module(mid: str, on: bool) -> None:
         modules.set_enabled(mid, on)
-        modules.apply(mid)
+        try:
+            modules.apply(mid)
+        except Exception as e:  # noqa: BLE001 — le réglage est enregistré ; on le dit au lieu de laisser l'interrupteur sans réaction
+            modules.log.exception("module %s : échec de l'application du changement", mid)
+            ui.notify(f"Le changement est enregistré, mais n'a pas pu être appliqué tout de suite ({type(e).__name__}). Relancez Velora.", type="warning")
         draw()
 
     def state_of(info: dict, wanted: bool) -> tuple[str, str]:

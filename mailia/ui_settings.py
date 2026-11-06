@@ -439,6 +439,16 @@ def _tab_prm(f, host) -> None:
                         "l'onglet « Intelligence artificielle ».").classes("text-caption text-grey")
     with ui.column().classes("w-full gap-1"):
         ui.label("Vous décidez des critères. Le format des réponses de l'IA est géré par l'application, pour que rien ne casse.").classes("text-caption text-grey")
+        accounts = config.load_accounts()
+        if len(accounts) > 1:
+            def set_brief(k: str, on: bool) -> None:
+                off = queries.brief_off() - {k} if on else queries.brief_off() | {k}
+                db.kv_set("brief_off", json.dumps(sorted(off)))
+                db.kv_set("brief:sig", "")  # le brief est réécrit avec les boîtes retenues
+            ui.label("Boîtes prises en compte dans le brief du jour").classes("text-subtitle2 q-mt-sm").style("font-weight:700")
+            for k, acc in accounts.items():
+                ui.switch(acc.label, value=k not in queries.brief_off(), on_change=lambda e, k=k: set_brief(k, e.value)).props("dense").mark(f"brief-account-{k}")
+            ui.label("Une boîte décochée reste visible partout ailleurs ; seul le brief du jour (liste, synthèse et résumé quotidien) l'ignore.").classes("text-caption text-grey")
         boxes: dict = {}
         for key, title, hint in (
                 ("analyze", "Tri et résumé des mails reçus", ""),

@@ -167,6 +167,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         self.cids: dict[str, dict] = {}  # message -> {cid: url data:} des images incrustées
         self.rep_folder = ""  # dossier d'où la conversation a été ouverte : c'est là que s'appliquent archiver / supprimer
         self.tsum: dict[str, str] = {}
+        self.tsum_tried: set[str] = set()  # conversations dont le résumé automatique a déjà été tenté
         self._alert_open = ""  # clé de l'alerte affichée en ce moment (voir show_alerts)
         self.fwd_src: dict | None = None  # message en cours de transfert : les outils des modules (carte patient…) restent affichés
         self.new = False  # True : formulaire « nouveau message » affiché à la place d'un mail
@@ -1116,6 +1117,14 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                         with ui.element("div").classes("aicard"):
                             ui.label("✦ Résumé de la conversation").classes("tag")
                             ui.label(summary).classes("q-mt-xs")
+                    elif len(th) >= 2 and cur["ckey"] not in self.tsum_tried:  # conversation : résumé automatique (une seule tentative, mis en cache ensuite)
+                        self.tsum_tried.add(cur["ckey"])
+                        background_tasks.create(self.auto_summarize_thread(cur["ckey"]))
+                        with ui.element("div").classes("aicard"):
+                            ui.label("✦ Résumé de la conversation").classes("tag")
+                            with ui.row().classes("items-center gap-2 q-mt-xs"):
+                                ui.spinner(size="16px")
+                                ui.label("Résumé en cours…").classes("rmeta")
                 self.translation_card(cur)
                 self.phishing_banner(cur)
                 self.meeting_card(cur)

@@ -334,3 +334,18 @@ def test_imap_missing_sent_folder_or_copy_failure_raises_an_alert(monkeypatch):
     p2.send("a@b.fr", "Hello 2", "texte")
     stats, alert = _stats()
     assert stats.get("nocopy") == 2 and "nocopy" in alert and sent2
+
+
+def test_brief_ignores_the_mailboxes_the_user_left_out(monkeypatch):
+    """Les boîtes décochées dans les réglages n'entrent ni dans le brief ni dans les chiffres du résumé quotidien, mais restent visibles ailleurs."""
+    import json
+    from mailia import config, queries
+    monkeypatch.setattr(config, "enabled_keys", lambda: ["testbox", "autre"])
+    monkeypatch.setattr(config, "ai_enabled", lambda: False)
+    add_message(mid="testbox|INBOX|60", subject="Pro", is_read=0, ai_at="2026-10-14T08:00:00+00:00", category="action", priority=3, needs_reply=1)
+    add_message(mid="autre|INBOX|61", account="autre", subject="Perso", is_read=0, ai_at="2026-10-14T08:00:00+00:00", category="action", priority=3, needs_reply=1)
+    assert {r["subject"] for r in queries.brief()["todo"]} == {"Pro", "Perso"}
+    db.kv_set("brief_off", json.dumps(["autre"]))
+    assert {r["subject"] for r in queries.brief()["todo"]} == {"Pro"}
+    assert queries.digest_text()[1].startswith("1 à traiter · 1 non lu")
+    assert "Perso" in {m["subject"] for m in queries.list_messages()}  # la boîte reste visible dans la liste

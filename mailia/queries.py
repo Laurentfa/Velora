@@ -44,6 +44,20 @@ def enabled_sql(col: str = "account") -> str:
     return f"{col} IN ({','.join(repr(k) for k in keys)})" if keys else "0"
 
 
+def brief_off() -> set[str]:
+    """Les boîtes que l'utilisateur a écartées du brief du jour (elles restent visibles partout ailleurs)."""
+    try:
+        return {str(k) for k in json.loads(db.kv_get("brief_off") or "[]")}
+    except (ValueError, TypeError):
+        return set()
+
+
+def brief_sql(col: str = "account") -> str:
+    """Condition SQL du brief du jour : boîtes actives, sauf celles écartées du brief."""
+    off = [k.replace("'", "''") for k in brief_off()]
+    return enabled_sql(col) + (f" AND {col} NOT IN ({','.join(repr(k) for k in off)})" if off else "")
+
+
 def list_messages(account: str = "", q: str = "", unread: bool = False, view: str = "",
                   limit: int = 80, offset: int = 0, folder: str = "", group: bool = True, pins_top: bool = True, read: bool = False, oldest_first: bool = False,
                   extra_ids: set[str] | None = None, everywhere: bool = False, flags: frozenset | set = frozenset(), sort_by: str = "date") -> list[dict]:
@@ -310,7 +324,7 @@ def _recently_failed() -> bool:
 def brief(refresh: bool = False) -> dict:
     with db.conn() as c:
         rows = [dict(r) for r in c.execute(
-            f"SELECT {LIST_COLS} FROM messages WHERE folder='INBOX' AND {enabled_sql()} AND is_read=0 AND ai_at IS NOT NULL "
+            f"SELECT {LIST_COLS} FROM messages WHERE folder='INBOX' AND {brief_sql()} AND is_read=0 AND ai_at IS NOT NULL "
             "AND ckey NOT IN (SELECT ckey FROM snoozes WHERE status='wait') "
             "ORDER BY priority DESC, date DESC LIMIT 80")]
     todo = [r for r in rows if (r["needs_reply"] or r["category"] == "action" or r["priority"] == 3)
@@ -322,7 +336,7 @@ def brief(refresh: bool = False) -> dict:
     for part in (todo, info, noise):
         part.sort(key=lambda r: r["date"], reverse=True)
 
-    sig = f"{len(rows)}:{rows[0]['id'] if rows else ''}"
+    sig = f"{len(rows)}:{rows[0]['id'] if rows else ''}:{','.join(sorted(brief_off()))}"
     if not config.ai_enabled():
         return {"headline": "", "summary": None, "todo": todo, "info": info, "noise": noise}
     if refresh or (db.kv_get("brief:sig") != sig and not _recently_failed()):
@@ -338,9 +352,14 @@ def brief(refresh: bool = False) -> dict:
 def digest_text(use_ai: bool = False) -> tuple[str, str]:
     """(titre, texte) du résumé quotidien : ce qui attend, sans appel à l'IA sauf demande (une phrase de synthèse)."""
     c = counts()
+    act = brief_sql()
+    inbox = f"folder='INBOX' AND {act} AND is_read=0 AND ckey NOT IN (SELECT ckey FROM snoozes WHERE status='wait')"
     with db.conn() as cx:
+        if brief_off():  # des boîtes sont écartées du brief : les chiffres ne les comptent pas non plus
+            c = dict(c, unread=cx.execute(f"SELECT COUNT(*) FROM messages WHERE {inbox}").fetchone()[0],
+                     todo=cx.execute(f"SELECT COUNT(*) FROM messages WHERE {inbox} AND {TODO_SQL}").fetchone()[0])
         urgent = [dict(r) for r in cx.execute(
-            f"SELECT sender, sender_name, subject, summary FROM messages WHERE folder='INBOX' AND {enabled_sql()} AND is_read=0 "
+            f"SELECT sender, sender_name, subject, summary FROM messages WHERE folder='INBOX' AND {act} AND is_read=0 "
             f"AND ckey NOT IN (SELECT ckey FROM snoozes WHERE status='wait') AND ({TODO_SQL}) ORDER BY priority DESC, date DESC LIMIT 3")]
     parts = []
     if c["todo"]:

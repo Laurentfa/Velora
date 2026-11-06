@@ -10,3 +10,11 @@ def test_the_print_page_shows_the_header_the_attachments_and_runs_nothing_from_t
     assert "script-src &#x27;nonce-" in doc and "img-src data:;" in doc  # images distantes bloquées par défaut
     assert htmlmail.build_print_doc({"subject": "S"}, None, "ligne 1\n<b>texte</b>", True).count("<b>texte</b>") == 0  # le texte brut est échappé
     assert "img-src data: https: http:" in htmlmail.build_print_doc({"subject": "S"}, "<p>x</p>", "", True)
+
+
+def test_the_hidden_html_title_of_a_message_is_not_shown_as_text():
+    """Le titre caché d'un modèle de signature Outlook (« Signature Mails ») ne doit pas devenir la première ligne du message."""
+    from mailia import htmlmail
+    raw = "<html><head><title>Signature Mails</title></head><body><p>Coucou</p></body></html>"
+    for out in (htmlmail.sanitize(raw), htmlmail.sanitize_quote(raw), htmlmail.sanitize_quote(raw, images=True), htmlmail.sanitize_outgoing(raw)):
+        assert "Signature Mails" not in out and "Coucou" in out
