@@ -143,6 +143,9 @@ def print_platform() -> str:
     return sys.platform
 
 
+AUTO_SUMMARY_MIN = 3  # nombre de mails à partir duquel une conversation est résumée sans clic (l'icône « Résumer la conversation » reste disponible avant)
+
+
 class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin, AppleWriterMixin, WeatherMixin, AgendaMixin, FeedMixin, ServerRulesMixin):
     """État et interface d'une fenêtre (chaque client a la sienne)."""
 
@@ -1135,7 +1138,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                         with ui.element("div").classes("aicard"):
                             ui.label("✦ Résumé de la conversation").classes("tag")
                             ui.label(summary).classes("q-mt-xs")
-                    elif len(th) >= 2 and cur["ckey"] not in self.tsum_tried:  # conversation : résumé automatique (une seule tentative, mis en cache ensuite)
+                    elif len(th) >= AUTO_SUMMARY_MIN and cur["ckey"] not in self.tsum_tried:  # conversation d'au moins 3 mails : résumé automatique (une seule tentative, mis en cache ensuite)
                         self.tsum_tried.add(cur["ckey"])
                         background_tasks.create(self.auto_summarize_thread(cur["ckey"]))
                         with ui.element("div").classes("aicard"):

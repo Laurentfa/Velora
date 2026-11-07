@@ -142,3 +142,30 @@ def test_install_refuses_outside_a_proper_install(configured, monkeypatch, tmp_p
     assert not updater.can_install()
     with pytest.raises(RuntimeError):
         updater.install(tmp_path / "x.zip")
+
+
+def test_windows_update_runs_a_script_that_installs_then_relaunches(configured, monkeypatch, tmp_path):
+    """Régression : /RESTARTAPPLICATIONS ne relançait rien (Velora s'était déjà fermée). Un script doit attendre, installer, puis relancer Velora."""
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    calls = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, *a, **k: calls.append((cmd, k)))
+    (tmp_path / "Velora-setup.exe").write_bytes(b"x")
+    updater.install(tmp_path / "Velora-setup.exe", 4321)
+    (cmd, kw), = calls
+    assert cmd[:2] == ["cmd", "/c"] and cmd[2].endswith("maj.bat") and cmd[3] == "4321" and cmd[4].endswith("Velora-setup.exe") and cmd[5] == sys.executable
+    assert "RESTARTAPPLICATIONS" not in " ".join(cmd) and cmd[6].endswith("mise-a-jour.log")
+    text = (tmp_path / "maj.bat").read_text(encoding="cp1252")
+    assert text.index("tasklist") < text.index("/VERYSILENT") < text.index('start "" "%~3"')  # attendre, installer jusqu'au bout, relancer
+    assert "start /wait" in text and "/CLOSEAPPLICATIONS" in text
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="script POSIX")
+def test_swap_logs_what_it_did(tmp_path):
+    dst, new, log = tmp_path / "Velora.app", tmp_path / "Velora.app.new", tmp_path / "maj.log"
+    dst.mkdir(); new.mkdir()
+    script = tmp_path / "echange.sh"
+    script.write_text(updater.SWAP_SCRIPT)
+    subprocess.run(["/bin/sh", str(script), str(2 ** 22 + 1), str(new), str(dst), "true", str(log)], check=True, timeout=20)
+    text = log.read_text(encoding="utf-8")
+    assert "application remplacée" in text and "relance demandée" in text

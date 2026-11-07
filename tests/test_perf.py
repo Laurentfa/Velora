@@ -64,6 +64,10 @@ async def test_settings_buttons(user: User):
     await user.open("/usage")
     await user.should_see(marker="open-data")
     await user.should_see(marker="perf-measure")
+    await user.should_see(marker="daily-cap")  # plafond quotidien de crédits
+    await user.should_see(marker="credits-today")
+    await user.should_see(marker="config-export")  # export / import de la configuration
+    await user.should_see(marker="config-import")
 
 
 def test_origin_is_shared_with_the_window_process_but_not_across_launches(monkeypatch):

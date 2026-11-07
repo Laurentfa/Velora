@@ -285,6 +285,7 @@ _headline_lock = threading.Lock()
 
 
 RETRY_AFTER = 120  # secondes : après un échec (réseau, clé, quota), on ne réessaie pas plus souvent
+BRIEF_MIN_INTERVAL = 3600  # secondes : la synthèse du brief (≈ 17 000 crédits 1min.AI l'appel) n'est pas refaite plus d'une fois par heure à cause de nouveaux mails
 
 
 def _headline_work(sig: str, items: list[dict]) -> None:
@@ -301,6 +302,7 @@ def _headline_work(sig: str, items: list[dict]) -> None:
     finally:
         if ok:
             db.kv_set("brief:sig", sig)
+            db.kv_set("brief:at", str(time.time()))
             db.kv_set("brief:fail_at", "")
         else:
             db.kv_set("brief:fail_at", str(time.time()))
@@ -321,6 +323,18 @@ def _recently_failed() -> bool:
         return False
 
 
+def _brief_due() -> bool:
+    """Faut-il refaire la synthèse parce que la boîte a changé ? Oui s'il n'y en a pas, si elle date d'un autre jour ou de plus d'une heure.
+    Elle est gardée d'un lancement à l'autre (base de données) : relancer Velora ne la refait pas."""
+    if not db.kv_get("brief:headline"):
+        return True
+    try:
+        at = float(db.kv_get("brief:at") or 0)
+    except ValueError:
+        at = 0.0
+    return time.time() - at >= BRIEF_MIN_INTERVAL or time.strftime("%Y-%m-%d", time.localtime(at)) != time.strftime("%Y-%m-%d")
+
+
 def brief(refresh: bool = False) -> dict:
     with db.conn() as c:
         rows = [dict(r) for r in c.execute(
@@ -339,7 +353,7 @@ def brief(refresh: bool = False) -> dict:
     sig = f"{len(rows)}:{rows[0]['id'] if rows else ''}:{','.join(sorted(brief_off()))}"
     if not config.ai_enabled():
         return {"headline": "", "summary": None, "todo": todo, "info": info, "noise": noise}
-    if refresh or (db.kv_get("brief:sig") != sig and not _recently_failed()):
+    if refresh or (db.kv_get("brief:sig") != sig and not _recently_failed() and _brief_due()):
         _refresh_headline(sig, [r for r in (todo + info) if not aipolicy.is_excluded(r)][:25])  # les exclus ne partent pas chez l'IA
     raw = db.kv_get("brief:headline") or ""
     try:

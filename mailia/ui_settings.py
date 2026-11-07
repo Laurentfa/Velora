@@ -20,6 +20,7 @@ from mailia.ui_pet import pet_settings
 from mailia.ui_sigmodels import signature_models_dialog
 from mailia.ui_weather import weather_settings
 from mailia.ui_update import panel as update_panel
+from mailia.ui_configbundle import panel as config_panel
 from mailia import ui_zoom
 
 
@@ -778,6 +779,7 @@ def _tab_use(host) -> None:
     settings_ui.send_stats_panel()
     ui.label(f"Données : {config.DATA_DIR}").classes("text-caption text-grey")
     update_panel()
+    config_panel()
 
     async def backup_now() -> None:
         try:

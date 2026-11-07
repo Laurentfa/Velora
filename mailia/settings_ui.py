@@ -134,7 +134,25 @@ def usage_panel() -> None:
     ui.label(f"Estimation d'après les jetons mesurés et les tarifs publics, au taux de {u['rate']:.2f} € pour 1 $. La facture réelle d'Anthropic fait foi. Les appels via 1min.AI sont comptés à 0 € ici : ils consomment vos crédits 1min.AI.").classes("text-caption text-grey")
 
     ui.label("Crédits 1min.AI").classes("text-subtitle2 q-mt-md")
+    ui.label(f"Cette installation : {config.machine_label()}. Elle ne compte que ses propres appels : si votre tableau de bord 1min.AI affiche davantage, une autre "
+             "copie de Velora (ou un autre outil) utilise la même clé.").classes("text-caption text-grey")
+    today, cap = aipolicy.day_credits(), aipolicy.daily_credit_cap()
+    ui.label(f"{today:,} crédits aujourd'hui".replace(",", " ") + (f" sur {cap:,}".replace(",", " ") if cap else "")).style("font-size:22px;font-weight:700").mark("credits-today")
+    if cap:
+        ui.linear_progress(value=min(1, today / cap), show_value=False, color="negative" if today >= cap else ("warning" if today >= cap * 0.8 else "primary")).props("rounded size=10px")
+    for name, calls, credits in aipolicy.day_credits_by_feature():
+        with ui.row().classes("w-full items-center no-wrap gap-2"):
+            ui.label(name).classes("col")
+            ui.label(f"{calls} appel(s)").classes("text-caption text-grey")
+            ui.label(f"{credits:,}".replace(",", " ")).style("min-width:90px;text-align:right")
+    per_day = aipolicy.credits_by_day(14)
+    top_cr = max((c for _, c in per_day), default=0) or 1
+    with ui.row().classes("items-end no-wrap gap-1 q-mt-sm").style("height:60px"):
+        for day, c in per_day:
+            ui.element("div").style(f"width:14px;height:{max(2, int(56 * c / top_cr))}px;background:{'var(--accent)' if c else 'var(--line)'};border-radius:2px").tooltip(
+                f"{day[8:]}/{day[5:7]} : {c:,} crédits".replace(",", " "))
     cr, est, allow = u["credits"], u["credits_est"], u["allowance"]
+    ui.label("Ce mois-ci").classes("text-caption q-mt-md")
     ui.label(f"{cr:,} crédits ce mois-ci".replace(",", " ") + (f" sur {allow:,}".replace(",", " ") if allow else "")).style("font-size:22px;font-weight:700")
     if allow:
         cpct = cr / allow
@@ -145,13 +163,15 @@ def usage_panel() -> None:
     with ui.row().classes("items-center gap-3 q-mt-sm"):
         bud = ui.number("Budget mensuel (€, 0 = aucun)", value=u["budget"], min=0, step=1, precision=2).props("outlined dense").style("width:230px")
         allowance = ui.number("Crédits 1min.AI par mois (0 = aucun plafond)", value=allow, min=0, step=100000, precision=0).props("outlined dense").style("width:330px")
+        daily = ui.number("Plafond par jour (crédits, 0 = aucun)", value=cap, min=0, step=10000, precision=0).props("outlined dense").style("width:280px").mark("daily-cap")
         hard = ui.switch("Bloquer l'IA au plafond", value=u["hard"])
 
     def save_budget() -> None:
         db.kv_set("ai_budget_eur", str(bud.value or 0))
         db.kv_set("onemin_allowance", str(int(allowance.value or 0)))
+        db.kv_set("onemin_daily_cap", str(int(daily.value or 0)))
         db.kv_set("ai_budget_hard", "1" if hard.value else "0")
-        ui.notify("Plafonds enregistrés. Une alerte vous prévient à 80 %.", type="positive")
+        ui.notify("Plafonds enregistrés. Une alerte vous prévient à 80 %. Le plafond par jour suspend toujours l'IA une fois atteint.", type="positive")
 
     ui.button("Enregistrer les plafonds", icon="save", on_click=save_budget).props("outline no-caps dense")
     if u["credits_by_feature"]:

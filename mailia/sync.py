@@ -414,7 +414,7 @@ def analyze_pending() -> int:
                 if queries.get_message(r["id"]):
                     _notify_if_urgent(r["id"], d)
         except ai.AIError as e:
-            wait = AI_PAUSE_REFUSED if e.alert else AI_PAUSE_OTHER
+            wait = AI_PAUSE_REFUSED if (e.alert or e.detail == "cap") else AI_PAUSE_OTHER
             _ai_pause.update(until=time.monotonic() + wait, fp=_ai_fingerprint(), why=str(e))
             log.warning("analyse %s : %s (nouvel essai dans %d min)", r["id"], e, max(1, wait // 60))
             break  # clé absente / quota : inutile d'insister (ni ce cycle, ni les suivants avant la fin de la pause)

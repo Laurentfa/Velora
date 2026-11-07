@@ -26,12 +26,32 @@ ASSET_SUFFIX = {"darwin": "-mac.zip", "win32": "-setup.exe"}
 
 # Remplace l'appli une fois fermée, puis la relance ; en cas d'échec l'ancienne version est remise en place.
 SWAP_SCRIPT = """#!/bin/sh
-PID="$1"; NEW="$2"; DST="$3"; OPEN="${4:-open}"
+PID="$1"; NEW="$2"; DST="$3"; OPEN="${4:-open}"; LOG="${5:-/dev/null}"
+note() { echo "$(date '+%Y-%m-%d %H:%M:%S') mise à jour : $1" >> "$LOG" 2>/dev/null; }
+note "attente de la fermeture de Velora (processus $PID)"
 while kill -0 "$PID" 2>/dev/null; do sleep 0.5; done
 BAK="$DST.old"
 rm -rf "$BAK"
-if mv "$DST" "$BAK" && mv "$NEW" "$DST"; then rm -rf "$BAK"; else [ -d "$BAK" ] && [ ! -d "$DST" ] && mv "$BAK" "$DST"; fi
-"$OPEN" "$DST"
+if mv "$DST" "$BAK" && mv "$NEW" "$DST"; then rm -rf "$BAK"; note "application remplacée"; else [ -d "$BAK" ] && [ ! -d "$DST" ] && mv "$BAK" "$DST"; note "remplacement impossible, ancienne version remise"; fi
+"$OPEN" "$DST" && note "relance demandée" || note "relance impossible"
+"""
+
+# Windows : attend la fermeture de Velora, lance l'installateur (silencieux) jusqu'au bout, puis relance Velora.
+# (L'option /RESTARTAPPLICATIONS de l'installateur ne relance que les applications QU'IL a fermées : Velora s'est déjà fermée toute seule, elle n'était donc jamais relancée.)
+WIN_SCRIPT = """@echo off
+set PID=%~1
+set LOG=%~4
+echo %date% %time% mise a jour : attente de la fermeture de Velora (processus %PID%)>> "%LOG%"
+:wait
+tasklist /FI "PID eq %PID%" /NH 2>nul | find "%PID%" >nul
+if not errorlevel 1 (
+  ping -n 2 127.0.0.1 >nul
+  goto wait
+)
+start /wait "" "%~2" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS
+echo %date% %time% mise a jour : installateur termine (code %errorlevel%)>> "%LOG%"
+start "" "%~3"
+echo %date% %time% mise a jour : relance demandee>> "%LOG%"
 """
 
 
@@ -115,16 +135,28 @@ def app_bundle() -> Path | None:
     return p if p.suffix == ".app" and os.access(p.parent, os.W_OK) and not str(p).startswith("/Volumes/") else None
 
 
+def _log_path() -> Path:
+    """Journal du remplacement (dossier des journaux de Velora) : de quoi comprendre pourquoi la relance n'a pas eu lieu."""
+    from . import config
+    d = config.DATA_DIR / "logs"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "mise-a-jour.log"
+
+
 def can_install() -> bool:
     return (sys.platform == "darwin" and app_bundle() is not None) or (sys.platform == "win32" and getattr(sys, "frozen", False))
 
 
 def install(archive: Path, pid: int | None = None, opener: str = "open") -> None:
     """Prépare le remplacement ; l'appelant doit ensuite fermer l'appli (le script attend sa fermeture)."""
+    log = _log_path()
     if sys.platform == "win32":
-        # installateur Inno Setup : silencieux, ferme et relance Velora, s'installe pour l'utilisateur seul (aucun droit administrateur)
-        subprocess.Popen([str(archive), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/RESTARTAPPLICATIONS"],
-                         creationflags=0x00000008 | 0x00000200, close_fds=True)
+        # installateur Inno Setup : silencieux, s'installe pour l'utilisateur seul (aucun droit administrateur). Un petit script attend la fermeture de Velora,
+        # lance l'installateur puis relance Velora (voir WIN_SCRIPT).
+        script = archive.parent / "maj.bat"
+        script.write_text(WIN_SCRIPT, encoding="cp1252", errors="replace")
+        subprocess.Popen(["cmd", "/c", str(script), str(pid or os.getpid()), str(archive), sys.executable, str(log)],
+                         creationflags=0x08000000 | 0x00000200, close_fds=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # sans fenêtre, hors du groupe de Velora
         return
     target = app_bundle()
     if target is None:
@@ -140,5 +172,5 @@ def install(archive: Path, pid: int | None = None, opener: str = "open") -> None
     shutil.move(str(new), staged)
     script = archive.parent / "echange.sh"
     script.write_text(SWAP_SCRIPT)
-    subprocess.Popen(["/bin/sh", str(script), str(pid or os.getpid()), str(staged), str(target), opener], start_new_session=True,
+    subprocess.Popen(["/bin/sh", str(script), str(pid or os.getpid()), str(staged), str(target), opener, str(log)], start_new_session=True,
                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

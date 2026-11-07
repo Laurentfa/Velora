@@ -484,3 +484,10 @@ import multiprocessing as _mp  # noqa: E402
 
 if _mp.current_process().name == "MainProcess":  # la fenêtre native (processus fils) n'a pas besoin de la clé IA
     hydrate_secrets()
+
+
+def machine_label() -> str:
+    """Nom de cette installation (« Mac · nom-de-la-machine »), pour savoir de quelle copie de Velora parle un chiffre."""
+    import platform
+    kind = {"darwin": "Mac", "win32": "PC Windows"}.get(sys.platform, "Linux")
+    return f"{kind} · {platform.node() or 'machine inconnue'}"

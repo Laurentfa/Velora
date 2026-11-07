@@ -167,9 +167,67 @@ def month_credits(month: str | None = None) -> tuple[int, int]:
     return int(r["cr"] or 0), int(r["est"] or 0)
 
 
+def daily_credit_cap() -> int:
+    """Crédits 1min.AI que cette installation peut dépenser par jour (0 = pas de plafond quotidien)."""
+    try:
+        return max(0, int(float(db.kv_get("onemin_daily_cap") or 0)))
+    except ValueError:
+        return 0
+
+
+def day_credits(day: str | None = None) -> int:
+    day = day or datetime.now().strftime("%Y-%m-%d")
+    with db.conn() as c:
+        return int(c.execute("SELECT SUM(credits) FROM usage_log WHERE day=? AND model LIKE '1min:%'", (day,)).fetchone()[0] or 0)
+
+
+def day_credits_by_feature(day: str | None = None) -> list[tuple[str, int, int]]:
+    """[(libellé, appels, crédits)] du jour, du plus gourmand au plus sobre."""
+    day = day or datetime.now().strftime("%Y-%m-%d")
+    with db.conn() as c:
+        rows = c.execute("SELECT feature, SUM(calls) calls, SUM(credits) cr FROM usage_log WHERE day=? AND model LIKE '1min:%' GROUP BY feature "
+                         "HAVING SUM(calls) > 0 ORDER BY cr DESC", (day,)).fetchall()
+    return [(feature_label(r["feature"]), r["calls"] or 0, r["cr"] or 0) for r in rows]
+
+
+def credits_by_day(days: int = 14) -> list[tuple[str, int]]:
+    """[(jour, crédits)] des `days` derniers jours, le plus ancien d'abord."""
+    first = (datetime.now() - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    with db.conn() as c:
+        got = {r["day"]: int(r["cr"] or 0) for r in c.execute(
+            "SELECT day, SUM(credits) cr FROM usage_log WHERE day>=? AND model LIKE '1min:%' GROUP BY day", (first,))}
+    return [(d, got.get(d, 0)) for d in ((datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(days - 1, -1, -1))]
+
+
+def daily_cap_reached() -> tuple[int, int] | None:
+    """(dépensé aujourd'hui, plafond) si le plafond quotidien est atteint, sinon None."""
+    cap = daily_credit_cap()
+    if not cap:
+        return None
+    used = day_credits()
+    return (used, cap) if used >= cap else None
+
+
+def check_daily_credits() -> None:
+    """Plafond quotidien : une fois atteint, l'IA est suspendue jusqu'à demain (ou jusqu'à ce que vous relevez le plafond). Toujours appliqué, sans repli sur l'API Claude.
+    Le dernier appel peut dépasser le plafond : on ne sait ce qu'un appel coûte qu'après coup."""
+    cap = daily_credit_cap()
+    if not cap:
+        return
+    used = day_credits()
+    day = datetime.now().strftime("%Y-%m-%d")
+    if used >= cap:
+        raise AIError(f"Plafond quotidien de crédits atteint ({used:,} sur {cap:,}).".replace(",", " ") + " L'IA reprend demain ; vous pouvez aussi relever le plafond "
+                      "dans Paramètres › Utilisation et données.", detail="cap")
+    if used >= cap * 0.8:
+        from . import notify
+        notify.once(f"credits-day:{day}:80", "Crédits 1min.AI", f"{used:,} crédits utilisés sur {cap:,} aujourd'hui.".replace(",", " "))
+
+
 def check_credits() -> None:
-    """Avant chaque appel à 1min.AI : arrête l'IA si le plafond de crédits du mois est atteint (si « Bloquer l'IA au plafond » est choisi) ; prévient à 80 %.
+    """Avant chaque appel à 1min.AI : arrête l'IA si le plafond quotidien, ou celui du mois (si « Bloquer l'IA au plafond » est choisi), est atteint ; prévient à 80 %.
     Sans repli sur l'API Claude : ce serait dépenser de l'argent sans que vous l'ayez décidé."""
+    check_daily_credits()
     allowance = credit_allowance()
     if not allowance:
         return

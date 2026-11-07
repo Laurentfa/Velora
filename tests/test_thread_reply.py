@@ -171,3 +171,12 @@ async def test_a_single_message_gets_no_conversation_summary(user, box) -> None:
     await box[-1].open("testbox|INBOX|0")
     await user.should_see("Seul")
     await user.should_not_see("Résumé de la conversation")
+
+
+async def test_a_two_message_conversation_is_not_summarised_automatically(user, box) -> None:
+    for i, who in enumerate(["alice@example.com", "bob@example.com"]):
+        add_message(f"testbox|INBOX|{i}", sender=who, subject="Court échange", ckey="testbox|court", date=f"2026-10-0{i + 1}T10:00:00+00:00")
+    await user.open("/")
+    await box[-1].open("testbox|INBOX|1")
+    await user.should_see("Court échange")
+    await user.should_not_see("Résumé de la conversation")
