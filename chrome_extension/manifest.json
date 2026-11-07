@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Velora – liaison Ventiléa",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Permet à Velora de lire Ventiléa avec la session ouverte dans ce Chrome. N'agit que sur prescripteurs.ventilea.fr, uniquement à la demande de Velora.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAq54ptHHkBTfzB+ghH0g8NNdoQy9LZmLhC2hEuMFojjJGt0DPOGLi6+u1rz5xMMPdkCqRdAj7OmDOTcpSbrT5IQQ+6kpYJDja9kK0+06OlPcFAGj+86uBHapvpgNjdAveD+UUrWy8nfJOlGpI0HVd1Be8nITKV09qdSs7OS2meXTWG8CyI+DPttPFHq35JQLQiG0YO/SEgOVBVJvVq5A4GAHsBYz6Lqmzf0Y2HQfUxgCcJQ+irNEROVXTgd1MpDbFJQucvce4q0YpbdA/JBkVdJ9/eD4GuZgJW4/6sAD4/sQbJLYiTHJvOiYY2nLCoORGMJHeKMuNz23oGnggSVD0PwIDAQAB",
   "minimum_chrome_version": "110",

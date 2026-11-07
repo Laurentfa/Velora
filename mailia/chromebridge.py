@@ -18,6 +18,9 @@ from . import config
 HOST_NAME = "fr.lfauvel.velora"
 EXTENSION_ID = "alcjhnemdjbkdfgphajpjhbojmfnlpbo"  # fixé par la clé du manifeste (chrome_extension/manifest.json)
 INFO = config.DATA_DIR / "chrome_bridge.json"
+EXTENSION_VERSION = "0.1.1"  # version de l'extension livrée avec cette version de Velora (chrome_extension/manifest.json, vérifié par un test)
+VENTILEA = "https://prescripteurs.ventilea.fr"
+ext: dict = {"conn": None, "version": ""}  # version annoncée par l'extension connectée (« ancienne » si elle ne sait pas répondre)
 
 
 class BridgeError(Exception):
@@ -108,6 +111,29 @@ def call(cmd: str, base: str, timeout: float = 60, **args) -> str:
     if msg.get("error"):
         raise BridgeError("Chrome : " + msg["error"])
     return msg.get("result") or ""
+
+
+def check_extension() -> None:
+    """Interroge l'extension connectée sur sa version (une fois par connexion). À appeler hors du fil de l'interface."""
+    c = _conn
+    if c is None:
+        ext.update(conn=None, version="")
+        return
+    if ext["conn"] is c and ext["version"]:
+        return
+    try:
+        v = call("version", VENTILEA, timeout=5).strip() or "?"
+    except BridgeError as e:
+        v = "ancienne" if "commande inconnue" in str(e) else ""  # une extension d'avant la commande « version » refuse : elle est donc à remplacer
+    ext.update(conn=c, version=v)
+
+
+def extension_outdated() -> str:
+    """Texte d'avertissement si l'extension connectée n'est pas celle livrée avec cette version de Velora, sinon chaîne vide."""
+    v = ext["version"]
+    if not v or v == EXTENSION_VERSION:
+        return ""
+    return f"L'extension Chrome de Velora est {'ancienne' if v == 'ancienne' else 'en version ' + v} (attendue : {EXTENSION_VERSION}) : réinstallez-la depuis le dossier fourni."
 
 
 # ---------- déclaration du relais à Chrome ----------

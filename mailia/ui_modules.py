@@ -80,32 +80,79 @@ def modules_settings() -> None:
                         sw = ui.switch(value=wanted, on_change=lambda e, i=info["id"]: set_module(i, bool(e.value))).props("dense").mark(f"module-{info['id']}")
                         if info.get("error"):
                             sw.disable()
+                        src = db.kv_get(f"module:{info['id']}:src") or ""
+                        if src and Path(src).is_dir():
+                            ui.button(icon="sync", on_click=lambda i=info["id"], p=src: update_from_source(i, p)).props("flat round dense color=primary").tooltip(
+                                f"Mettre à jour depuis {src}").mark(f"module-update-{info['id']}")
                         ui.button(icon="delete_outline", on_click=lambda i=info: ask_remove(i)).props("flat round dense color=grey").tooltip("Supprimer ce module").mark(f"module-delete-{info['id']}")
+            with ui.row().classes("items-center gap-2 q-mt-sm w-full no-wrap"):
+                repo = ui.input("Dépôt GitHub des modules", value=db.kv_get("modules_repo") or "", placeholder="compte/depot").props("dense outlined").classes("col").mark("modules-repo")
+                repo.on("blur", lambda: db.kv_set("modules_repo", (repo.value or "").strip()))
+                ui.button("Mettre à jour depuis le dépôt", icon="cloud_download", on_click=lambda: update_from_repo((repo.value or "").strip())).props("outline no-caps").mark("modules-repo-update")
+            ui.label("Met à jour les modules déjà installés dont la version du dépôt est plus récente, grâce à l'outil « gh » connecté à votre compte GitHub.").classes("text-caption text-grey")
             with ui.row().classes("items-center gap-3 q-mt-sm"):
                 with ui.button("Importer un module", icon="upload").props("outline no-caps color=primary").mark("module-import"):
                     with ui.menu():
                         ui.menu_item("Depuis un dossier…", on_click=pick_folder)
-                        ui.menu_item("Depuis une archive .zip…", on_click=lambda: ui.run_javascript(f"getElement({up.id}).$refs.qRef.pickFiles()"))
+                        ui.menu_item("Depuis une archive .zip…").on("click", js_handler=f"() => getElement({up.id}).$refs.qRef.pickFiles()")
                 ui.label("Un module importé est copié dans le dossier de Velora ; activez-le ensuite avec son interrupteur.").classes("text-caption text-grey col")
 
     async def import_from(path: Path) -> None:
         try:
             try:
-                mid = await run.io_bound(modules.import_module, path)
+                mids = await run.io_bound(modules.import_bundle, path)
             except FileExistsError as e:
                 with ui.dialog() as cd, ui.card():
-                    ui.label(f"Le module « {e} » existe déjà. Le remplacer ?").classes("text-subtitle1")
+                    ui.label(f"{'Le module' if ',' not in str(e) else 'Les modules'} « {e} » existe{'nt' if ',' in str(e) else ''} déjà. Remplacer ?").classes("text-subtitle1")
                     ui.label("Ses fichiers sont remplacés ; ses réglages sont conservés.").classes("text-caption text-grey")
                     with ui.row().classes("justify-end w-full gap-2"):
                         ui.button("Annuler", on_click=lambda: cd.submit(False)).props("flat no-caps")
                         ui.button("Remplacer", on_click=lambda: cd.submit(True)).props("unelevated no-caps color=primary")
                 if not await cd:
                     return
-                mid = await run.io_bound(modules.import_module, path, True)
+                mids = await run.io_bound(modules.import_bundle, path, True)
         except (ValueError, OSError) as err:
             return ui.notify(str(err), type="negative")
-        ui.notify(f"Module « {mid} » importé. Activez-le avec son interrupteur.", type="positive", multi_line=True)
-        modules.apply(mid)  # un module remplacé est rechargé tout de suite
+        if path.is_dir() and len(mids) == 1:
+            db.kv_set(f"module:{mids[0]}:src", str(path))  # permet « Mettre à jour » depuis le même dossier
+        ui.notify(f"Module « {mids[0]} » importé. Activez-le avec son interrupteur." if len(mids) == 1
+                  else f"{len(mids)} modules importés : {', '.join(mids)}. Activez-les avec leurs interrupteurs.", type="positive", multi_line=True)
+        for mid in mids:
+            modules.apply(mid)  # un module remplacé est rechargé tout de suite
+        draw()
+
+    async def update_from_repo(repo: str) -> None:
+        db.kv_set("modules_repo", repo)
+        ui.notify("Recherche de mises à jour…", timeout=1500)
+        try:
+            done = await run.io_bound(modules.update_from_repo, repo)
+        except (ValueError, OSError) as err:
+            return ui.notify(str(err), type="negative", multi_line=True)
+        if not done:
+            return ui.notify("Tous les modules installés sont à jour.", type="positive")
+        failed = []
+        for mid, _old, _new in done:
+            try:
+                modules.apply(mid)
+            except Exception:  # noqa: BLE001
+                modules.log.exception("module %s : échec du rechargement", mid)
+                failed.append(mid)
+        ui.notify("Mis à jour : " + ", ".join(f"{m} {o or '?'} → {n}" for m, o, n in done) + (f". À relancer : {', '.join(failed)}." if failed else "."),
+                  type="warning" if failed else "positive", multi_line=True)
+        draw()
+
+    async def update_from_source(mid: str, src: str) -> None:
+        try:
+            await run.io_bound(modules.import_module, Path(src), True)
+        except (ValueError, OSError) as err:
+            return ui.notify(f"Mise à jour impossible : {err}", type="negative", multi_line=True)
+        try:
+            modules.apply(mid)
+        except Exception as e:  # noqa: BLE001
+            modules.log.exception("module %s : échec du rechargement", mid)
+            ui.notify(f"Module mis à jour, mais pas rechargé ({type(e).__name__}). Relancez Velora.", type="warning")
+        else:
+            ui.notify(f"Module « {mid} » mis à jour depuis {src}.", type="positive", multi_line=True)
         draw()
 
     async def pick_folder() -> None:

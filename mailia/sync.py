@@ -366,7 +366,7 @@ def _notify_if_urgent(mid: str, d: dict) -> None:
         log.exception("notification")
 
 
-_ai_pause = {"until": 0.0, "fp": ""}  # analyse suspendue après un refus de l'IA (clé refusée, quota…) : sans cela le même mail serait retenté à chaque cycle, toutes les quelques secondes
+_ai_pause = {"until": 0.0, "fp": "", "why": ""}  # analyse suspendue après un refus de l'IA (clé refusée, quota…) : sans cela le même mail serait retenté à chaque cycle, toutes les quelques secondes
 AI_PAUSE_REFUSED, AI_PAUSE_OTHER = 600, 90  # secondes : refus de clé ou de crédits / autre erreur (réseau, surcharge)
 
 
@@ -415,7 +415,7 @@ def analyze_pending() -> int:
                     _notify_if_urgent(r["id"], d)
         except ai.AIError as e:
             wait = AI_PAUSE_REFUSED if e.alert else AI_PAUSE_OTHER
-            _ai_pause.update(until=time.monotonic() + wait, fp=_ai_fingerprint())
+            _ai_pause.update(until=time.monotonic() + wait, fp=_ai_fingerprint(), why=str(e))
             log.warning("analyse %s : %s (nouvel essai dans %d min)", r["id"], e, max(1, wait // 60))
             break  # clé absente / quota : inutile d'insister (ni ce cycle, ni les suivants avant la fin de la pause)
     if done:

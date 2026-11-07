@@ -214,3 +214,101 @@ def test_a_module_can_be_enabled_and_removed_without_restarting(mod_dir, monkeyp
     db.kv_set("modules_on", "0")
     modules.apply()
     assert not modules.views and not modules.slots["reader"]
+
+
+def test_reimport_from_the_installed_folder_is_refused_and_keeps_the_module(mod_dir) -> None:
+    make(mod_dir, "alpha", "def register(api): pass\n")
+    with pytest.raises(ValueError):
+        modules.import_module(mod_dir / "alpha", True)
+    assert (mod_dir / "alpha" / "module.py").is_file()  # le module n'a pas été effacé
+
+
+def test_update_replaces_the_files_from_the_source_folder(mod_dir, tmp_path_factory) -> None:
+    src = tmp_path_factory.mktemp("src")
+    make(src, "alpha", "VERSION = 2\ndef register(api): pass\n")
+    make(mod_dir, "alpha", "VERSION = 1\ndef register(api): pass\n")
+    assert modules.import_module(src / "alpha", True) == "alpha"
+    assert "VERSION = 2" in (mod_dir / "alpha" / "module.py").read_text(encoding="utf-8")
+
+
+def _fake_gh(monkeypatch, tmp_path, versions: dict[str, str], ok: bool = True):
+    """Fait passer « gh api …/zipball » pour une archive GitHub : un dossier racine « compte-depot-<commit> » qui contient les modules."""
+    import io
+    import subprocess
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, v in versions.items():
+            z.writestr(f"me-modules-abc123/{name}/module.json", json.dumps({"name": name, "version": v, "api": 1}))
+            z.writestr(f"me-modules-abc123/{name}/module.py", f"VERSION = '{v}'\ndef register(api): pass\n")
+        z.writestr("me-modules-abc123/README.md", "x")
+    monkeypatch.setattr(modules.shutil, "which", lambda n: "/usr/bin/gh")
+    monkeypatch.setattr(modules.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0 if ok else 1, buf.getvalue() if ok else b"", b"" if ok else b"HTTP 404"))
+
+
+def test_update_from_repo_updates_only_newer_installed_modules(mod_dir, monkeypatch) -> None:
+    make(mod_dir, "alpha", "VERSION = '1.0'\ndef register(api): pass\n", version="1.0")
+    make(mod_dir, "beta", "VERSION = '2.0'\ndef register(api): pass\n", version="2.0")
+    _fake_gh(monkeypatch, mod_dir, {"alpha": "1.1", "beta": "2.0", "gamma": "9.0"})
+    assert modules.update_from_repo("moi/modules") == [("alpha", "1.0", "1.1")]
+    assert "1.1" in (mod_dir / "alpha" / "module.py").read_text(encoding="utf-8")
+    assert not (mod_dir / "gamma").exists()  # un module non installé n'est pas ajouté
+
+
+def test_update_from_repo_explains_failures(mod_dir, monkeypatch) -> None:
+    with pytest.raises(ValueError):
+        modules.update_from_repo("pas un depot")
+    monkeypatch.setattr(modules.shutil, "which", lambda n: None)
+    with pytest.raises(ValueError, match="gh"):
+        modules.update_from_repo("moi/modules")
+    _fake_gh(monkeypatch, mod_dir, {}, ok=False)
+    with pytest.raises(ValueError, match="inaccessible"):
+        modules.update_from_repo("moi/modules")
+
+
+async def test_zip_uploaded_through_the_settings_page_is_imported(user: User, mod_dir, tmp_path) -> None:
+    import io
+    import zipfile
+
+    from nicegui.elements.upload_files import create_file_upload
+    from starlette.datastructures import Headers, UploadFile
+
+    @ui.page("/settings-modules-zip")
+    def page() -> None:
+        open_settings(ui.element("div"), lambda acct: None)
+    db.kv_set("modules_on", "1")
+    try:
+        await user.open("/settings-modules-zip")
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("zipme/module.json", json.dumps({"name": "Zipme", "version": "1.0", "api": 1}))
+            z.writestr("zipme/module.py", "def register(api): pass\n")
+        up = next(u for u in user.find(kind=ui.upload).elements if u.props.get('accept') == '.zip')  # la page a d'autres envois de fichiers
+        f = await create_file_upload(UploadFile(io.BytesIO(buf.getvalue()), filename="zipme.zip", headers=Headers({"content-type": "application/zip"})))
+        await up.handle_uploads([f])
+        await user.should_see("Module « zipme » importé")
+        assert (mod_dir / "zipme" / "module.py").is_file()
+    finally:
+        db.kv_set("modules_on", "0")
+
+
+def test_an_archive_with_several_modules_imports_them_all(mod_dir, tmp_path_factory) -> None:
+    import zipfile
+    out = tmp_path_factory.mktemp("zip")
+    z = out / "Velora-modules.zip"
+    with zipfile.ZipFile(z, "w") as f:
+        for n in ("un", "deux"):
+            f.writestr(f"{n}/module.json", json.dumps({"name": n, "version": "1.0", "api": 1}))
+            f.writestr(f"{n}/module.py", "def register(api): pass\n")
+        f.writestr("README.md", "x")
+    assert sorted(modules.import_bundle(z)) == ["deux", "un"]
+    with pytest.raises(FileExistsError, match="un"):
+        modules.import_bundle(z)
+    assert sorted(modules.import_bundle(z, True)) == ["deux", "un"]
+    single = out / "s.zip"
+    with zipfile.ZipFile(single, "w") as f:
+        f.writestr("seul/module.json", json.dumps({"name": "seul", "version": "1.0", "api": 1}))
+        f.writestr("seul/module.py", "def register(api): pass\n")
+    assert modules.import_bundle(single) == ["seul"]
+    with pytest.raises(ValueError):
+        modules.import_bundle(out)  # un dossier sans aucun module

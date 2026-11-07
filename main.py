@@ -70,7 +70,7 @@ from nicegui import Client, app, background_tasks, native, run, ui
 
 from mailia import ai, aipolicy, apiserver, compose, config, db, folder_order, folder_tree, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, vault, wizard
 from html import escape as html_escape
-from mailia import alerts, chromebridge, modules
+from mailia import alerts, chromebridge, health, modules
 from mailia.mailpdf import message_pdf
 from mailia.textutil import for_ai, split_links
 from mailia.ui_account import friendly_error
@@ -447,6 +447,19 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                 "round dense size=sm color=primary " + ("unelevated" if auto else "flat")).tooltip(
                 "Masquer la colonne automatiquement")
             ui.button(icon="settings", on_click=self.settings).props("flat dense round size=sm").tooltip("Paramètres")
+            hb = ui.button(icon="warning_amber", on_click=lambda: self.settings()).props("flat dense round size=sm color=warning").mark("health")
+            hb.set_visibility(False)
+            htip = hb.tooltip("")
+
+            async def health_tick() -> None:
+                await run.io_bound(health.refresh)
+                found = health.problems()
+                hb.set_visibility(bool(found))
+                htip.set_text("\n".join(found))
+                htip.style("white-space:pre-line;max-width:360px")
+
+            ui.timer(30, health_tick)
+            ui.timer(4, health_tick, once=True)
             if lock_applies() and vault.lock_enabled(db):
                 ui.button(icon="lock", on_click=lock_screen_now).props("flat dense round size=sm").tooltip("Verrouiller maintenant")
 

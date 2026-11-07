@@ -38,6 +38,9 @@ async function state(tab) {
 }
 
 const commands = {
+  async version() {
+    return chrome.runtime.getManifest().version;
+  },
   async find({ base }) {
     return state(await findTab(base));
   },

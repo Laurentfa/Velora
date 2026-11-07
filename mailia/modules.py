@@ -12,6 +12,7 @@ import json
 import logging
 import re
 import shutil
+import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
@@ -59,6 +60,90 @@ def _root_of(folder: Path) -> Path:
     raise ValueError("Ce n'est pas un module : il manque le fichier module.json.")
 
 
+def _safe_extract(archive: Path, dest: Path) -> None:
+    with zipfile.ZipFile(archive) as z:
+        if sum(i.file_size for i in z.infolist()) > MAX_UNZIPPED:
+            raise ValueError("Archive trop volumineuse pour un module.")
+        for i in z.infolist():
+            if i.filename.startswith(("/", "\\")) or ".." in Path(i.filename).parts or ":" in i.filename:
+                raise ValueError("Archive refusée : chemins inattendus.")
+        z.extractall(dest)
+
+
+def _vtuple(v: str) -> tuple:
+    return tuple(int(x) for x in re.findall(r"\d+", v or ""))
+
+
+def update_from_repo(repo: str) -> list[tuple[str, str, str]]:
+    """Met à jour, depuis un dépôt GitHub (même privé), les modules DÉJÀ installés dont la version du dépôt est plus récente.
+    Passe par l'outil « gh » de l'ordinateur (connecté à votre compte GitHub) : Velora ne garde aucun jeton. Rend [(identifiant, ancienne, nouvelle version)].
+    Les modules ne sont pas rechargés ici (voir apply). ValueError avec un message lisible si « gh » manque ou si le dépôt est inaccessible."""
+    if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo or ""):
+        raise ValueError("Indiquez le dépôt sous la forme « compte/depot ».")
+    gh = shutil.which("gh")
+    if not gh:
+        raise ValueError("L'outil GitHub « gh » n'est pas installé sur cet ordinateur : importez plutôt le dossier du module ou une archive .zip.")
+    tmp = Path(tempfile.mkdtemp(prefix="velora-modules-"))
+    try:
+        try:
+            r = subprocess.run([gh, "api", f"repos/{repo}/zipball"], capture_output=True, timeout=120)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            raise ValueError(f"Dépôt injoignable : {e}") from None
+        if r.returncode or not r.stdout.startswith(b"PK"):
+            raise ValueError("Dépôt inaccessible (êtes-vous connecté à GitHub avec « gh auth login » ?) : " + r.stderr.decode("utf-8", "replace").strip()[:200])
+        archive = tmp / "repo.zip"
+        archive.write_bytes(r.stdout)
+        _safe_extract(archive, tmp / "x")
+        tops = [d for d in (tmp / "x").iterdir() if d.is_dir()]
+        root = tops[0] if len(tops) == 1 else tmp / "x"  # GitHub range tout dans un dossier « compte-depot-<commit> »
+        installed = {i["id"]: i for i in discover() if not i.get("error")}
+        done = []
+        for d in sorted(p for p in root.iterdir() if p.is_dir() and p.name in installed and (p / "module.py").is_file()):
+            try:
+                new = json.loads((d / "module.json").read_text(encoding="utf-8")).get("version", "")
+            except (OSError, ValueError):
+                continue
+            old = installed[d.name]["version"]
+            if _vtuple(new) > _vtuple(old):
+                import_module(d, True)
+                done.append((d.name, old, new))
+        return done
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def import_bundle(src, replace: bool = False) -> list[str]:
+    """Comme import_module, mais accepte aussi une archive ou un dossier qui contient PLUSIEURS modules (un sous-dossier par module).
+    Rend les identifiants importés. FileExistsError(noms séparés par des virgules) si certains existent déjà et replace est faux : rien n'est alors copié."""
+    src = Path(src)
+    try:
+        return [import_module(src, replace)]
+    except ValueError as first:
+        if "module.json" not in str(first):
+            raise
+    tmp = None
+    try:
+        if src.is_file():
+            tmp = Path(tempfile.mkdtemp(prefix="velora-modules-"))
+            _safe_extract(src, tmp)
+            base = tmp
+        else:
+            base = src
+        subs = [d for d in base.iterdir() if d.is_dir() and not d.name.startswith((".", "__"))]
+        if len(subs) == 1 and not (subs[0] / "module.json").is_file():
+            subs = [d for d in subs[0].iterdir() if d.is_dir() and not d.name.startswith((".", "__"))]  # archive faite depuis un dossier parent
+        found = [d for d in subs if (d / "module.json").is_file() and (d / "module.py").is_file()]
+        if not found:
+            raise ValueError("Ce n'est pas un module : il manque le fichier module.json.")
+        existing = [d.name for d in found if (DIR / re.sub(r"[^A-Za-z0-9_-]", "_", d.name)).exists()]
+        if existing and not replace:
+            raise FileExistsError(", ".join(existing))
+        return [import_module(d, replace) for d in found]
+    finally:
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 def import_module(src, replace: bool = False) -> str:
     """Copie un module (dossier, ou archive .zip) dans le dossier des modules et rend son identifiant.
     FileExistsError s'il y en a déjà un du même nom (replace=True le remplace) ; ValueError si ce n'est pas un module. Le module n'est pas activé."""
@@ -70,13 +155,7 @@ def import_module(src, replace: bool = False) -> str:
             if src.suffix.lower() != ".zip":
                 raise ValueError("Choisissez le dossier du module, ou une archive .zip.")
             tmp = Path(tempfile.mkdtemp(prefix="velora-module-"))
-            with zipfile.ZipFile(src) as z:
-                if sum(i.file_size for i in z.infolist()) > MAX_UNZIPPED:
-                    raise ValueError("Archive trop volumineuse pour un module.")
-                for i in z.infolist():
-                    if i.filename.startswith(("/", "\\")) or ".." in Path(i.filename).parts or ":" in i.filename:
-                        raise ValueError("Archive refusée : chemins inattendus.")
-                z.extractall(tmp)
+            _safe_extract(src, tmp)
             root = _root_of(tmp)
             name = root.name if root != tmp else name
         else:
@@ -90,6 +169,8 @@ def import_module(src, replace: bool = False) -> str:
         DIR.mkdir(parents=True, exist_ok=True)
         dest = DIR / mid
         if dest.exists():
+            if root.resolve() == dest.resolve():
+                raise ValueError("Ce dossier est déjà le module installé : choisissez le dossier d'origine.")  # sinon le remplacement effacerait sa propre source
             if not replace:
                 raise FileExistsError(mid)
             shutil.rmtree(dest)
@@ -107,6 +188,7 @@ def remove_module(mid: str) -> None:
     set_enabled(mid, False)
     shutil.rmtree(DIR / mid, ignore_errors=True)
     db.kv_set(f"module:{mid}:cfg", "")
+    db.kv_set(f"module:{mid}:src", "")
     status.pop(mid, None)
 
 

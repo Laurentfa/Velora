@@ -2,11 +2,14 @@
 import asyncio
 import html
 import json
+import logging
 
 from nicegui import run, ui
 
 from mailia import ai, compose, db
 from mailia.textutil import html_to_text
+
+log = logging.getLogger(__name__)
 
 
 class ComposeAiMixin:
@@ -157,7 +160,8 @@ class ComposeAiMixin:
         """Résumé d'une conversation ouverte, sans clic : silencieux en cas d'échec (l'icône « Résumer la conversation » reste disponible)."""
         try:
             self.tsum[ckey] = await run.io_bound(ai.summarize_thread, ckey)
-        except Exception:  # noqa: BLE001  (IA indisponible, mail protégé…)
+        except Exception as e:  # noqa: BLE001  (IA indisponible, mail protégé…)
+            log.warning("résumé automatique de la conversation %s impossible : %s", ckey, e, exc_info=not isinstance(e, ai.AIError))
             self.tsum_tried.add(ckey)
             self.tsum.pop(ckey, None)
         if (self.cur or {}).get("ckey") == ckey:
