@@ -17,7 +17,7 @@ import time
 import urllib.request
 from pathlib import Path
 
-from . import db
+from . import db, tlsutil
 from .version import APP_VERSION, UPDATE_PUBKEY, UPDATE_REPO
 
 log = logging.getLogger("updater")
@@ -68,7 +68,7 @@ def is_newer(candidate: str, current: str = APP_VERSION) -> bool:
 
 
 def _get(url: str, timeout: int = 15):
-    return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": f"Velora/{APP_VERSION}", "Accept": "application/vnd.github+json"}), timeout=timeout)
+    return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": f"Velora/{APP_VERSION}", "Accept": "application/vnd.github+json"}), timeout=timeout, context=tlsutil.context())
 
 
 def fetch_latest() -> dict | None:

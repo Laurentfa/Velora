@@ -13,7 +13,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-from . import db
+from . import db, tlsutil
 
 log = logging.getLogger("weather")
 ICONS = Path(__file__).parent / "weather_icons"
@@ -86,7 +86,7 @@ def enabled() -> bool:
 # ---------------------------------------------------------------- réseau
 def _get(url: str, params: dict, timeout: float = 8.0) -> dict:
     req = urllib.request.Request(url + "?" + urllib.parse.urlencode(params), headers={"User-Agent": "Velora"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:  # noqa: S310 — adresses fixes en https
+    with urllib.request.urlopen(req, timeout=timeout, context=tlsutil.context()) as r:  # noqa: S310 — adresses fixes en https
         return json.loads(r.read().decode("utf-8"))
 
 

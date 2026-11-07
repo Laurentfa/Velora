@@ -21,7 +21,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import config, db
+from . import config, db, tlsutil
 
 log = logging.getLogger("dictation")
 
@@ -129,7 +129,7 @@ def fetch_file(url: str, final: Path, size: int, sha256: str, on_bytes=None, can
     try:
         if have == size:  # reçu en entier mais jamais vérifié (appli fermée juste avant) : pas de nouvelle requête (« bytes=taille- » serait refusé), on vérifie
             raise _AlreadyComplete()
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=30, context=tlsutil.context()) as resp:
             if have and resp.status != 206:  # le serveur ignore la reprise : on repart de zéro
                 have = 0
             with open(part, "ab" if have else "wb") as f:

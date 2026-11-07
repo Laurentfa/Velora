@@ -102,3 +102,31 @@ def test_import_refuses_anything_that_is_not_a_configuration(clean_db, tmp_path)
         z.writestr("readme.txt", "x")
     with pytest.raises(ValueError):
         configbundle.import_bundle(other)
+
+
+def test_every_https_download_uses_the_bundled_certificates(clean_db, monkeypatch):
+    """Régression : météo, flux RSS et mise à jour utilisaient le magasin du système, vide dans l'appli Mac (« unable to get local issuer certificate »)."""
+    import io
+    import ssl
+    import urllib.request
+
+    from mailia import feed, updater, weather
+    seen = []
+
+    class R(io.BytesIO):
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def fake(req, timeout=None, context=None):
+        seen.append(context)
+        return R(b'{"x": 1}')
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    weather._get("https://example.org/w", {})
+    updater._get("https://example.org/u")
+    try:
+        db.kv_set("feed_url", "https://example.org/rss")
+        feed.fetch(force=True)
+    except Exception:  # noqa: BLE001 — le contenu n'est pas un flux : seul le contexte TLS nous intéresse
+        pass
+    assert len(seen) == 3 and all(isinstance(c, ssl.SSLContext) for c in seen)
