@@ -1,11 +1,10 @@
 """Plafond quotidien de crédits, brief gardé d'un lancement à l'autre, export/import de la configuration."""
 import json
 import time
-import zipfile
 
 import pytest
 
-from mailia import aipolicy, config, configbundle, db, health, modules, queries
+from mailia import aipolicy, config, db, health, modules, queries
 
 
 def spend(credits, feature="analyze", model="1min:x"):
@@ -58,7 +57,8 @@ def make_module(base, mid, version):
     return d
 
 
-def test_export_import_round_trip_keeps_secrets_out(clean_db, tmp_path, monkeypatch):
+def test_backup_carries_accounts_settings_and_modules_but_no_secret(clean_db, tmp_path, monkeypatch):
+    from mailia import backup
     monkeypatch.setattr(modules, "DIR", tmp_path / "mods")
     monkeypatch.setattr(config, "ACCOUNTS_PATH", tmp_path / "accounts.json")  # sinon les boîtes du test resteraient pour les tests suivants
     monkeypatch.setattr(config, "_acc_cache", (None, []))
@@ -66,42 +66,43 @@ def test_export_import_round_trip_keeps_secrets_out(clean_db, tmp_path, monkeypa
     (modules.DIR / "mon_module" / "__pycache__").mkdir()
     (modules.DIR / "mon_module" / "__pycache__" / "a.pyc").write_bytes(b"x")
     db.kv_set("onemin_daily_cap", "1234"); db.kv_set("vip_senders", '["a@b.fr"]'); db.kv_set("module:mon_module:cfg", '{"url": "https://x"}')
-    db.kv_set("module:mon_module:src", "/chemin/de/l/autre/machine"); db.kv_set("thread_sum:abc", "cache"); db.kv_set("openai_api_key", "SECRET")
+    db.kv_set("weather_place", '{"name": "Rouen"}'); db.kv_set("weather_cache", "cache"); db.kv_set("feed_url", "https://exemple.fr/rss");
+    db.kv_set("module:mon_module:src", "/chemin/de/l/autre/machine"); db.kv_set("thread_sum:abc", "cache"); db.kv_set("module:odoo:password", "SECRET")
     config.write_accounts([{"key": "perso", "label": "Perso", "email": "a@b.fr", "password": "mdp", "kind": "imap"}])
-    out = tmp_path / "conf.zip"
-    assert configbundle.export_bundle(out) == {"settings": 3, "accounts": 1, "modules": 1}
-    with zipfile.ZipFile(out) as z:
-        names = z.namelist()
-        blob = z.read("velora-config.json").decode()
-    assert "modules/mon_module/module.py" in names and not any("pycache" in n for n in names)
+    data = backup.export_data()
+    blob = backup.dumps(data).decode()
+    assert [m["id"] for m in data["modules"]] == ["mon_module"] and set(data["modules"][0]["files"]) == {"module.json", "module.py"}
     assert "SECRET" not in blob and "mdp" not in blob and "thread_sum" not in blob and "autre/machine" not in blob
+    assert {"onemin_daily_cap", "vip_senders", "module:mon_module:cfg", "weather_place", "feed_url"} <= set(data["kv"]) and "weather_cache" not in data["kv"]  # la ville suit, pas le cache and "1 module(s)" in backup.summary(data)
 
-    # autre machine : tout est vide, sauf une boîte et un réglage déjà posés (conservés)
+    # autre machine : rien d'installé ; une boîte déjà présente est conservée
     with db.conn() as c:
         c.execute("DELETE FROM kv")
     config.write_accounts([{"key": "perso", "label": "Déjà là", "kind": "imap"}])
-    db.kv_set("vip_senders", '["local@x.fr"]')
     monkeypatch.setattr(modules, "DIR", tmp_path / "mods2")
-    r = configbundle.import_bundle(out)
-    assert r == {"settings": 2, "accounts": 0, "modules": 1, "updated": 0}
-    assert db.kv_get("onemin_daily_cap") == "1234" and db.kv_get("vip_senders") == '["local@x.fr"]'
-    assert config.read_accounts()[0]["label"] == "Déjà là" and (modules.DIR / "mon_module" / "module.py").is_file()
+    r = backup.import_data(json.loads(blob))
+    assert r["modules"] == 1 and r["modules mis à jour"] == 0 and r["boîtes"] == 0
+    assert db.kv_get("onemin_daily_cap") == "1234" and config.read_accounts()[0]["label"] == "Déjà là"
+    assert (modules.DIR / "mon_module" / "module.py").is_file()
     # un module n'est remplacé que par une version plus récente
-    assert configbundle.import_bundle(out)["updated"] == 0
+    assert backup.import_data(json.loads(blob))["modules mis à jour"] == 0
     (modules.DIR / "mon_module" / "module.json").write_text(json.dumps({"name": "m", "version": "0.5", "api": 1}))
-    assert configbundle.import_bundle(out)["updated"] == 1
+    assert backup.import_data(json.loads(blob))["modules mis à jour"] == 1
 
 
-def test_import_refuses_anything_that_is_not_a_configuration(clean_db, tmp_path):
-    bad = tmp_path / "x.zip"
-    bad.write_bytes(b"pas un zip")
+def test_an_old_backup_without_modules_still_restores_and_a_hostile_module_is_refused(clean_db, tmp_path, monkeypatch):
+    import base64
+
+    from mailia import backup
+    monkeypatch.setattr(modules, "DIR", tmp_path / "mods")
+    assert backup.import_data({"app": "Velora", "kv": {"theme": "dark"}})["réglages"] == 1  # sauvegarde d'avant les modules
+    ok = base64.b64encode(b"{}").decode()
+    evil = {"app": "Velora", "kv": {}, "modules": [{"id": "pirate", "version": "1.0", "files": {"module.json": ok, "../../evil.py": ok}}]}
     with pytest.raises(ValueError):
-        configbundle.import_bundle(bad)
-    other = tmp_path / "y.zip"
-    with zipfile.ZipFile(other, "w") as z:
-        z.writestr("readme.txt", "x")
+        backup.import_data(evil)
+    assert not (tmp_path / "evil.py").exists() and not (modules.DIR / "pirate").exists()
     with pytest.raises(ValueError):
-        configbundle.import_bundle(other)
+        backup.import_data({"app": "autre", "kv": {}})
 
 
 def test_every_https_download_uses_the_bundled_certificates(clean_db, monkeypatch):

@@ -20,7 +20,6 @@ from mailia.ui_pet import pet_settings
 from mailia.ui_sigmodels import signature_models_dialog
 from mailia.ui_weather import weather_settings
 from mailia.ui_update import panel as update_panel
-from mailia.ui_configbundle import panel as config_panel
 from mailia import ui_zoom
 
 
@@ -779,7 +778,6 @@ def _tab_use(host) -> None:
     settings_ui.send_stats_panel()
     ui.label(f"Données : {config.DATA_DIR}").classes("text-caption text-grey")
     update_panel()
-    config_panel()
 
     async def backup_now() -> None:
         try:
@@ -834,8 +832,9 @@ def _tab_use(host) -> None:
 
     from mailia import backup
     ui.label("Sauvegarde de vos données").classes("text-subtitle2 q-mt-lg")
-    ui.label("Réglages, signatures, modèles, contacts favoris, groupes, tâches et règles de tri : un fichier à garder en lieu sûr. "
-             "Vos mots de passe et votre clé d'API n'y sont jamais. Vos mails restent sur vos serveurs.").classes("text-caption text-grey")
+    ui.label("Réglages, boîtes mail, signatures, modèles, contacts favoris, groupes, tâches, règles de tri et modules : un fichier à garder en lieu sûr, "
+             "ou pour installer Velora sur un autre ordinateur sans tout ressaisir. Vos mots de passe et vos clés d'API n'y sont jamais (à saisir de nouveau). "
+             "Vos mails restent sur vos serveurs. Les réglages du fichier remplacent les vôtres ; boîtes, modèles, modules… ne sont ajoutés que s'ils n'existent pas déjà (un module n'est remplacé que par une version plus récente).").classes("text-caption text-grey")
 
     async def do_export() -> None:
         raw = backup.dumps(await run.io_bound(backup.export_data))
@@ -863,20 +862,22 @@ def _tab_use(host) -> None:
         with host, ui.dialog() as cd, ui.card().style("width:520px;max-width:96vw"):
             ui.label("Restaurer cette sauvegarde ?").classes("text-h6")
             ui.label(summary).classes("text-body2")
-            ui.label("Elle est fusionnée avec vos données actuelles : rien n'est supprimé, ce qui existe déjà est conservé.").classes("text-caption text-grey")
+            ui.label("Elle est fusionnée avec vos données actuelles : rien n'est supprimé ; les réglages du fichier remplacent les vôtres, le reste (boîtes, modèles, modules…) n'est ajouté que s'il n'existe pas déjà.").classes("text-caption text-grey")
             with ui.row().classes("justify-end w-full gap-2"):
                 ui.button("Annuler", on_click=lambda: cd.submit(False)).props("flat no-caps")
                 ui.button("Restaurer", on_click=lambda: cd.submit(True)).props("unelevated no-caps color=primary")
         if await cd:
             res = await run.io_bound(backup.import_data, data)
             sync.reload()
-            ui.notify("Restauré : " + ", ".join(f"{v} {k}" for k, v in res.items() if v) or "rien de nouveau.", type="positive", multi_line=True)
+            ui.notify(("Restauré : " + ", ".join(f"{v} {k}" for k, v in res.items() if v) if any(res.values()) else "Rien de nouveau à restaurer.")
+                      + (". Relancez Velora pour que les modules et les boîtes ajoutés soient pris en compte." if res.get("modules") or res.get("modules mis à jour") or res.get("boîtes") else ""),
+                      type="positive", multi_line=True)
 
     up = ui.upload(on_upload=do_import, auto_upload=True).props("hide-upload-btn accept=.json").style(
         "position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden")
     with ui.row().classes("gap-2"):
-        ui.button("Exporter mes données", icon="download", on_click=do_export).props("outline no-caps dense")
-        ui.button("Importer une sauvegarde…", icon="upload").props("outline no-caps dense").on(
+        ui.button("Exporter mes données", icon="file_download", on_click=do_export).props("outline no-caps dense").mark("backup-export")
+        ui.button("Importer une sauvegarde…", icon="file_upload").props("outline no-caps dense").mark("backup-import").on(
             "click", js_handler=f"() => getElement({up.id}).$refs.qRef.pickFiles()")
 
     ui.label("Mots de passe des boîtes").classes("text-subtitle2 q-mt-lg")
