@@ -41,4 +41,4 @@ def panel() -> None:
 
     with ui.row().classes("items-center gap-3"):
         ui.button("Exporter la configuration", icon="upload", on_click=export).props("outline no-caps dense").mark("config-export")
-        ui.upload(on_upload=on_upload, auto_upload=True, label="Importer une configuration (.zip)").props("accept=.zip flat dense").classes("config-import").mark("config-import")
+        ui.upload(on_upload=on_upload, auto_upload=True, label="Importer une configuration (.zip)").props("accept=application/zip,.zip flat dense").classes("config-import").mark("config-import")
