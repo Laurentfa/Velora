@@ -37,12 +37,22 @@ def set_enabled(account: str, on: bool) -> None:
 
 
 # ---------- empreinte et format ----------
+def _texts() -> dict[str, str]:
+    from . import ai
+    # le nom compte sans tenir compte des majuscules ni des espaces en trop : « Laurent FAUVEL » et « Laurent Fauvel » sont la même personne
+    return {"analyze": ai.prompt_text("analyze"), "rules": ai.prompt_text("rules"), "persona": " ".join(config.persona("‹‹NOM››|‹‹PRENOM››").casefold().split()),
+            "lang": aipolicy.language_note("analyze"), "categories": "|".join(ai.CATEGORIES)}
+
+
 def fingerprint() -> str:
     """Change dès que les consignes de tri, vos règles, votre nom ou la langue changent : une analyse faite autrement n'est pas reprise.
     (Les exemples tirés de vos corrections ne comptent pas : ils sont propres à chaque ordinateur.)"""
-    from . import ai
-    parts = [ai.prompt_text("analyze"), ai.prompt_text("rules"), config.persona("‹‹NOM››|‹‹PRENOM››"), aipolicy.language_note("analyze"), "|".join(ai.CATEGORIES)]
-    return hashlib.sha1("\n".join(parts).encode("utf-8")).hexdigest()[:12]
+    return hashlib.sha1("\n".join(_texts().values()).encode("utf-8")).hexdigest()[:12]
+
+
+def fingerprint_parts() -> dict[str, str]:
+    """Empreinte de chaque élément (jamais le texte) : sert à voir QUOI diffère quand deux ordinateurs ne partagent pas (consigne de tri, règles, nom, langue)."""
+    return {k: hashlib.sha1(v.encode("utf-8")).hexdigest()[:8] for k, v in _texts().items()}
 
 
 def encode(d: dict) -> str:

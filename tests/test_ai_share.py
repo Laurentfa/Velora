@@ -55,6 +55,17 @@ def test_round_trip_and_the_fingerprint_guards_against_other_instructions(clean_
     assert aishare.decode("pas du json") is None and aishare.decode(None) is None and aishare.decode(json.dumps({"v": 99})) is None
 
 
+def test_the_fingerprint_ignores_the_case_and_spacing_of_the_name_but_not_the_person(clean_db, ews) -> None:
+    """Régression : « Laurent Fauvel » sur un ordinateur et « Laurent FAUVEL » sur l'autre empêchaient tout partage."""
+    db.kv_set("user_name", "Laurent Fauvel")
+    a = aishare.fingerprint()
+    db.kv_set("user_name", "  Laurent   FAUVEL ")
+    assert aishare.fingerprint() == a
+    db.kv_set("user_name", "Marie Dupont")
+    assert aishare.fingerprint() != a  # une autre personne : « à répondre » n'a pas le même sens
+    assert set(aishare.fingerprint_parts()) == {"analyze", "rules", "persona", "lang", "categories"}
+
+
 def test_a_published_analysis_is_taken_without_calling_the_ai_and_keeps_local_rules(clean_db, ews, monkeypatch) -> None:
     monkeypatch.setattr(ai, "analyze", lambda m, system=None: (_ for _ in ()).throw(AssertionError("l'IA ne doit pas être appelée")))
     add_message("testbox|INBOX|1", is_read=0, sender="vip@exemple.fr")
