@@ -6,7 +6,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import ai, aishare, compose, config, db, htmlmail, notify, queries, rules, security
+from . import ai, aishare, compose, config, db, htmlmail, notify, queries, rules, security, settingsync
 from .textutil import html_to_text
 from .config import AI_BATCH, AccountCfg, load_accounts
 from .providers.base import FolderInfo
@@ -479,6 +479,10 @@ def run_cycle(force: bool = False) -> dict:
         _contacts_upkeep(any(report["synced"].values()))
     except Exception:
         log.exception("carnet d'adresses")
+    try:
+        settingsync.tick()  # consignes de l'IA et nom : suivent la personne d'un ordinateur à l'autre (au plus toutes les deux minutes)
+    except Exception:
+        log.exception("réglages partagés")
     report["analyzed"] = analyze_pending()
     return report
 

@@ -1,7 +1,7 @@
 """Interface du partage des analyses IA entre ordinateurs (voir aishare) : explication complète, interrupteur par boîte, avis affiché une fois."""
 from nicegui import ui
 
-from mailia import aishare, config, db
+from mailia import aishare, config, db, settingsync
 
 EXPLAIN = [
     ("Ce que ça fait",
@@ -21,6 +21,24 @@ EXPLAIN = [
     ("Le désactiver",
      "Un interrupteur par boîte, ci-dessous. Désactivé, plus rien n'est écrit ni repris. Les analyses déjà publiées restent attachées à leurs mails "
      "(invisibles) jusqu'à la suppression de ces mails."),
+]
+
+
+EXPLAIN_SYNC = [
+    ("Pourquoi",
+     "Pour que deux ordinateurs partagent leurs analyses, ils doivent avoir les mêmes consignes de tri, les mêmes règles personnelles et le même nom. Plutôt que de les "
+     "recopier à la main, Velora les fait suivre d'un ordinateur à l'autre : une consigne modifiée sur l'un s'applique aussi sur l'autre, en quelques minutes."),
+    ("Ce qui est synchronisé",
+     "Seulement les consignes de l'IA (tri et résumé, brief du jour, style des réponses, règles personnelles) et votre nom. Rien d'autre : ni vos mots de passe, ni vos clés, "
+     "ni vos budgets, ni vos signatures."),
+    ("Où c'est stocké",
+     "Dans un élément caché de la boîte de réception de votre première boîte Exchange avec IA (par adresse), sur votre serveur. Outlook ne l'affiche pas. Si vos consignes "
+     "contiennent des informations sensibles, elles sont au même endroit que vos mails."),
+    ("Si deux ordinateurs changent la même consigne",
+     "La modification la plus récente l'emporte. Au tout premier contact, si une consigne personnalisée existe ici et une autre ailleurs, Velora n'écrase rien : "
+     "elle vous demande laquelle garder."),
+    ("Le désactiver",
+     "L'interrupteur ci-dessous. Désactivé, chaque ordinateur garde ses propres consignes (et le partage des analyses ne marche alors qu'entre ordinateurs qui ont les mêmes)."),
 ]
 
 
@@ -46,6 +64,47 @@ def settings() -> None:
         ui.label(f"Sur cet ordinateur : {st.get('reused', 0)} analyse(s) reprise(s) d'un autre ordinateur, {st.get('published', 0)} publiée(s).").classes("text-caption")
     with ui.expansion("Comment ça marche, où c'est stocké, qui peut le lire", icon="info").classes("w-full").props("dense"):
         explanation()
+    follow_settings()
+
+
+def follow_settings() -> None:
+    """Bloc « Faire suivre mes consignes d'un ordinateur à l'autre » de l'onglet « Intelligence artificielle »."""
+    ui.label("Faire suivre mes consignes d'un ordinateur à l'autre (Exchange)").classes("text-subtitle2 q-mt-md").mark("ssync-title")
+    ui.label("Activé par défaut : vos consignes de l'IA et votre nom sont les mêmes sur tous vos ordinateurs, sans rien recopier.").classes("text-body2")
+    acc = settingsync.account()
+    if not acc:
+        ui.label("Aucune boîte Exchange avec l'IA activée : rien à synchroniser.").classes("text-caption text-grey")
+    else:
+        ui.switch("Synchroniser mes consignes de l'IA et mon nom", value=db.kv_get("settingsync_on") != "0",
+                  on_change=lambda e: db.kv_set("settingsync_on", "1" if e.value else "0")).mark("ssync-switch")
+        at, err = db.kv_get("ssync:at"), db.kv_get("ssync:error")
+        if err:
+            ui.label(f"Dernière tentative en échec ({err}) : Velora réessaie toute seule.").classes("text-caption text-negative")
+        elif at:
+            ui.label(f"Dernière vérification de la boîte : {at[11:16]} (UTC).").classes("text-caption text-grey")
+    for key, remote in settingsync.conflicts().items():
+        with ui.card().classes("w-full q-pa-sm").style("border:1px solid var(--line)").mark(f"ssync-conflict-{key}"):
+            ui.label(f"« {settingsync.LABELS[key]} » diffère de celle de vos autres ordinateurs.").classes("text-body2")
+            ui.label("Choisissez laquelle garder : rien n'est écrasé tant que vous n'avez pas choisi.").classes("text-caption text-grey")
+            with ui.row().classes("gap-2"):
+                ui.button("Utiliser celle de la boîte", on_click=lambda k=key: (settingsync.resolve(k, True), ui.notify("Consigne de la boîte reprise.", type="positive"))
+                          ).props("outline no-caps dense").mark(f"ssync-remote-{key}")
+                ui.button("Garder celle de cet ordinateur", on_click=lambda k=key: (settingsync.resolve(k, False), ui.notify("Votre consigne sera envoyée aux autres ordinateurs.", type="positive"))
+                          ).props("outline no-caps dense").mark(f"ssync-local-{key}")
+    with ui.expansion("Comment ça marche, ce qui est synchronisé, où c'est stocké", icon="info").classes("w-full").props("dense"):
+        for title, text in EXPLAIN_SYNC:
+            ui.label(title).classes("text-caption text-weight-bold q-mt-xs")
+            ui.label(text).classes("text-caption text-grey")
+
+
+def notice_settings_once() -> None:
+    """Une seule fois : prévient que les consignes de l'IA et le nom suivent désormais d'un ordinateur à l'autre."""
+    if db.kv_get("ssync_notice") == "1" or not settingsync.account():
+        return
+    db.kv_set("ssync_notice", "1")
+    ui.notification("Nouveau : vos consignes de l'IA et votre nom sont désormais les mêmes sur tous vos ordinateurs, par votre boîte Exchange (un élément caché, invisible dans "
+                    "Outlook). Une consigne modifiée sur l'un s'applique sur l'autre. Détails et interrupteur : Paramètres › Intelligence artificielle.",
+                    type="info", multi_line=True, timeout=0, close_button="Compris")
 
 
 def notice_once() -> None:
