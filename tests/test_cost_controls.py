@@ -160,3 +160,26 @@ def test_a_lost_connection_is_dropped_so_the_next_cycle_reconnects(clean_db, mon
     sync.run_cycle(force=True)
     assert "boite" in sync._providers  # un refus du serveur n'efface rien
     sync.last_error.clear()
+
+
+def test_the_text_sent_to_the_ai_for_analysis_is_capped_and_adjustable(clean_db, monkeypatch) -> None:
+    """Une newsletter longue coûtait trois à quatre fois un mail ordinaire : l'analyse n'envoie plus que le début du texte (2000 caractères par défaut, réglable)."""
+    from mailia import ai
+    assert config.ai_body_limit() == 2000
+    for raw, expect in (("100", 500), ("999999", 6000), ("3000", 3000), ("pas un nombre", 2000)):
+        monkeypatch.setattr(config, "env", lambda k, d="", raw=raw: raw if k == "AI_BODY_LIMIT" else d)
+        assert config.ai_body_limit() == expect, raw
+    monkeypatch.undo()
+    m = {"sender_name": "Boutique", "sender": "promo@boutique.fr", "to_addrs": "moi@x.fr", "cc_addrs": "", "att_json": None, "importance": 1, "date": "2026-11-08",
+         "subject": "Soldes", "body": "\n".join(f"Ligne de promotion numéro {i} avec du texte" for i in range(400))}  # ≈ 17 000 caractères
+    seen = []
+    monkeypatch.setattr(ai, "_ask", lambda system, user, **k: (seen.append(user), '{"summary": "Publicité.", "category": "newsletter", "priority": 1, "needs_reply": false, "suggested": "Archiver"}')[1])
+    ai.analyze(m)
+    long_block = len(ai._mail_block(m))  # les autres usages (brouillons de réponse…) gardent 6000 caractères
+    assert len(seen[0]) < long_block - 3000 and len(seen[0]) < 2400, (len(seen[0]), long_block)
+    monkeypatch.setattr(config, "env", lambda k, d="": "800" if k == "AI_BODY_LIMIT" else d)
+    seen.clear()
+    ai.analyze(m)
+    assert len(seen[0]) < 1200  # la valeur choisie dans les paramètres s'applique
+    short = dict(m, body="Bonjour, pouvez-vous me rappeler ? Merci.")
+    assert "pouvez-vous me rappeler" in ai._mail_block(short, 500)  # un mail court n'est pas touché

@@ -232,6 +232,18 @@ def ai_unread_only() -> bool:
     return env("AI_UNREAD_ONLY", "1") == "1"
 
 
+AI_BODY_LIMIT_DEFAULT = 2000
+
+
+def ai_body_limit() -> int:
+    """Nombre de caractères du texte d'un mail envoyés à l'IA pour l'ANALYSE automatique (tri, résumé, priorité). Le début d'un message suffit à le classer ; un texte long
+    (newsletter) coûtait trois à quatre fois un mail ordinaire. Entre 500 et 6000 ; ne concerne pas les brouillons de réponse, qui gardent tout le texte utile."""
+    try:
+        return min(6000, max(500, int(float(env("AI_BODY_LIMIT", str(AI_BODY_LIMIT_DEFAULT))))))
+    except ValueError:
+        return AI_BODY_LIMIT_DEFAULT
+
+
 def ai_max_age_days() -> int:
     """Pas d'analyse automatique au-delà de N jours (0 = sans limite)."""
     try:

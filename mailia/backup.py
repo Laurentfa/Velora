@@ -22,7 +22,7 @@ SKIP_SUFFIX = (":src",)  # dossier d'origine d'un module sur l'autre machine : n
 # « password » ; les mots de passe se saisissent sur cet ordinateur.
 ACCOUNT_KEYS = {"key", "label", "kind", "email", "login", "host", "port", "smtp_host", "smtp_port", "tls", "enabled", "ai"}
 _MODULE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
-ENV_KEYS = ("AI_ENABLED", "AI_UNREAD_ONLY", "AI_MAX_AGE_DAYS", "CONVERSATIONS", "SYNC_LIMIT", "AI_PROVIDER",
+ENV_KEYS = ("AI_ENABLED", "AI_UNREAD_ONLY", "AI_MAX_AGE_DAYS", "AI_BODY_LIMIT", "CONVERSATIONS", "SYNC_LIMIT", "AI_PROVIDER",
             *(f"{p}_{t}" for p in ("MODEL", "MODEL1", "PROVIDER") for t in ("ANALYZE", "BRIEF", "DRAFT", "ASK")))
 VERSION = 1
 

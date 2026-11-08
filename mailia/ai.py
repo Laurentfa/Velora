@@ -121,7 +121,7 @@ def _run(model: str, system: str, user: str, max_tokens: int, effort: str, image
     return "".join(b.text for b in r.content if b.type == "text").strip()
 
 
-def _mail_block(m) -> str:
+def _mail_block(m, limit: int = 6000) -> str:
     return (
         f"De : {m['sender_name']} <{m['sender']}>\nÀ : {m['to_addrs']}\n"
         + (f"Cc : {m['cc_addrs']}\n" if m.get("cc_addrs") else "")
@@ -129,7 +129,7 @@ def _mail_block(m) -> str:
            if m.get("att_json") not in (None, "[]") else "")
         + {2: "Importance indiquée par l'expéditeur : HAUTE (indice seulement, à confronter au contenu)\n",
            0: "Importance indiquée par l'expéditeur : basse (indice seulement)\n"}.get(int(m.get("importance") if m.get("importance") is not None else 1), "")
-        + f"Date : {m['date']}\nObjet : {m['subject']}\n\n{for_ai(m['body'] or '')}"
+        + f"Date : {m['date']}\nObjet : {m['subject']}\n\n{for_ai(m['body'] or '', limit)}"
     )
 
 
@@ -192,7 +192,7 @@ def test_analyze(m: dict, criteria: str, rules: str) -> dict:
 
 
 def analyze(m, system: str | None = None) -> dict:
-    raw = _ask(system or analyze_system(), _mail_block(m), model=config.model("ANALYZE"), max_tokens=500, feature="analyze")
+    raw = _ask(system or analyze_system(), _mail_block(m, config.ai_body_limit()), model=config.model("ANALYZE"), max_tokens=500, feature="analyze")
     match = re.search(r"\{.*\}", raw, re.S)
     if not match:
         raise AIError("Réponse IA illisible.")

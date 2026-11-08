@@ -429,6 +429,10 @@ def _tab_ia(f) -> None:
     ui.switch("Seulement les mails non lus").bind_value(f, "AI_UNREAD_ONLY")
     ui.number("Ignorer les mails de plus de … jours (0 = aucune limite)", min=0, max=3650, step=1, precision=0).bind_value(f, "AI_MAX_AGE_DAYS").props("outlined dense").classes("w-full")
     ui.label("Les autres mails restent analysables à la demande (bouton « Analyser ce message »).").classes("text-caption text-grey")
+    ui.number("Texte d'un mail envoyé à l'IA pour l'analyse (caractères, 500 à 6000)", min=500, max=6000, step=100, precision=0).bind_value(f, "AI_BODY_LIMIT").props(
+        "outlined dense").classes("w-full q-mt-sm").mark("ai-body-limit")
+    ui.label("Le début d'un message suffit à le classer et à le résumer. Un texte long (newsletter) coûtait trois à quatre fois un mail ordinaire : 2000 caractères "
+             "(valeur par défaut) réduisent ce coût sans changer le tri des mails courts. Ne concerne que l'analyse automatique, pas les brouillons de réponse.").classes("text-caption text-grey")
     ui_aishare.settings()
 
 
@@ -909,7 +913,7 @@ def open_settings(host, on_folders) -> None:
          **{f"MODEL_{t}": config.model(t, "anthropic") for t in config.TASKS},
          **{f"MODEL1_{t}": config.model(t, "onemin")[len(config.ONEMIN_PREFIX):] for t in config.TASKS},
          **{f"PROVIDER_{t}": (config.env(f"PROVIDER_{t}") if config.env(f"PROVIDER_{t}") in config.PROVIDERS else "default") for t in config.TASKS},
-         "AI_UNREAD_ONLY": config.ai_unread_only(), "AI_MAX_AGE_DAYS": config.ai_max_age_days(),
+         "AI_UNREAD_ONLY": config.ai_unread_only(), "AI_MAX_AGE_DAYS": config.ai_max_age_days(), "AI_BODY_LIMIT": config.ai_body_limit(),
          "CONVERSATIONS": config.conversations_enabled(), "SIG_ON": compose.signature_on(), "SIG_HTML": compose.signature_html(),
          **{f"P_{k}": ai.prompt_text(k) for k in ai.DEFAULTS}, "TEST_MAIL": None}
 
@@ -987,6 +991,7 @@ def open_settings(host, on_folders) -> None:
                               "AI_ENABLED": "1" if f["AI_ENABLED"] else "0",
                               "AI_UNREAD_ONLY": "1" if f["AI_UNREAD_ONLY"] else "0",
                               "AI_MAX_AGE_DAYS": str(int(f["AI_MAX_AGE_DAYS"] or 0)),
+                              "AI_BODY_LIMIT": str(min(6000, max(500, int(f["AI_BODY_LIMIT"] or config.AI_BODY_LIMIT_DEFAULT)))),
                               "CONVERSATIONS": "1" if f["CONVERSATIONS"] else "0",
                               })
             db.kv_set("signature_on", "1" if f["SIG_ON"] else "0")
