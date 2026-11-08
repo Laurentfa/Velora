@@ -93,7 +93,7 @@ def _write_env_file(cur: dict[str, str]) -> None:
 
 
 # réglages secrets (hors mots de passe de boîtes) : confiés au trousseau quand il est activé
-SECRET_ENV = ("ANTHROPIC_API_KEY", "ONEMIN_API_KEY", "OAUTH_GOOGLE_CLIENT_SECRET", "GCAL_REFRESH_TOKEN")
+SECRET_ENV = ("ANTHROPIC_API_KEY", "ONEMIN_API_KEY", "OAI_API_KEY", "OAUTH_GOOGLE_CLIENT_SECRET", "GCAL_REFRESH_TOKEN")
 
 
 def _secret_name(name: str) -> str:
@@ -179,9 +179,49 @@ TASKS = {
 }
 
 
-PROVIDERS = {"anthropic": "Claude (Anthropic)", "onemin": "1min.AI"}
+PROVIDERS = {"anthropic": "Claude (Anthropic)", "onemin": "1min.AI", "openai": "Compatible OpenAI (OpenAI, Mistral, Azure, Ollama…)"}
 ONEMIN_DEFAULT_MODEL = "gpt-4o-mini"  # exemple de la documentation 1min.AI ; la liste réelle se lit avec la clé (réglages)
 ONEMIN_PREFIX = "1min:"  # un modèle « 1min:xxx » est servi par 1min.AI ; sans préfixe, par Claude
+OAI_PREFIX = "oai:"  # un modèle « oai:xxx » est servi par un fournisseur compatible OpenAI (adresse et clé réglées dans les paramètres)
+OAI_DEFAULT_URL = "https://api.openai.com/v1"
+OAI_DEFAULT_MODEL = "gpt-4o-mini"
+
+
+def oai_base_url() -> str:
+    """Adresse du fournisseur compatible OpenAI (sans « / » final) : OpenAI si rien n'est réglé. Une adresse non valide donne '' : le fournisseur n'est alors pas
+    utilisable (jamais de repli vers OpenAI : la clé d'un autre service n'a rien à faire chez eux)."""
+    raw = env("OAI_BASE_URL").strip().rstrip("/")
+    if not raw:
+        return OAI_DEFAULT_URL
+    return raw if oai_url_ok(raw) else ""
+
+
+def oai_url_ok(url: str) -> bool:
+    """https:// partout ; http:// seulement vers cet ordinateur ou votre réseau local (un serveur maison comme Ollama), jamais vers Internet : la clé et le texte des mails
+    voyageraient sinon en clair."""
+    from urllib.parse import urlparse
+    try:
+        u = urlparse((url or "").strip())
+        host = (u.hostname or "").lower()
+    except ValueError:
+        return False
+    if not host or u.username or u.password or u.scheme not in ("http", "https"):
+        return False
+    if u.scheme == "https":
+        return True
+    import ipaddress
+    if host == "localhost" or host.endswith(".local") or host.endswith(".home") or host.endswith(".lan"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_private or ip.is_link_local
+
+
+def oai_is_local() -> bool:
+    """Le fournisseur compatible OpenAI est un serveur de cet ordinateur ou du réseau local (adresse en http://) : une clé n'est alors pas obligatoire."""
+    return oai_base_url().startswith("http://")
 
 
 def ai_provider(task: str | None = None) -> str:
@@ -194,14 +234,19 @@ def ai_provider(task: str | None = None) -> str:
 
 
 def provider_ready(provider: str) -> bool:
+    if provider == "openai":  # une clé, ou un serveur local réglé par vous (sans clé)
+        return bool(oai_base_url()) and (bool(env("OAI_API_KEY")) or oai_is_local())
     return bool(env("ONEMIN_API_KEY" if provider == "onemin" else "ANTHROPIC_API_KEY"))
 
 
 def model(task: str, provider: str | None = None) -> str:
     """Modèle d'une tâche, relu à chaque appel : un changement de paramètre s'applique tout de suite.
     Pour 1min.AI, le nom est préfixé (« 1min:gpt-4o-mini ») : c'est ce préfixe qui aiguille l'appel vers le bon fournisseur."""
-    if (provider or ai_provider(task)) == "onemin":
+    prov = provider or ai_provider(task)
+    if prov == "onemin":
         return ONEMIN_PREFIX + (env(f"MODEL1_{task}") or ONEMIN_DEFAULT_MODEL)
+    if prov == "openai":
+        return OAI_PREFIX + (env(f"MODEL2_{task}") or OAI_DEFAULT_MODEL)
     m = env(f"MODEL_{task}", "claude-haiku-4-5")
     return m if m in MODEL_CHOICES else "claude-haiku-4-5"
 

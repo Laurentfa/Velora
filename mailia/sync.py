@@ -380,7 +380,7 @@ AI_PAUSE_REFUSED, AI_PAUSE_OTHER = 600, 90  # secondes : refus de clé ou de cr�
 def _ai_fingerprint() -> str:
     """Change dès que l'utilisateur modifie les clés ou le fournisseur : la suspension tombe alors tout de suite."""
     import hashlib
-    raw = "|".join(str(config.env(k, "") or "") for k in ("ONEMIN_API_KEY", "ANTHROPIC_API_KEY", "AI_PROVIDER", "AI_FALLBACK"))
+    raw = "|".join(str(config.env(k, "") or "") for k in ("ONEMIN_API_KEY", "ANTHROPIC_API_KEY", "OAI_API_KEY", "OAI_BASE_URL", "AI_PROVIDER", "AI_FALLBACK"))
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 

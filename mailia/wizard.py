@@ -100,7 +100,7 @@ async def run_wizard(host, first: bool, friendly_error, open_link=None, on_done=
                                   on_click=lambda: open_link("https://console.anthropic.com/settings/keys")).props("flat no-caps dense size=sm")
                         ui.input("Clé API 1min.AI (facultative)", password=True, password_toggle_button=True).bind_value(st, "onemin_key").props(
                             "outlined dense stack-label").classes("w-full")
-                        ui.toggle(config.PROVIDERS, value="anthropic").bind_value(st, "provider").props("no-caps unelevated")
+                        ui.toggle({k: v for k, v in config.PROVIDERS.items() if k != "openai"}, value="anthropic").bind_value(st, "provider").props("no-caps unelevated")
                         with ui.row().classes("items-center gap-3"):
                             ui.number("Budget mensuel (€)", min=0, step=1, precision=2).bind_value(st, "budget").props("outlined dense").style("width:200px")
                             ui.switch("Bloquer l'IA au plafond").bind_value(st, "hard")

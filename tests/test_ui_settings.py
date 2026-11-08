@@ -45,3 +45,31 @@ async def test_save_writes_the_ai_switch(user: User) -> None:
     await user.should_see("Paramètres enregistrés")
     assert not config.ai_enabled()
     assert db.kv_get("signature_on") in ("0", "1")
+
+
+async def test_openai_compatible_settings_are_saved(user: User, monkeypatch) -> None:
+    for k in ("OAI_API_KEY", "OAI_BASE_URL", "OAI_VISION", "OAI_PRICE_IN", "OAI_PRICE_OUT", "MODEL2_ASK", "PROVIDER_ASK"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(config, "write_env", lambda updates: [monkeypatch.setenv(k, v) for k, v in updates.items() if v not in (None, "")])  # rien n'est écrit dans le vrai .env ; l'environnement est rétabli à la fin du test
+    settings_page()
+    await user.open("/settings")
+    await user.should_see("Compatible OpenAI")
+    await user.should_see("Tester et charger les modèles")
+    user.find(marker="oai-url").type("https://api.mistral.ai/v1")
+    user.find(marker="oai-key").type("cle-mistral")
+    user.find(marker="settings-save").click()
+    await user.should_see("Paramètres enregistrés")
+    assert config.env("OAI_BASE_URL") == "https://api.mistral.ai/v1" and config.env("OAI_API_KEY") == "cle-mistral" and config.provider_ready("openai")
+    assert config.env("OAI_VISION") == "auto"
+
+
+async def test_an_insecure_address_is_refused_on_save(user: User, monkeypatch) -> None:
+    for k in ("OAI_API_KEY", "OAI_BASE_URL"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setattr(config, "write_env", lambda updates: [monkeypatch.setenv(k, v) for k, v in updates.items() if v not in (None, "")])
+    settings_page()
+    await user.open("/settings")
+    user.find(marker="oai-url").type("http://example.com/v1")
+    user.find(marker="settings-save").click()
+    await user.should_see("Adresse du service compatible OpenAI refusée")
+    assert config.env("OAI_BASE_URL") == ""  # jamais enregistrée : la clé et les mails ne partiront pas en clair

@@ -127,10 +127,19 @@ def usd_eur() -> float:
         return 0.92
 
 
-def cost_usd(model: str, tokens_in: int, tokens_out: int) -> float:
+def price_per_million(model: str) -> tuple[float, float]:
+    """($ entrée, $ sortie) par million de jetons. 1min.AI : crédits prépayés, pas de coût en euros à suivre ici (seulement les jetons). Fournisseur compatible OpenAI :
+    tarif d'OpenAI ou celui que vous avez saisi ; un modèle dont on ignore le prix n'est pas chiffré (0)."""
     if model.startswith("1min:"):
-        return 0.0  # crédits prépayés chez 1min.AI : pas de coût en euros à suivre ici (seulement les jetons)
-    pin, pout = PRICES.get(model, (4.0, 20.0))
+        return 0.0, 0.0
+    if model.startswith(config.OAI_PREFIX):
+        from . import oaicompat
+        return oaicompat.price(model[len(config.OAI_PREFIX):]) or (0.0, 0.0)
+    return PRICES.get(model, (4.0, 20.0))
+
+
+def cost_usd(model: str, tokens_in: int, tokens_out: int) -> float:
+    pin, pout = price_per_million(model)
     return (tokens_in * pin + tokens_out * pout) / 1_000_000
 
 

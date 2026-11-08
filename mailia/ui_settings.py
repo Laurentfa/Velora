@@ -8,7 +8,7 @@ from pathlib import Path
 
 from nicegui import run, ui
 
-from mailia import ai, api_ui, apple_writer, dictation, folder_order, gcal, onemin, outgoing, compose, config, db, htmlmail, i18n, logs, notify, perf, queries, settings_ui, sync, wizard
+from mailia import ai, aipolicy, api_ui, apple_writer, dictation, folder_order, gcal, oaicompat, onemin, outgoing, compose, config, db, htmlmail, i18n, logs, notify, perf, queries, settings_ui, sync, wizard
 from mailia.textutil import html_to_text
 
 from mailia.ui_account import delete_account_dialog, friendly_error, open_account
@@ -387,6 +387,10 @@ def _tab_ia(f) -> None:
     ui.input("Clé API 1min.AI", password=True, password_toggle_button=True,
              placeholder=state(bool(config.env("ONEMIN_API_KEY")))).bind_value(f, "ONEMIN_API_KEY").props("outlined dense stack-label").classes("w-full")
     model_selects: list = []
+    oai_selects: list = []
+
+    def known_oai() -> list[str]:
+        return sorted({*oaicompat.known_models(), config.OAI_DEFAULT_MODEL, *(f[f"MODEL2_{t}"] for t in config.TASKS if f[f"MODEL2_{t}"])})
 
     def known_ids() -> list[str]:
         try:
@@ -410,6 +414,33 @@ def _tab_ia(f) -> None:
     ui.label("1min.AI donne aussi accès à Claude et à Gemini (modèles « us.anthropic… », « gemini… »). Les photos et documents numérisés sont "
              "envoyés à 1min.AI (stockage chez eux) pour être lus. La consommation se déduit de vos crédits 1min.AI ; elle n'entre pas dans "
              "le budget en euros ci-dessous. Limite : 60 requêtes par minute.").classes("text-caption text-grey")
+    ui.label("Compatible OpenAI").classes("text-caption q-mt-sm")
+    ui.label("OpenAI, mais aussi Mistral, Azure OpenAI, OpenRouter ou un serveur de votre réseau (Ollama…) : tout service qui parle le format d'OpenAI. "
+             "Laissez l'adresse vide pour OpenAI.").classes("text-caption text-grey")
+    ui.input("Adresse du service", placeholder=config.OAI_DEFAULT_URL).bind_value(f, "OAI_BASE_URL").props("outlined dense stack-label").classes("w-full").mark("oai-url")
+    ui.input("Clé API du service", password=True, password_toggle_button=True,
+             placeholder=state(bool(config.env("OAI_API_KEY")))).bind_value(f, "OAI_API_KEY").props("outlined dense stack-label").classes("w-full").mark("oai-key")
+    with ui.row().classes("w-full items-center no-wrap gap-2"):
+        ui.select({"auto": "Lit les images : automatique", "1": "Lit les images : oui", "0": "Lit les images : non"}).bind_value(f, "OAI_VISION").props(
+            "outlined dense options-dense").classes("col")
+        ui.number("Tarif entrée ($ / million de jetons)", min=0, step=0.1, precision=3).bind_value(f, "OAI_PRICE_IN").props("outlined dense").classes("col")
+        ui.number("Tarif sortie ($ / million)", min=0, step=0.1, precision=3).bind_value(f, "OAI_PRICE_OUT").props("outlined dense").classes("col")
+    ui.label("Tarifs facultatifs : pour OpenAI, ceux du modèle sont connus ; pour un autre service, saisissez les vôtres pour suivre le coût en euros (sinon seuls les jetons sont comptés). "
+             "Un service sans adresse en https:// n'est accepté que sur votre réseau local.").classes("text-caption text-grey")
+
+    async def test_oai() -> None:
+        key, url = (f["OAI_API_KEY"] or "").strip() or config.env("OAI_API_KEY"), (f["OAI_BASE_URL"] or "").strip()
+        ok, msg = await run.io_bound(oaicompat.test, key, url)  # essai avec ce qui est saisi, sans l'enregistrer
+        ui.notify(msg, type="positive" if ok else "negative", multi_line=True)
+        if ok:
+            for s in oai_selects:
+                s.set_options(known_oai())
+    with ui.row().classes("items-center gap-2"):
+        ui.button("Tester et charger les modèles", icon="bolt", on_click=test_oai).props("outline dense no-caps").mark("oai-test")
+        ui.button("Obtenir une clé OpenAI", icon="open_in_new",
+                  on_click=lambda: ui.navigate.to("https://platform.openai.com/api-keys", new_tab=True)).props("flat dense no-caps size=sm")
+    ui.label("Le texte de vos mails est envoyé à ce service : vérifiez ses conditions (confidentialité, lieu d'hébergement, utilisation des données). "
+             "L'abonnement ChatGPT ne donne pas de clé : il faut un compte API (platform.openai.com).").classes("text-caption text-grey")
     ui.switch("Si le fournisseur choisi est en panne ou sans crédit, essayer l'autre").bind_value(f, "AI_FALLBACK")
     ui.select(["neutre", "chaleureux", "très formel", "bref et direct", "ferme"], label="Ton par défaut des brouillons IA",
               value=db.kv_get("ai_tone") or "neutre", on_change=lambda e: db.kv_set("ai_tone", e.value or "neutre")
@@ -423,6 +454,9 @@ def _tab_ia(f) -> None:
             sel = ui.select(known_ids(), label="Modèle 1min.AI", with_input=True, new_value_mode="add-unique").bind_value(
                 f, f"MODEL1_{task}").props("outlined dense options-dense").classes("col")
             model_selects.append(sel)
+            sel2 = ui.select(known_oai(), label="Modèle compatible OpenAI", with_input=True, new_value_mode="add-unique").bind_value(
+                f, f"MODEL2_{task}").props("outlined dense options-dense").classes("col")
+            oai_selects.append(sel2)
     ui.label("Analyse par boîte (uniquement la boîte de réception)").classes("text-caption q-mt-sm")
     ui.label("L'analyse IA se règle boîte par boîte : bouton « Modifier » de la boîte concernée.").classes("text-caption text-grey")
     ui.label("Quels mails analyser automatiquement ?").classes("text-caption q-mt-sm")
@@ -494,7 +528,7 @@ def _tab_prm(f, host) -> None:
 
         async def reanalyze() -> None:
             n = queries.reanalyze_count()
-            pin, pout = (0.0, 0.0) if config.model("ANALYZE").startswith(config.ONEMIN_PREFIX) else ai.PRICES.get(config.model("ANALYZE"), (1.0, 5.0))
+            pin, pout = aipolicy.price_per_million(config.model("ANALYZE"))
             cost = n * (1500 * pin + 150 * pout) / 1_000_000
             with host, ui.dialog() as rd, ui.card().classes("w-[460px] max-w-full"):
                 ui.label(f"Réanalyser {n} mail(s) avec vos consignes enregistrées ?").classes("text-subtitle1")
@@ -908,10 +942,12 @@ def _tab_use(host) -> None:
 def open_settings(host, on_folders) -> None:
     """Dossiers, IA (interrupteur, modèles, limites), clé API et mots de passe : écrits dans le .env de l'utilisateur."""
     cfgs = sync.ACCOUNTS
-    f = {"ANTHROPIC_API_KEY": "", "ONEMIN_API_KEY": "", "AI_ENABLED": config.ai_switch(),
+    f = {"ANTHROPIC_API_KEY": "", "ONEMIN_API_KEY": "", "OAI_API_KEY": "", "OAI_BASE_URL": config.env("OAI_BASE_URL"), "OAI_VISION": oaicompat.vision_setting(),
+         "OAI_PRICE_IN": float(config.env("OAI_PRICE_IN") or 0), "OAI_PRICE_OUT": float(config.env("OAI_PRICE_OUT") or 0), "AI_ENABLED": config.ai_switch(),
          "AI_PROVIDER": config.ai_provider(), "AI_FALLBACK": (db.kv_get("ai_fallback") or "1") == "1",
          **{f"MODEL_{t}": config.model(t, "anthropic") for t in config.TASKS},
          **{f"MODEL1_{t}": config.model(t, "onemin")[len(config.ONEMIN_PREFIX):] for t in config.TASKS},
+         **{f"MODEL2_{t}": config.model(t, "openai")[len(config.OAI_PREFIX):] for t in config.TASKS},
          **{f"PROVIDER_{t}": (config.env(f"PROVIDER_{t}") if config.env(f"PROVIDER_{t}") in config.PROVIDERS else "default") for t in config.TASKS},
          "AI_UNREAD_ONLY": config.ai_unread_only(), "AI_MAX_AGE_DAYS": config.ai_max_age_days(), "AI_BODY_LIMIT": config.ai_body_limit(),
          "CONVERSATIONS": config.conversations_enabled(), "SIG_ON": compose.signature_on(), "SIG_HTML": compose.signature_html(),
@@ -986,8 +1022,16 @@ def open_settings(host, on_folders) -> None:
 
         def save() -> None:
             db.kv_set("ai_fallback", "1" if f["AI_FALLBACK"] else "0")
-            config.write_env({**{k: v for k, v in f.items() if k in ("ANTHROPIC_API_KEY", "ONEMIN_API_KEY", "AI_PROVIDER")
-                                 or k.startswith(("MODEL_", "MODEL1_", "PROVIDER_"))},
+            url = (f["OAI_BASE_URL"] or "").strip().rstrip("/")
+            if url and not config.oai_url_ok(url):
+                ui.notify("Adresse du service compatible OpenAI refusée : https://… (ou http:// vers votre réseau local seulement). Elle n'est pas enregistrée.", type="warning", multi_line=True)
+                url = config.env("OAI_BASE_URL")
+            if not url and config.env("OAI_BASE_URL"):
+                config.forget_env("OAI_BASE_URL")  # champ vidé : retour à OpenAI
+            config.write_env({**{k: v for k, v in f.items() if k in ("ANTHROPIC_API_KEY", "ONEMIN_API_KEY", "OAI_API_KEY", "AI_PROVIDER")
+                                 or k.startswith(("MODEL_", "MODEL1_", "MODEL2_", "PROVIDER_"))},
+                              "OAI_BASE_URL": url, "OAI_VISION": f["OAI_VISION"] if f["OAI_VISION"] in ("auto", "1", "0") else "auto",
+                              "OAI_PRICE_IN": str(max(0.0, float(f["OAI_PRICE_IN"] or 0))), "OAI_PRICE_OUT": str(max(0.0, float(f["OAI_PRICE_OUT"] or 0))),
                               "AI_ENABLED": "1" if f["AI_ENABLED"] else "0",
                               "AI_UNREAD_ONLY": "1" if f["AI_UNREAD_ONLY"] else "0",
                               "AI_MAX_AGE_DAYS": str(int(f["AI_MAX_AGE_DAYS"] or 0)),

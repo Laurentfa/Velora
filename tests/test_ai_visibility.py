@@ -55,8 +55,8 @@ async def test_settings_explain_why_ai_is_hidden(user: User, monkeypatch) -> Non
 
     @ui.page("/ia")
     def page():
-        f = {"AI_ENABLED": True, "AI_PROVIDER": "anthropic", "ANTHROPIC_API_KEY": "", "ONEMIN_API_KEY": "", "AI_FALLBACK": True, "AI_UNREAD_ONLY": True,
-             "AI_MAX_AGE_DAYS": 30, **{f"MODEL_{t}": "claude-haiku-4-5" for t in config.TASKS}, **{f"MODEL1_{t}": "" for t in config.TASKS},
+        f = {"AI_ENABLED": True, "AI_PROVIDER": "anthropic", "ANTHROPIC_API_KEY": "", "ONEMIN_API_KEY": "", "OAI_API_KEY": "", "OAI_BASE_URL": "", "OAI_VISION": "auto", "OAI_PRICE_IN": 0, "OAI_PRICE_OUT": 0, "AI_FALLBACK": True, "AI_UNREAD_ONLY": True,
+             "AI_MAX_AGE_DAYS": 30, **{f"MODEL_{t}": "claude-haiku-4-5" for t in config.TASKS}, **{f"MODEL1_{t}": "" for t in config.TASKS}, **{f"MODEL2_{t}": "" for t in config.TASKS},
              **{f"PROVIDER_{t}": "default" for t in config.TASKS}}
         _tab_ia(f)
         _tab_prm(f, ui.row())

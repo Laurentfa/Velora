@@ -40,15 +40,22 @@ def _task_of(model: str) -> str | None:
     return next((t for t in config.TASKS if config.model(t) == model), None)
 
 
+def _provider_of(model: str) -> str:
+    return "onemin" if model.startswith(config.ONEMIN_PREFIX) else "openai" if model.startswith(config.OAI_PREFIX) else "anthropic"
+
+
 def _alternative(model: str) -> str | None:
-    """Modèle de l'autre fournisseur pour la même tâche, si le repli est activé et que sa clé existe."""
+    """Modèle d'un autre fournisseur pour la même tâche, si le repli est activé et que sa clé existe (Claude d'abord, puis 1min.AI, puis le fournisseur compatible OpenAI)."""
     if (db.kv_get("ai_fallback") or "1") != "1":
         return None
-    other = "anthropic" if model.startswith(config.ONEMIN_PREFIX) else "onemin"
-    if not config.provider_ready(other):
+    cur = _provider_of(model)
+    other = next((p for p in ("anthropic", "onemin", "openai") if p != cur and config.provider_ready(p)), None)
+    if not other:
         return None
     task = _task_of(model)
-    return config.model(task, other) if task else (config.ONEMIN_PREFIX + config.ONEMIN_DEFAULT_MODEL if other == "onemin" else "claude-haiku-4-5")
+    if task:
+        return config.model(task, other)
+    return {"onemin": config.ONEMIN_PREFIX + config.ONEMIN_DEFAULT_MODEL, "openai": config.OAI_PREFIX + config.OAI_DEFAULT_MODEL}.get(other, "claude-haiku-4-5")
 
 
 def _ask(system: str, user: str, *, model: str, max_tokens: int = 1500, effort: str = "low", images: list[bytes] | None = None, feature: str = "") -> str:
@@ -76,6 +83,17 @@ def _ask(system: str, user: str, *, model: str, max_tokens: int = 1500, effort: 
 
 
 def _run(model: str, system: str, user: str, max_tokens: int, effort: str, images: list[bytes] | None, feature: str) -> str:
+    if model.startswith(config.OAI_PREFIX):
+        from . import oaicompat
+        if not config.provider_ready("openai"):
+            raise AIError("Fournisseur compatible OpenAI non réglé : clé ou adresse absente (Paramètres › Intelligence artificielle).", fallback=True)
+        aipolicy.check_budget()
+        text, tin, tout = oaicompat.chat_full(model[len(config.OAI_PREFIX):], system, user, max_tokens, images)
+        try:
+            db.record_usage(model, tin, tout, feature)
+        except Exception:
+            logging.getLogger("ai").warning("mesure de la consommation impossible", exc_info=True)
+        return text
     if model.startswith(config.ONEMIN_PREFIX):
         from . import onemin
         if not config.provider_ready("onemin"):
