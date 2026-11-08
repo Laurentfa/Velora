@@ -271,3 +271,86 @@ def test_fetch_latest_keeps_the_api_addresses_as_a_fallback(configured, monkeypa
     fake_net(monkeypatch, {"https://api.github.com/repos/moi/velora/releases/latest": rel})
     info = updater.fetch_latest()
     assert info["url"] == "d/exe" and info["api_url"] == "api/exe" and info["sig_url"] == "d/sig2" and info["sig_api_url"] == "api/sig2"
+
+
+MIRROR = "https://miroir.exemple.fr/velora"
+
+
+@pytest.fixture
+def hook(monkeypatch):
+    """Un module qui ajoute une source de mise à jour (miroir privé) : ce que fait le module « Miroir » sans que le code public en sache rien."""
+    state = {"latest": None, "boom": False}
+
+    def latest(suffix):
+        if state["boom"]:
+            raise RuntimeError("module en panne")
+        return state["latest"]
+
+    def sources(info, kind):
+        if state["boom"]:
+            raise RuntimeError("module en panne")
+        name = info["name"] + (".sig2" if kind == "sig" else "")
+        return [(f"{MIRROR}/{info['version']}/{name}", False), ("http://pas-https.exemple.fr/x", False)]
+    monkeypatch.setitem(updater.hooks, "miroir", {"latest": latest, "sources": sources})
+    return state
+
+
+def test_a_module_can_announce_the_latest_version_when_github_does_not_answer(configured, hook, monkeypatch):
+    import urllib.error
+    monkeypatch.setattr(sys, "platform", "win32")
+    hook["latest"] = {"version": "1.1.0", "name": "Velora-1.1.0-setup.exe", "url": MIRROR + "/1.1.0/Velora-1.1.0-setup.exe", "sig_url": MIRROR + "/1.1.0/Velora-1.1.0-setup.exe.sig2"}
+
+    def get(url, timeout=15, octet=False):
+        raise urllib.error.HTTPError(url, 504, "Gateway Time-out", {}, None)
+    monkeypatch.setattr(updater, "_get", get)
+    info = updater.fetch_latest()
+    assert info["version"] == "1.1.0" and info["url"].startswith(MIRROR) and info["api_url"] == ""
+    hook["latest"] = {"version": "1.0.0", "name": "Velora-1.0.0-setup.exe", "url": "u", "sig_url": "s"}  # pas plus récent : rien
+    with pytest.raises(urllib.error.HTTPError):
+        updater.fetch_latest()
+    hook["boom"] = True  # module en panne : l'erreur de GitHub remonte comme avant
+    with pytest.raises(urllib.error.HTTPError):
+        updater.fetch_latest()
+    monkeypatch.setitem(updater.hooks, "miroir", {})
+    with pytest.raises(urllib.error.HTTPError):
+        updater.fetch_latest()
+
+
+def test_when_github_answers_a_module_is_not_asked_for_the_version(configured, hook, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    hook["latest"] = {"version": "9.9.9", "name": "Velora-9.9.9-mac.zip", "url": MIRROR + "/9.9.9/f", "sig_url": MIRROR + "/9.9.9/f.sig2"}
+    fake_net(monkeypatch, {"https://api.github.com/repos/moi/velora/releases/latest": release()})
+    assert updater.fetch_latest()["version"] == "1.1.0"  # la version de GitHub, jamais celle d'un module
+
+
+def test_download_falls_back_to_a_module_source_and_still_checks_the_signature(configured, hook, monkeypatch, tmp_path):
+    import urllib.error
+    data = b"installateur"
+    info = {"version": "1.1.0", "name": "Velora-1.1.0-setup.exe", "url": "https://github.com/x/f", "sig_url": "https://github.com/x/f.sig2", "api_url": "https://api.github.com/a/1",
+            "sig_api_url": "https://api.github.com/a/2"}
+    served = {"data": data}
+    asked = []
+
+    def get(url, timeout=15, octet=False):
+        asked.append(url)
+        if "github.com" in url:
+            raise urllib.error.HTTPError(url, 504, "Gateway Time-out", {}, None)  # tout GitHub en panne
+        return Resp(served["data"] if url.endswith(".exe") else sig2(data, "1.1.0", "Velora-1.1.0-setup.exe").encode())
+    monkeypatch.setattr(updater, "_get", get)
+    monkeypatch.setattr(updater.time, "sleep", lambda s: None)
+    assert updater.download(info, tmp_path).read_bytes() == data
+    assert not any(u.startswith("http://") for u in asked)  # une adresse en clair proposée par un module n'est jamais utilisée
+    served["data"] = b"fichier piege depose sur le miroir"  # un miroir piraté ne peut rien faire installer
+    with pytest.raises(RuntimeError):
+        updater.download(info, tmp_path)
+    assert not list(tmp_path.glob("*.exe"))
+    hook["boom"] = True  # module en panne : l'échec reste celui de GitHub, clair
+    with pytest.raises(RuntimeError, match="GitHub ne répond pas"):
+        updater.download(info, tmp_path)
+
+
+def test_unloading_a_module_removes_its_update_source(monkeypatch):
+    from mailia import modules
+    monkeypatch.setitem(updater.hooks, "miroir", {"sources": lambda i, k: []})
+    modules.unload("miroir")
+    assert "miroir" not in updater.hooks

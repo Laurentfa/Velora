@@ -288,6 +288,8 @@ def unload(mid: str) -> None:
     for name in [n for n, it in services.items() if it["module"] == mid]:
         services.pop(name, None)
     status.pop(mid, None)
+    from mailia import updater
+    updater.hooks.pop(mid, None)  # une source de mise à jour ajoutée par ce module
 
 
 def _load(info: dict) -> None:

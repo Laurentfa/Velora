@@ -83,12 +83,43 @@ def friendly_error(e: BaseException) -> str:
     return f"Connexion à GitHub impossible ({type(e).__name__}) : vérifiez votre connexion, puis réessayez."
 
 
-def _sources(info: dict, key: str, api_key: str) -> list[tuple[str, bool]]:
-    """Où télécharger un fichier : l'adresse directe, puis (si l'adresse directe est en panne) l'adresse de l'API de GitHub. Chacune est tentée deux fois."""
+# Points d'extension pour un module (voir modules.py) : source de téléchargement supplémentaire, par exemple un miroir privé. Rien de ce qu'un module annonce n'est cru :
+# chaque fichier reste vérifié par sa signature (liée à la version et au nom du fichier) avant d'être installé.
+#   hooks[id_du_module] = {"latest": fn(suffix) -> info | None,        # quand GitHub ne répond pas du tout : la dernière version, même forme que fetch_latest()
+#                          "sources": fn(info, kind) -> [(url, octet)]}  # kind : "file" ou "sig" ; adresses essayées après celles de GitHub
+hooks: dict[str, dict] = {}
+
+
+def _hook_sources(info: dict, kind: str) -> list[tuple[str, bool]]:
+    out: list[tuple[str, bool]] = []
+    for mid, h in list(hooks.items()):
+        try:
+            for url, octet in (h.get("sources") or (lambda *_: []))(info, kind):
+                if isinstance(url, str) and url.startswith("https://"):  # jamais d'adresse en clair
+                    out += [(url, bool(octet))] * 2
+        except Exception:  # noqa: BLE001 — un module en panne ne doit pas empêcher la mise à jour
+            log.warning("source de téléchargement du module %s en erreur", mid, exc_info=True)
+    return out
+
+
+def _hook_latest(suffix: str) -> dict | None:
+    for mid, h in list(hooks.items()):
+        try:
+            found = (h.get("latest") or (lambda *_: None))(suffix)
+        except Exception:  # noqa: BLE001
+            log.warning("recherche de version du module %s en erreur", mid, exc_info=True)
+            continue
+        if isinstance(found, dict) and found.get("version") and is_newer(str(found["version"])) and found.get("name") and found.get("url") and found.get("sig_url"):
+            return {"api_url": "", "sig_api_url": "", "notes": "", **found}
+    return None
+
+
+def _sources(info: dict, key: str, api_key: str, kind: str = "file") -> list[tuple[str, bool]]:
+    """Où télécharger un fichier : l'adresse directe, puis (si elle est en panne) l'adresse de l'API de GitHub, puis les sources ajoutées par un module. Chacune est tentée deux fois."""
     out = [(info[key], False)] * 2
     if info.get(api_key):
         out += [(info[api_key], True)] * 2
-    return out
+    return out + _hook_sources(info, kind)
 
 
 def _try_each(sources: list[tuple[str, bool]], work, pause: float = 1.5):
@@ -110,8 +141,15 @@ def fetch_latest() -> dict | None:
     suffix = ASSET_SUFFIX.get(sys.platform)
     if not (available() and suffix):
         return None
-    with _get(f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest") as r:
-        rel = json.load(r)
+    try:
+        with _get(f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest") as r:
+            rel = json.load(r)
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError) as e:  # GitHub injoignable : un module (miroir) peut dire s'il y a mieux
+        log.warning("GitHub ne répond pas (%s)", type(e).__name__)
+        found = _hook_latest(suffix)
+        if found:
+            return found
+        raise
     if rel.get("draft") or rel.get("prerelease") or not is_newer(rel.get("tag_name") or ""):
         return None
     assets = {a["name"]: a["browser_download_url"] for a in rel.get("assets") or []}
@@ -175,8 +213,8 @@ def download(info: dict, dest: Path | None = None) -> Path:
             return r.read().decode()
 
     try:
-        digest = _try_each(_sources(info, "url", "api_url"), fetch)
-        sig = _try_each(_sources(info, "sig_url", "sig_api_url"), fetch_sig)
+        digest = _try_each(_sources(info, "url", "api_url", "file"), fetch)
+        sig = _try_each(_sources(info, "sig_url", "sig_api_url", "sig"), fetch_sig)
     except (urllib.error.URLError, OSError, TimeoutError) as e:
         dest.unlink(missing_ok=True)
         raise RuntimeError(friendly_error(e)) from e
