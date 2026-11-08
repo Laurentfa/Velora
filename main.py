@@ -392,8 +392,6 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
             item("tasks", "", "☑", "Tâches", c.get("tasks", 0))
             if self.srules_accounts():
                 item("srules", "", "▽", "Règles de tri", 0)
-            for vid, v in modules.views.items():  # vues ajoutées par les modules personnels
-                item(vid, "", v["icon"], v["title"], 0)
             if c.get("snoozed") or self.view == "snoozed":
                 item("snoozed", "", "⏳", "Reportés", c.get("snoozed", 0))
             if c.get("followups") or self.view == "followups":
@@ -411,6 +409,10 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
             if use_ai:
                 item("newsletter", "", "☰", "Newsletters", c["newsletter"], total=c["tot_newsletter"])
                 item("notification", "", "ⓘ", "Notifications", c["notification"], total=c["tot_notification"])
+            if modules.views:  # pages ajoutées par les modules personnels : une section à part, qui n'existe que s'il y a au moins un module
+                ui.label("Modules").classes("grp").mark("modules-section")
+                for vid, v in modules.views.items():
+                    item(vid, "", v["icon"], v["title"], 0)
             saved = self.saved_searches()
             if saved:
                 ui.label("Recherches").classes("grp")
@@ -462,11 +464,13 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
 
             async def health_tick() -> None:
                 await run.io_bound(health.refresh)
+                snap = await run.io_bound(fleet.snapshot) or []
+                if hb.is_deleted or credits.is_deleted:  # la colonne a été redessinée pendant l'attente : ces éléments n'existent plus, le minuteur du nouveau dessin prend le relais
+                    return
                 found = health.problems()
                 hb.set_visibility(bool(found))
                 htip.set_text("\n".join(found))
                 htip.style("white-space:pre-line;max-width:360px")
-                snap = await run.io_bound(fleet.snapshot) or []
                 text = ui_fleet.summary_text(snap)
                 credits.set_text(text)
                 credits.set_visibility(bool(text))

@@ -122,3 +122,16 @@ async def test_credits_counter_shows_every_computer_and_opens_the_detail(user: U
     await user.should_see("Crédits 1min.AI par ordinateur")
     await user.should_see("PC Windows · pc")
     await user.should_see("en retard")
+
+
+async def test_module_pages_have_their_own_section_only_when_there_are_modules(user: User, monkeypatch, clean_db) -> None:
+    from nicegui import ui
+    monkeypatch.setattr(sync, "run_cycle", lambda: None)
+    monkeypatch.setattr(app_main.modules, "views", {})
+    ui.page("/")(app_main.index_page)
+    await user.open("/")
+    await user.should_not_see("Modules")  # aucun module : pas de section
+    monkeypatch.setattr(app_main.modules, "views", {"mod_x_v": {"title": "Ma page de module", "icon": "⚕"}})
+    await user.open("/")
+    await user.should_see("Ma page de module")
+    assert user.find(marker="modules-section").elements

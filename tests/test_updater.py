@@ -212,6 +212,7 @@ def test_windows_update_runs_a_script_that_installs_then_relaunches(configured, 
     text = (tmp_path / "maj.bat").read_text(encoding="cp1252")
     assert text.index("tasklist") < text.index("/VERYSILENT") < text.index('start "" "%~3"')  # attendre, installer jusqu'au bout, relancer
     assert "start /wait" in text and "/CLOSEAPPLICATIONS" in text
+    assert text.index("tasklist") < text.index("taskkill /F /IM") < text.index("/VERYSILENT")  # les processus Velora restants sont fermés avant l'installation (le relais de Chrome la bloquait)
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="script POSIX")

@@ -49,6 +49,9 @@ if not errorlevel 1 (
   ping -n 2 127.0.0.1 >nul
   goto wait
 )
+rem les autres processus Velora (fenetre native, relais lance par Chrome pour l'extension) gardent des fichiers ouverts : l'installateur silencieux abandonnerait (code 5)
+taskkill /F /IM "%~nx3" >nul 2>&1
+echo %date% %time% mise a jour : processus Velora restants fermes>> "%LOG%"
 start /wait "" "%~2" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS
 echo %date% %time% mise a jour : installateur termine (code %errorlevel%)>> "%LOG%"
 start "" "%~3"
