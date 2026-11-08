@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from mailia import aishare, config, db, settingsync, sync
+from mailia import aipolicy, aishare, config, db, settingsync, sync
 
 A_NOW = "2026-11-08T07:00:00Z"
 
@@ -207,3 +207,76 @@ async def test_the_settings_page_explains_the_feature_and_offers_a_choice_on_con
     await user.should_see(marker="ssync-switch")
     await user.should_see(marker="ssync-conflict-prompt:analyze")
     await user.should_see("Activé par défaut")
+
+
+def message(mid, sender, category="newsletter"):
+    from conftest import add_message
+    add_message(mid, sender=sender, category=category, priority=2, needs_reply=1, ai_at="2026-11-08T07:00:00+00:00", summary="x")
+
+
+def row_of(mid):
+    with db.conn() as c:
+        return dict(c.execute("SELECT category, needs_reply, priority FROM messages WHERE id=?", (mid,)).fetchone())
+
+
+def test_a_category_correction_follows_the_user_to_the_other_computer(world) -> None:
+    """« Toujours classer ainsi les mails de … » : refait sur un ordinateur, appliqué sur l'autre (mails déjà reçus compris)."""
+    world.on("B", lambda: message("testbox|INBOX|1", "aldo.blaret@gestis.net"))
+    world.set("A", "sender_cat:aldo.blaret@gestis.net", "info")
+    assert world.on("A")["pushed"] == ["sender_cat:aldo.blaret@gestis.net"]
+    res = world.on("B")
+    assert res["pulled"] == ["sender_cat:aldo.blaret@gestis.net"]
+    assert world.get("B", "sender_cat:aldo.blaret@gestis.net") == "info"
+    assert world.on("B", lambda: row_of("testbox|INBOX|1"))["category"] == "info"  # le mail déjà reçu est reclassé
+    assert world.on("B") == {"pulled": [], "pushed": [], "conflicts": []}  # et ça ne repart pas dans l'autre sens
+
+
+def test_a_domain_correction_reclassifies_every_mail_of_that_domain(world) -> None:
+    world.on("B", lambda: (message("testbox|INBOX|1", "a@promo.exemple.fr"), message("testbox|INBOX|2", "b@promo.exemple.fr"), message("testbox|INBOX|3", "c@ailleurs.fr")))
+    world.set("A", "domain_cat:promo.exemple.fr", "newsletter")
+    world.on("A"); world.on("B")
+    got = world.on("B", lambda: [row_of(f"testbox|INBOX|{i}")["category"] for i in (1, 2, 3)])
+    assert got == ["newsletter", "newsletter", "newsletter"]  # les trois étaient déjà « newsletter » : on vérifie surtout l'inverse ci-dessous
+    world.on("B", lambda: (message("testbox|INBOX|4", "d@promo.exemple.fr", "action"), message("testbox|INBOX|5", "e@ailleurs.fr", "action")))
+    world.set("A", "domain_cat:promo.exemple.fr", "notification")
+    world.on("A"); world.on("B")
+    assert world.on("B", lambda: [row_of(f"testbox|INBOX|{i}")["category"] for i in (4, 5)]) == ["notification", "action"]  # seul ce domaine est touché
+
+
+def test_a_correction_forgotten_on_one_computer_is_forgotten_on_the_others(world) -> None:
+    world.set("A", "sender_cat:x@exemple.fr", "info")
+    world.on("A"); world.on("B")
+    assert world.get("B", "sender_cat:x@exemple.fr") == "info"
+    world.on("A", lambda: aipolicy.forget("adresse", "x@exemple.fr"))  # « Oublier » dans Paramètres › Automatismes
+    db_deleted = world.on("A", lambda: db.kv_get("sender_cat:x@exemple.fr"))
+    assert not db_deleted
+    assert world.on("A")["pushed"] == ["sender_cat:x@exemple.fr"]
+    assert world.on("B")["pulled"] == ["sender_cat:x@exemple.fr"]
+    assert not world.get("B", "sender_cat:x@exemple.fr")
+    assert world.on("B") == {"pulled": [], "pushed": [], "conflicts": []}
+
+
+def test_only_valid_corrections_are_accepted_from_the_mailbox(world) -> None:
+    raw = json.dumps({"v": 1, "keys": {"sender_cat:ok@exemple.fr": {"v": "info", "t": "t"}, "sender_cat:mauvais@exemple.fr": {"v": "n'importe quoi", "t": "t"},
+                                       "ONEMIN_API_KEY": {"v": "SECRET", "t": "t"}, "sender_cat:": {"v": "info", "t": "t"}, "autre:x": {"v": "info", "t": "t"}}})
+    assert set(settingsync.decode(raw)) == {"sender_cat:ok@exemple.fr"}  # catégorie inconnue, clé secrète, clé mal formée, autre préfixe : refusés
+    big = json.dumps({"v": 1, "keys": {f"sender_cat:u{i}@exemple.fr": {"v": "info", "t": "t"} for i in range(settingsync.MAX_DYNAMIC + 500)}})
+    assert len(settingsync.decode(big)) <= settingsync.MAX_DYNAMIC + len(settingsync.KEYS)
+
+
+def test_two_different_classifications_of_the_same_sender_do_not_block_anything(world) -> None:
+    world.set("A", "sender_cat:y@exemple.fr", "info")
+    world.on("A")
+    world.set("B", "sender_cat:y@exemple.fr", "action")  # B avait déjà son propre classement
+    res = world.on("B")
+    assert res["conflicts"] == [] and res["pushed"] == ["sender_cat:y@exemple.fr"]  # une simple préférence de tri : pas de question posée
+    world.on("A")
+    assert world.get("A", "sender_cat:y@exemple.fr") == world.get("B", "sender_cat:y@exemple.fr") == "action"
+
+
+def test_backups_carry_the_category_corrections_too(clean_db) -> None:
+    from mailia import backup
+    db.kv_set("sender_cat:z@exemple.fr", "info")
+    db.kv_set("domain_cat:exemple.fr", "newsletter")
+    kv = backup.export_data()["kv"]
+    assert kv["sender_cat:z@exemple.fr"] == "info" and kv["domain_cat:exemple.fr"] == "newsletter"

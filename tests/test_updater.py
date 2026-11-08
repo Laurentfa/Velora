@@ -41,7 +41,7 @@ class Resp(io.BytesIO):
 
 
 def fake_net(monkeypatch, files: dict):
-    monkeypatch.setattr(updater, "_get", lambda url, timeout=15: Resp(files[url]))
+    monkeypatch.setattr(updater, "_get", lambda url, timeout=15, octet=False: Resp(files[url]))
 
 
 def test_versions():
@@ -223,3 +223,51 @@ def test_swap_logs_what_it_did(tmp_path):
     subprocess.run(["/bin/sh", str(script), str(2 ** 22 + 1), str(new), str(dst), "true", str(log)], check=True, timeout=20)
     text = log.read_text(encoding="utf-8")
     assert "application remplacée" in text and "relance demandée" in text
+
+
+
+def test_a_504_from_the_direct_download_falls_back_to_the_github_api(configured, monkeypatch, tmp_path):
+    """Régression vue sur un PC : « HTTP Error 504: Gateway Time-out » sur l'adresse de téléchargement directe de GitHub empêchait toute mise à jour."""
+    import urllib.error
+    data = b"installateur"
+    info = {"version": "1.1.0", "name": "Velora-1.1.0-setup.exe", "url": "https://github.com/x/releases/download/v1.1.0/f", "sig_url": "https://github.com/x/releases/download/v1.1.0/f.sig2",
+            "api_url": "https://api.github.com/x/assets/1", "sig_api_url": "https://api.github.com/x/assets/2"}
+    files = {info["api_url"]: data, info["sig_api_url"]: sig2(data, "1.1.0", "Velora-1.1.0-setup.exe").encode()}
+    calls = []
+
+    def get(url, timeout=15, octet=False):
+        calls.append((url, octet))
+        if "github.com/x/releases/download" in url:
+            raise urllib.error.HTTPError(url, 504, "Gateway Time-out", {}, None)
+        return Resp(files[url])
+    monkeypatch.setattr(updater, "_get", get)
+    monkeypatch.setattr(updater.time, "sleep", lambda s: None)
+    assert updater.download(info, tmp_path).read_bytes() == data
+    assert [c for c in calls if c[0] == info["url"]] and (info["api_url"], True) in calls  # le direct a été tenté (deux fois), puis l'API (avec l'en-tête « octet-stream »)
+    assert len([c for c in calls if c[0] == info["url"]]) == 2
+
+
+def test_when_github_is_down_everywhere_the_message_is_clear_and_nothing_is_left(configured, monkeypatch, tmp_path):
+    import urllib.error
+    info = {"version": "1.1.0", "name": "Velora-1.1.0-setup.exe", "url": "u/f", "sig_url": "u/f.sig2", "api_url": "api/f", "sig_api_url": "api/f.sig2"}
+
+    def down(url, timeout=15, octet=False):
+        raise urllib.error.HTTPError(url, 504, "Gateway Time-out", {}, None)
+    monkeypatch.setattr(updater, "_get", down)
+    monkeypatch.setattr(updater.time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError) as e:
+        updater.download(info, tmp_path)
+    assert "GitHub ne répond pas" in str(e.value) and "504" in str(e.value) and "pas un problème de votre ordinateur" in str(e.value)
+    assert not list(tmp_path.glob("*.exe"))
+    assert "Connexion à GitHub impossible" in updater.friendly_error(urllib.error.URLError("pas de réseau"))
+    assert "refusé le téléchargement (erreur 404)" in updater.friendly_error(urllib.error.HTTPError("u", 404, "x", {}, None))
+
+
+def test_fetch_latest_keeps_the_api_addresses_as_a_fallback(configured, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    rel = json.dumps({"tag_name": "v1.1.0", "body": "", "assets": [
+        {"name": "Velora-1.1.0-setup.exe", "browser_download_url": "d/exe", "url": "api/exe"},
+        {"name": "Velora-1.1.0-setup.exe.sig2", "browser_download_url": "d/sig2", "url": "api/sig2"}]}).encode()
+    fake_net(monkeypatch, {"https://api.github.com/repos/moi/velora/releases/latest": rel})
+    info = updater.fetch_latest()
+    assert info["url"] == "d/exe" and info["api_url"] == "api/exe" and info["sig_url"] == "d/sig2" and info["sig_api_url"] == "api/sig2"

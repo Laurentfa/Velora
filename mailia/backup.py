@@ -15,7 +15,7 @@ from . import config, db, modules
 KV_PREFIXES = ("prompt:", "signature", "undo_delay", "ai_tone", "notify_urgent", "quick_replies", "ai_intents", "trusted_senders",
                "side_", "cols", "list_sort", "server_search", "folder_order:", "folder_fold", "archive:", "theme", "default_account", "user_name", "phish_safe",
                "ai_fallback", "ai_exclude", "ai_budget_", "onemin_allowance", "onemin_daily_cap", "apple_writer", "brief_off", "list_density", "update_auto",
-               "vip_senders", "safe_senders", "drafts_auto:", "modules_repo", "module:", "weather_on", "weather_place", "feed_on", "feed_url", "ai_share:")
+               "vip_senders", "safe_senders", "sender_cat:", "domain_cat:", "drafts_auto:", "modules_repo", "module:", "weather_on", "weather_place", "feed_on", "feed_url", "ai_share:")
 SECRET = re.compile(r"(pass|pwd|secret|token|api_?key)", re.I)  # jamais dans le fichier, quelle que soit la clé
 SKIP_SUFFIX = (":src",)  # dossier d'origine d'un module sur l'autre machine : n'a aucun sens ici
 # Réglages d'une boîte repris d'un fichier : une liste fermée. Surtout pas « tls_insecure » (un fichier ne doit pas pouvoir désactiver la vérification des certificats), ni

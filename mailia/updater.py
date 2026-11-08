@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -67,8 +68,41 @@ def is_newer(candidate: str, current: str | None = None) -> bool:
     return parse(candidate) > parse(current or APP_VERSION)
 
 
-def _get(url: str, timeout: int = 15):
-    return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": f"Velora/{APP_VERSION}", "Accept": "application/vnd.github+json"}), timeout=timeout, context=tlsutil.context())
+def _get(url: str, timeout: int = 15, octet: bool = False):
+    """`octet` : adresse de l'API GitHub d'un fichier de version (elle renvoie le fichier lui-même, avec cet en-tête)."""
+    accept = "application/octet-stream" if octet else "application/vnd.github+json"
+    return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": f"Velora/{APP_VERSION}", "Accept": accept}), timeout=timeout, context=tlsutil.context())
+
+
+def friendly_error(e: BaseException) -> str:
+    """Ce que voit l'utilisateur quand le téléchargement échoue : GitHub répond parfois « 504 » sur ses adresses de téléchargement, ce n'est pas un problème de l'ordinateur."""
+    if isinstance(e, urllib.error.HTTPError) and (e.code >= 500 or e.code == 429):
+        return f"GitHub ne répond pas pour le moment (erreur {e.code}). Ce n'est pas un problème de votre ordinateur : réessayez dans quelques minutes."
+    if isinstance(e, urllib.error.HTTPError):
+        return f"GitHub a refusé le téléchargement (erreur {e.code})."
+    return f"Connexion à GitHub impossible ({type(e).__name__}) : vérifiez votre connexion, puis réessayez."
+
+
+def _sources(info: dict, key: str, api_key: str) -> list[tuple[str, bool]]:
+    """Où télécharger un fichier : l'adresse directe, puis (si l'adresse directe est en panne) l'adresse de l'API de GitHub. Chacune est tentée deux fois."""
+    out = [(info[key], False)] * 2
+    if info.get(api_key):
+        out += [(info[api_key], True)] * 2
+    return out
+
+
+def _try_each(sources: list[tuple[str, bool]], work, pause: float = 1.5):
+    """Exécute `work(url, octet)` sur chaque source jusqu'à la première qui marche. Lève la dernière erreur (réseau ou HTTP) si aucune ne marche."""
+    last: BaseException | None = None
+    for n, (url, octet) in enumerate(sources):
+        try:
+            return work(url, octet)
+        except (urllib.error.URLError, OSError, TimeoutError) as e:  # HTTPError en fait partie
+            last = e
+            log.warning("téléchargement de la mise à jour : %s (%s)", type(e).__name__, getattr(e, "code", "") or str(e)[:80])
+            if n < len(sources) - 1:
+                time.sleep(pause * (1 + n % 2))
+    raise last or RuntimeError("aucune adresse de téléchargement")
 
 
 def fetch_latest() -> dict | None:
@@ -81,12 +115,13 @@ def fetch_latest() -> dict | None:
     if rel.get("draft") or rel.get("prerelease") or not is_newer(rel.get("tag_name") or ""):
         return None
     assets = {a["name"]: a["browser_download_url"] for a in rel.get("assets") or []}
+    api_assets = {a["name"]: a["url"] for a in rel.get("assets") or [] if a.get("url")}  # adresses de l'API : repli quand le téléchargement direct est en panne
     name = next((n for n in assets if n.endswith(suffix)), None)
     if not name or name + ".sig2" not in assets:  # signature liée à la version obligatoire (une version publiée sans elle n'est pas proposée)
         log.warning("version %s ignorée : signature liée à la version absente", rel.get("tag_name"))
         return None
     return {"version": ".".join(map(str, parse(rel["tag_name"]))), "notes": (rel.get("body") or "").strip()[:1500],
-            "name": name, "url": assets[name], "sig_url": assets[name + ".sig2"]}
+            "name": name, "url": assets[name], "sig_url": assets[name + ".sig2"], "api_url": api_assets.get(name, ""), "sig_api_url": api_assets.get(name + ".sig2", "")}
 
 
 def check(force: bool = False) -> dict | None:
@@ -126,14 +161,26 @@ def verify_release(version: str, name: str, digest_hex: str, signature_b64: str)
 def download(info: dict, dest: Path | None = None) -> Path:
     """Télécharge puis vérifie la signature (liée à la version et au nom du fichier) ; lève RuntimeError si elle ne correspond pas (le fichier est alors supprimé)."""
     dest = (dest or Path(tempfile.mkdtemp(prefix="velora-maj-"))) / info["name"]
-    h = hashlib.sha256()
-    with _get(info["url"], timeout=60) as r, open(dest, "wb") as f:
-        while chunk := r.read(1 << 20):
-            f.write(chunk)
-            h.update(chunk)
-    with _get(info["sig_url"]) as r:
-        sig = r.read().decode()
-    if not (is_newer(info["version"]) and verify_release(info["version"], info["name"], h.hexdigest(), sig)):  # jamais une version qui n'est pas plus récente que celle-ci
+
+    def fetch(url: str, octet: bool) -> str:
+        h = hashlib.sha256()
+        with _get(url, 60, octet) as r, open(dest, "wb") as f:
+            while chunk := r.read(1 << 20):
+                f.write(chunk)
+                h.update(chunk)
+        return h.hexdigest()
+
+    def fetch_sig(url: str, octet: bool) -> str:
+        with _get(url, 15, octet) as r:
+            return r.read().decode()
+
+    try:
+        digest = _try_each(_sources(info, "url", "api_url"), fetch)
+        sig = _try_each(_sources(info, "sig_url", "sig_api_url"), fetch_sig)
+    except (urllib.error.URLError, OSError, TimeoutError) as e:
+        dest.unlink(missing_ok=True)
+        raise RuntimeError(friendly_error(e)) from e
+    if not (is_newer(info["version"]) and verify_release(info["version"], info["name"], digest, sig)):  # jamais une version qui n'est pas plus récente que celle-ci
         dest.unlink(missing_ok=True)
         raise RuntimeError("La signature de la mise à jour ne correspond pas : elle est refusée.")
     return dest

@@ -360,6 +360,14 @@ def record_correction(m: dict, old: str, new: str) -> str | None:
     return None
 
 
+def apply_sender(sender: str, cat: str) -> int:
+    """Range dans `cat` tous les mails déjà reçus de cette adresse (mêmes règles que « Corriger le classement »). Rend le nombre de mails changés."""
+    noise = cat in ("newsletter", "notification")
+    with db.conn() as c:
+        return c.execute(f"UPDATE messages SET category=?{', needs_reply=0, priority=MIN(priority,1)' if noise else ''} WHERE sender=? COLLATE NOCASE AND category<>?",
+                         (cat, sender, cat)).rowcount
+
+
 def apply_domain(dom: str, cat: str) -> int:
     noise = cat in ("newsletter", "notification")
     with db.conn() as c:

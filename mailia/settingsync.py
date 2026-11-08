@@ -7,7 +7,8 @@ propres réglages ; il ne l'affiche pas). Chaque ordinateur la relit toutes les 
 Fusion : chaque réglage est comparé à sa dernière valeur synchronisée. Modifié ici seulement : il part vers la boîte. Modifié ailleurs seulement : il est repris ici. Modifié des
 deux côtés : le plus récent l'emporte. Premier contact avec des valeurs différentes (une consigne personnalisée ici, une autre ailleurs) : rien n'est écrasé, Velora vous demande
 laquelle garder (Paramètres › Intelligence artificielle).
-Ne sont synchronisés que : les quatre consignes de l'IA (tri, brief, style des réponses, règles personnelles) et votre nom. Rien d'autre."""
+Ne sont synchronisés que : les quatre consignes de l'IA (tri, brief, style des réponses, règles personnelles), votre nom et vos corrections de classement (« Toujours classer ainsi
+les mails de … », par adresse ou par domaine). Une correction retirée sur un ordinateur est retirée sur les autres. Rien d'autre."""
 import json
 import logging
 import time
@@ -20,6 +21,8 @@ KEYS = ("prompt:analyze", "prompt:brief", "prompt:draft", "prompt:rules", "user_
 LABELS = {"prompt:analyze": "Consigne de tri et de résumé des mails", "prompt:brief": "Consigne du brief du jour", "prompt:draft": "Style des réponses et des nouveaux mails",
           "prompt:rules": "Règles personnelles", "user_name": "Votre nom"}
 VERSION = 1
+PREFIXES = ("sender_cat:", "domain_cat:")  # corrections de classement : un réglage par adresse ou par domaine
+MAX_DYNAMIC = 1500  # plafond du nombre de corrections synchronisées (la boîte garde un seul petit élément)
 INTERVAL = 120  # secondes entre deux lectures de la boîte
 _last_tick = {"t": 0.0}
 
@@ -78,6 +81,16 @@ def encode(keys: dict) -> str:
     return json.dumps({"v": VERSION, "by": config.machine_label(), "at": _now(), "keys": keys}, ensure_ascii=False, separators=(",", ":"))
 
 
+def is_key(k: str) -> bool:
+    return k in KEYS or (k.startswith(PREFIXES) and 12 < len(k) < 200)
+
+
+def _valid(k: str, v: str) -> bool:
+    """Une correction de classement ne peut valoir que l'une des catégories (ou rien : correction retirée)."""
+    from . import aipolicy
+    return k in KEYS or v == "" or v in aipolicy.CATS
+
+
 def decode(raw: str | None) -> dict:
     """{clé: {"v", "t"}} lues dans la boîte (rien si absent ou illisible)."""
     if not raw:
@@ -87,7 +100,8 @@ def decode(raw: str | None) -> dict:
         if not isinstance(d, dict) or d.get("v") != VERSION:
             return {}
         cap = lambda k: 200 if k == "user_name" else 20000  # une valeur démesurée (boîte altérée) n'entre pas dans vos réglages
-        return {k: {"v": str(x.get("v", ""))[:cap(k)], "t": str(x.get("t", ""))[:32]} for k, x in (d.get("keys") or {}).items() if k in KEYS and isinstance(x, dict)}
+        out = {k: {"v": str(x.get("v", ""))[:cap(k)], "t": str(x.get("t", ""))[:32]} for k, x in (d.get("keys") or {}).items() if is_key(k) and isinstance(x, dict)}
+        return {k: x for k, x in list(out.items())[:len(KEYS) + MAX_DYNAMIC] if _valid(k, x["v"])}
     except (ValueError, AttributeError):
         return {}
 
@@ -98,6 +112,33 @@ def _now() -> str:
 
 def _get(key: str) -> str:
     return db.kv_get(key) or ""
+
+
+def _dynamic_keys(remote: dict) -> list[str]:
+    """Corrections de classement à examiner : celles d'ici, celles de la boîte, et celles qu'on a déjà synchronisées (pour voir une suppression)."""
+    found: set[str] = {k for k in remote if k not in KEYS}
+    with db.conn() as c:
+        for p in PREFIXES:
+            found |= {r["k"] for r in c.execute("SELECT k FROM kv WHERE k LIKE ? AND v<>''", (p + "%",))}
+            found |= {r["k"][len("ssync:base:"):] for r in c.execute("SELECT k FROM kv WHERE k LIKE ? AND v<>''", ("ssync:base:" + p + "%",))}
+    return sorted(k for k in found if is_key(k))[:MAX_DYNAMIC]
+
+
+def _store(k: str, v: str) -> None:
+    """Applique ici une valeur reprise de la boîte. Pour une correction de classement : les mails déjà reçus sont reclassés, comme si la correction avait été faite ici."""
+    if k in KEYS:
+        db.kv_set(k, v)
+        return
+    from . import aipolicy
+    target = k.split(":", 1)[1]
+    if v:
+        db.kv_set(k, v)
+        (aipolicy.apply_domain if k.startswith("domain_cat:") else aipolicy.apply_sender)(target, v)
+    else:  # correction retirée ailleurs
+        with db.conn() as c:
+            c.execute("DELETE FROM kv WHERE k=?", (k,))
+        if k.startswith("domain_cat:"):
+            db.kv_set(f"domain_cat_n:{target}", "0")
 
 
 # ---------- cycle ----------
@@ -113,15 +154,17 @@ def tick(force: bool = False) -> dict | None:
         out = {k: dict(v) for k, v in remote.items()}
         res: dict = {"pulled": [], "pushed": [], "conflicts": []}
         now = _now()
-        for k in KEYS:
+        for k in [*KEYS, *_dynamic_keys(remote)]:
             local, base = _get(k), db.kv_get(f"ssync:base:{k}")
             lt = db.kv_get(f"ssync:lt:{k}") or None
             if base is not None and not same(k, local, base) and not lt:
                 lt = now
                 db.kv_set(f"ssync:lt:{k}", lt)  # on retient quand on a vu la modification locale (sert à départager deux modifications)
             act = decide(k, local, base, remote.get(k), lt, now)
+            if act[0] == "conflict" and k not in KEYS:
+                act = ("push", now)  # deux classements différents pour la même adresse au premier contact : celui de cet ordinateur est envoyé (ce n'est qu'une préférence de tri)
             if act[0] == "pull":
-                db.kv_set(k, remote[k]["v"])
+                _store(k, remote[k]["v"])
                 db.kv_set(f"ssync:base:{k}", remote[k]["v"])
                 res["pulled"].append(k)
             elif act[0] == "push":
@@ -133,9 +176,11 @@ def tick(force: bool = False) -> dict | None:
                 res["conflicts"].append(k)
                 continue
             else:
-                db.kv_set(f"ssync:base:{k}", local)
-            db.kv_set(f"ssync:lt:{k}", "")
-            db.kv_set(f"ssync:conflict:{k}", "")
+                if db.kv_get(f"ssync:base:{k}") != local:
+                    db.kv_set(f"ssync:base:{k}", local)
+            for aux in (f"ssync:lt:{k}", f"ssync:conflict:{k}"):
+                if db.kv_get(aux):  # on n'écrit que ce qui change : une centaine de corrections ne doit pas laisser des centaines de lignes de plus à chaque tour
+                    db.kv_set(aux, "")
         if res["pushed"]:
             prov.write_settings(encode(out))
         db.kv_set("ssync:at", now)

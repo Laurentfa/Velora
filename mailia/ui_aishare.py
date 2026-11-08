@@ -29,8 +29,9 @@ EXPLAIN_SYNC = [
      "Pour que deux ordinateurs partagent leurs analyses, ils doivent avoir les mêmes consignes de tri, les mêmes règles personnelles et le même nom. Plutôt que de les "
      "recopier à la main, Velora les fait suivre d'un ordinateur à l'autre : une consigne modifiée sur l'un s'applique aussi sur l'autre, en quelques minutes."),
     ("Ce qui est synchronisé",
-     "Seulement les consignes de l'IA (tri et résumé, brief du jour, style des réponses, règles personnelles) et votre nom. Rien d'autre : ni vos mots de passe, ni vos clés, "
-     "ni vos budgets, ni vos signatures."),
+     "Les consignes de l'IA (tri et résumé, brief du jour, style des réponses, règles personnelles), votre nom et vos corrections de classement (« Toujours classer ainsi les "
+     "mails de… », par adresse ou par domaine) : une correction faite sur un ordinateur s'applique aux autres, et une correction retirée est retirée partout. Rien d'autre : "
+     "ni vos mots de passe, ni vos clés, ni vos budgets, ni vos signatures."),
     ("Où c'est stocké",
      "Dans un élément caché de la boîte de réception de votre première boîte Exchange avec IA (par adresse), sur votre serveur. Outlook ne l'affiche pas. Si vos consignes "
      "contiennent des informations sensibles, elles sont au même endroit que vos mails."),
@@ -69,13 +70,13 @@ def settings() -> None:
 
 def follow_settings() -> None:
     """Bloc « Faire suivre mes consignes d'un ordinateur à l'autre » de l'onglet « Intelligence artificielle »."""
-    ui.label("Faire suivre mes consignes d'un ordinateur à l'autre (Exchange)").classes("text-subtitle2 q-mt-md").mark("ssync-title")
-    ui.label("Activé par défaut : vos consignes de l'IA et votre nom sont les mêmes sur tous vos ordinateurs, sans rien recopier.").classes("text-body2")
+    ui.label("Faire suivre mes réglages d'IA d'un ordinateur à l'autre (Exchange)").classes("text-subtitle2 q-mt-md").mark("ssync-title")
+    ui.label("Activé par défaut : vos consignes de l'IA, votre nom et vos corrections de classement sont les mêmes sur tous vos ordinateurs, sans rien recopier.").classes("text-body2")
     acc = settingsync.account()
     if not acc:
         ui.label("Aucune boîte Exchange avec l'IA activée : rien à synchroniser.").classes("text-caption text-grey")
     else:
-        ui.switch("Synchroniser mes consignes de l'IA et mon nom", value=db.kv_get("settingsync_on") != "0",
+        ui.switch("Synchroniser mes consignes de l'IA, mon nom et mes corrections de classement", value=db.kv_get("settingsync_on") != "0",
                   on_change=lambda e: db.kv_set("settingsync_on", "1" if e.value else "0")).mark("ssync-switch")
         at, err = db.kv_get("ssync:at"), db.kv_get("ssync:error")
         if err:
