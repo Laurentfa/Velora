@@ -25,6 +25,8 @@ from urllib.parse import urljoin, urlparse
 
 from PIL import Image, ImageChops, ImageFilter, ImageOps
 
+from . import safexml
+
 log = logging.getLogger("scan")
 
 MAX_PAGES = 80
@@ -174,7 +176,7 @@ def capabilities(base: str) -> dict:
     if status != 200:
         raise ScanError(f"Ce scanner n'accepte pas la numérisation réseau (code {status}).")
     try:
-        root = ET.fromstring(data)
+        root = safexml.fromstring(data)
     except ET.ParseError as e:
         raise ScanError("Réponse du scanner illisible.") from e
     text = lambda el, n: next((e.text.strip() for e in _all(el, n) if e.text), "")

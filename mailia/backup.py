@@ -15,9 +15,12 @@ from . import config, db, modules
 KV_PREFIXES = ("prompt:", "signature", "undo_delay", "ai_tone", "notify_urgent", "quick_replies", "ai_intents", "trusted_senders",
                "side_", "cols", "list_sort", "server_search", "folder_order:", "folder_fold", "archive:", "theme", "default_account", "user_name", "phish_safe",
                "ai_fallback", "ai_exclude", "ai_budget_", "onemin_allowance", "onemin_daily_cap", "apple_writer", "brief_off", "list_density", "update_auto",
-               "vip_senders", "safe_senders", "drafts_auto:", "modules_", "module:", "weather_on", "weather_place", "feed_on", "feed_url", "ai_share:")
+               "vip_senders", "safe_senders", "drafts_auto:", "modules_repo", "module:", "weather_on", "weather_place", "feed_on", "feed_url", "ai_share:")
 SECRET = re.compile(r"(pass|pwd|secret|token|api_?key)", re.I)  # jamais dans le fichier, quelle que soit la clé
 SKIP_SUFFIX = (":src",)  # dossier d'origine d'un module sur l'autre machine : n'a aucun sens ici
+# Réglages d'une boîte repris d'un fichier : une liste fermée. Surtout pas « tls_insecure » (un fichier ne doit pas pouvoir désactiver la vérification des certificats), ni
+# « password » ; les mots de passe se saisissent sur cet ordinateur.
+ACCOUNT_KEYS = {"key", "label", "kind", "email", "login", "host", "port", "smtp_host", "smtp_port", "tls", "enabled", "ai"}
 _MODULE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 ENV_KEYS = ("AI_ENABLED", "AI_UNREAD_ONLY", "AI_MAX_AGE_DAYS", "CONVERSATIONS", "SYNC_LIMIT", "AI_PROVIDER",
             *(f"{p}_{t}" for p in ("MODEL", "MODEL1", "PROVIDER") for t in ("ANALYZE", "BRIEF", "DRAFT", "ASK")))
@@ -85,7 +88,7 @@ def export_data() -> dict:
             "app": "Velora", "version": VERSION, "date": datetime.now(timezone.utc).isoformat(),
             "kv": kv,
             "env": {k: config.env(k) for k in ENV_KEYS if config.env(k)},
-            "accounts": [{k: v for k, v in a.items() if not SECRET.search(k)} for a in config.read_accounts()],
+            "accounts": [{k: v for k, v in a.items() if k in ACCOUNT_KEYS} for a in config.read_accounts()],
             "modules": _export_modules(),
             "from": config.machine_label(),
             "templates": rows("SELECT name,subject,html,to_addrs,cc,bcc FROM templates"),
@@ -119,7 +122,7 @@ def import_data(data: dict) -> dict:
     have = {a["key"] for a in config.read_accounts()}
     for a in data.get("accounts") or []:
         if a.get("key") and a["key"] not in have:
-            config.save_account({k: v for k, v in a.items() if k != "password"}, "")
+            config.save_account({k: v for k, v in a.items() if k in ACCOUNT_KEYS}, "")
             out["boîtes"] += 1
     have_t = {t["name"].lower() for t in db.templates_list()}
     for t in data.get("templates") or []:

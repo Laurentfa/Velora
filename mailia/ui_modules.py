@@ -86,10 +86,12 @@ def modules_settings() -> None:
                                 f"Mettre à jour depuis {src}").mark(f"module-update-{info['id']}")
                         ui.button(icon="delete_outline", on_click=lambda i=info: ask_remove(i)).props("flat round dense color=grey").tooltip("Supprimer ce module").mark(f"module-delete-{info['id']}")
             with ui.row().classes("items-center gap-2 q-mt-sm w-full no-wrap"):
-                repo = ui.input("Dépôt GitHub des modules", value=db.kv_get("modules_repo") or "", placeholder="compte/depot").props("dense outlined").classes("col").mark("modules-repo")
+                repo = ui.input("Dépôt GitHub des modules", value=db.kv_get("modules_repo") or "", placeholder="moncompte/mes-modules").props("dense outlined stack-label").classes("col").mark("modules-repo")
                 repo.on("blur", lambda: db.kv_set("modules_repo", (repo.value or "").strip()))
                 ui.button("Mettre à jour depuis le dépôt", icon="cloud_download", on_click=lambda: update_from_repo((repo.value or "").strip())).props("outline no-caps").mark("modules-repo-update")
-            ui.label("Met à jour les modules déjà installés dont la version du dépôt est plus récente, grâce à l'outil « gh » connecté à votre compte GitHub.").classes("text-caption text-grey")
+            ui.label("À renseigner : le dépôt GitHub qui contient vos modules, sous la forme « compte/dépôt » (même privé), par exemple moncompte/mes-modules. Velora met à jour "
+                     "les modules déjà installés dont la version du dépôt est plus récente. Il faut l'outil « gh » (cli.github.com), connecté une fois avec « gh auth login » "
+                     "dans le Terminal.").classes("text-caption text-grey")
             with ui.row().classes("items-center gap-3 q-mt-sm"):
                 with ui.button("Importer un module", icon="upload").props("outline no-caps color=primary").mark("module-import"):
                     with ui.menu():

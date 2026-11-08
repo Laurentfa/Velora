@@ -176,7 +176,7 @@ avec votre propre clé (`tools/sign_release.py`), pas avec un certificat Apple o
 git tag v1.1.0 && git push --tags
 ```
 GitHub construit, signe et publie : `Velora-1.1.0-mac.dmg` et `Velora-1.1.0-setup.exe` (première installation, à donner aux nouveaux
-utilisateurs avec `INSTALLER.md`), `…-mac.zip` et `…-setup.exe` + `.sig` (utilisés par la mise à jour automatique). Les Velora déjà installées
+utilisateurs avec `INSTALLER.md`), `…-mac.zip` et `…-setup.exe` + `.sig` et `.sig2` (utilisés par la mise à jour automatique ; `.sig2` lie la signature à la version, pour qu'une ancienne version signée ne puisse pas être servie à la place d'une nouvelle). Les Velora déjà installées
 proposent la nouvelle version dans la journée.
 
 Essai en local (Mac) : `./build_mac.sh && scripts/package_mac.sh 1.1.0` crée `dist/release/`.

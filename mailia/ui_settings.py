@@ -863,6 +863,9 @@ def _tab_use(host) -> None:
         with host, ui.dialog() as cd, ui.card().style("width:520px;max-width:96vw"):
             ui.label("Restaurer cette sauvegarde ?").classes("text-h6")
             ui.label(summary).classes("text-body2")
+            if data.get("modules"):
+                ui.label("⚠ Ce fichier contient des modules : du code qui s'exécutera avec vos droits une fois que vous les aurez activés. Ils restent désactivés après la "
+                         "restauration. N'importez que des fichiers que vous avez produits vous-même.").classes("text-caption text-negative")
             ui.label("Elle est fusionnée avec vos données actuelles : rien n'est supprimé ; les réglages du fichier remplacent les vôtres, le reste (boîtes, modèles, modules…) n'est ajouté que s'il n'existe pas déjà.").classes("text-caption text-grey")
             with ui.row().classes("justify-end w-full gap-2"):
                 ui.button("Annuler", on_click=lambda: cd.submit(False)).props("flat no-caps")
@@ -871,7 +874,8 @@ def _tab_use(host) -> None:
             res = await run.io_bound(backup.import_data, data)
             sync.reload()
             ui.notify(("Restauré : " + ", ".join(f"{v} {k}" for k, v in res.items() if v) if any(res.values()) else "Rien de nouveau à restaurer.")
-                      + (". Relancez Velora pour que les modules et les boîtes ajoutés soient pris en compte." if res.get("modules") or res.get("modules mis à jour") or res.get("boîtes") else ""),
+                      + (". Les modules restent désactivés : vérifiez-les puis activez-les dans Paramètres › Modules." if res.get("modules") or res.get("modules mis à jour") else "")
+                      + (" Relancez Velora pour que les boîtes ajoutées soient prises en compte." if res.get("boîtes") else ""),
                       type="positive", multi_line=True)
 
     up = ui.upload(on_upload=do_import, auto_upload=True).props("hide-upload-btn accept=.json").style(

@@ -188,6 +188,14 @@ def _migrate(c) -> None:
 
 
 def init() -> None:
+    from .config import harden_permissions
+    try:
+        _init()
+    finally:
+        harden_permissions()  # après l'ouverture : la base et ses fichiers « -wal » / « -shm » existent maintenant
+
+
+def _init() -> None:
     with conn() as c:
         c.execute("PRAGMA journal_mode=WAL")  # écritures plus sûres en cas d'arrêt brutal, lectures qui n'attendent pas les écritures
         c.executescript(SCHEMA)

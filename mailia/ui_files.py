@@ -11,7 +11,7 @@ from nicegui import app, run, ui
 
 from mailia import ai, aipolicy, compose, config, htmlmail, preview, security, sync
 
-from mailia.ui_common import SERVER_MODE, can_print, human_size, log, open_to_print, reveal
+from mailia.ui_common import SERVER_MODE, can_print, human_size, log, mark_downloaded, open_to_print, reveal
 
 
 class FilesMixin:
@@ -100,7 +100,13 @@ class FilesMixin:
         while path.exists():
             path = folder / f"{Path(name).stem} ({n}){Path(name).suffix}"
             n += 1
-        path.write_bytes(data)
+        try:
+            path.write_bytes(data)
+        except OSError as e:  # sous macOS : « Operation not permitted » tant que Velora n'a pas l'accès au dossier Téléchargements (avant, rien n'était dit)
+            log.warning("enregistrement de %s impossible : %s", name, e)
+            return ui.notify(f"Enregistrement impossible dans Téléchargements ({e.strerror or type(e).__name__}). Sous macOS, autorisez Velora dans Réglages Système › "
+                             "Confidentialité et sécurité › Fichiers et dossiers › Téléchargements.", type="negative", multi_line=True, timeout=0, close_button="OK")
+        mark_downloaded(path)
         ui.notify(f"Enregistré dans Téléchargements : {path.name}", type="positive")
         reveal(path)
 

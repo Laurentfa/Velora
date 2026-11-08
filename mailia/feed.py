@@ -91,7 +91,8 @@ def fetch(force: bool = False) -> dict:
     if not valid(u):
         raise ValueError("adresse du flux invalide (https obligatoire)")
     req = urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0 (compatible; Velora)", "Accept": "application/rss+xml, application/xml;q=0.9, */*;q=0.5"})
-    with urllib.request.urlopen(req, timeout=10, context=tlsutil.context()) as r:  # noqa: S310 — https vérifié par valid()
+    # une redirection n'est suivie que vers une adresse https valide (jamais vers http:// ni file:// : un flux piégé ne doit pas faire lire une adresse locale)
+    with tlsutil.opener(check_redirect=valid).open(req, timeout=10) as r:  # noqa: S310 — https vérifié par valid()
         data = r.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
         raise ValueError("flux trop volumineux")

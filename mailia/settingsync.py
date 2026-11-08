@@ -86,7 +86,8 @@ def decode(raw: str | None) -> dict:
         d = json.loads(raw)
         if not isinstance(d, dict) or d.get("v") != VERSION:
             return {}
-        return {k: {"v": str(x.get("v", "")), "t": str(x.get("t", ""))} for k, x in (d.get("keys") or {}).items() if k in KEYS and isinstance(x, dict)}
+        cap = lambda k: 200 if k == "user_name" else 20000  # une valeur démesurée (boîte altérée) n'entre pas dans vos réglages
+        return {k: {"v": str(x.get("v", ""))[:cap(k)], "t": str(x.get("t", ""))[:32]} for k, x in (d.get("keys") or {}).items() if k in KEYS and isinstance(x, dict)}
     except (ValueError, AttributeError):
         return {}
 

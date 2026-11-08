@@ -1,5 +1,7 @@
 nicegui>=3.18,<4  # la 4.0 (novembre 2026) remplace httpx par httpx2 et n'est pas testée avec Velora
 httpx
+certifi>=2026.10.18  # audit : magasin de certificats à jour
+oauthlib>=4.0.1  # audit : correctif de sécurité (connexion OAuth)
 pywebview
 exchangelib
 imap-tools
@@ -7,14 +9,14 @@ anthropic
 python-dotenv
 platformdirs
 pyinstaller
-pillow
+pillow>=13.0.0  # audit du 8 novembre 2026 : la 12.3 a 39 avis de sécurité (aperçu des images et pièces jointes reçues)
 nh3
 keyring
 mammoth
 openpyxl
 python-pptx
 pillow-heif
-pypdf
+pypdf>=6.21.4  # audit : la 6.20 a 16 avis de sécurité (aperçu des PDF reçus)
 fpdf2  # PDF du texte d'un message (impression sous Windows)
 zeroconf
 segno

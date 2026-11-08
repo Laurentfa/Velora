@@ -172,6 +172,19 @@ def safe_notify(*args, **kwargs):
 ui.notify = safe_notify  # tous les ui.notify de l'appli passent par là
 
 
+def mark_downloaded(path: Path) -> None:
+    """Marque un fichier venu d'un mail comme « téléchargé » (quarantaine macOS, Zone.Identifier de Windows), comme le font les navigateurs : le système avertit
+    avant d'ouvrir un programme ou un document à risque. Sans cela, une pièce jointe enregistrée par Velora s'ouvrait sans aucun avertissement."""
+    try:
+        if sys.platform == "darwin":
+            subprocess.run(["xattr", "-w", "com.apple.quarantine", "0081;00000000;Velora;", str(path)], check=False, timeout=10)
+        elif sys.platform.startswith("win"):
+            with open(str(path) + ":Zone.Identifier", "w") as z:
+                z.write("[ZoneTransfer]\nZoneId=3\n")
+    except Exception:  # noqa: BLE001 — la marque est une protection en plus ; son absence ne doit pas empêcher d'enregistrer
+        pass
+
+
 def reveal(path: Path) -> None:
     """Montre le fichier dans le Finder / l'Explorateur, sans jamais l'ouvrir (une pièce jointe peut être dangereuse)."""
     try:
@@ -269,14 +282,7 @@ def open_to_print(name: str, data: bytes) -> Path:
         raise ValueError("Ce type de fichier ne s'imprime pas depuis l'aperçu : téléchargez-le pour l'ouvrir.")
     path = Path(tempfile.mkdtemp(prefix=PRINT_DIR_PREFIX)) / safe
     path.write_bytes(data)
-    try:
-        if sys.platform == "darwin":
-            subprocess.run(["xattr", "-w", "com.apple.quarantine", "0081;00000000;Velora;", str(path)], check=False, timeout=10)
-        elif sys.platform.startswith("win"):
-            with open(str(path) + ":Zone.Identifier", "w") as z:
-                z.write("[ZoneTransfer]\nZoneId=3\n")
-    except Exception:
-        pass
+    mark_downloaded(path)
     if native_print(path):
         return path
     if sys.platform == "darwin":

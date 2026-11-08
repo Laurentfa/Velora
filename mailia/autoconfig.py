@@ -6,7 +6,7 @@ import re
 import urllib.request
 import xml.etree.ElementTree as ET
 
-from . import tlsutil
+from . import safexml, tlsutil
 
 log = logging.getLogger("autoconfig")
 
@@ -76,7 +76,7 @@ def _get(url: str, timeout: float = 4) -> bytes | None:
 def parse_autoconfig(xml: bytes) -> dict | None:
     """Fichier « clientConfig » (format Mozilla) -> réglages IMAP/SMTP."""
     try:
-        root = ET.fromstring(xml)
+        root = safexml.fromstring(xml)
     except ET.ParseError:
         return None
     imap = smtp = None

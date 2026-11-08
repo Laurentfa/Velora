@@ -17,7 +17,12 @@ PUB = base64.b64encode(KEY.public_key().public_bytes(serialization.Encoding.Raw,
 
 
 def sig(data: bytes, key=KEY) -> str:
-    return base64.b64encode(key.sign(hashlib.sha256(data).hexdigest().encode())).decode()
+    return base64.b64encode(key.sign(hashlib.sha256(data).hexdigest().encode())).decode()  # ancien format : empreinte seule
+
+
+def sig2(data: bytes, version: str = "1.1.0", name: str = "Velora-1.1.0-mac.zip", key=KEY) -> str:
+    from mailia.version import release_message
+    return base64.b64encode(key.sign(release_message(version, name, hashlib.sha256(data).hexdigest()))).decode()  # lié à la version et au nom du fichier
 
 
 @pytest.fixture
@@ -58,8 +63,8 @@ def test_disabled_without_repo(monkeypatch):
 
 def release(tag="v1.1.0", **kw):
     return json.dumps({"tag_name": tag, "body": "Nouveautés", "assets": [
-        {"name": "Velora-1.1.0-mac.zip", "browser_download_url": "u/mac"}, {"name": "Velora-1.1.0-mac.zip.sig", "browser_download_url": "u/mac.sig"},
-        {"name": "Velora-1.1.0-setup.exe", "browser_download_url": "u/win"}, {"name": "Velora-1.1.0-setup.exe.sig", "browser_download_url": "u/win.sig"}], **kw}).encode()
+        {"name": "Velora-1.1.0-mac.zip", "browser_download_url": "u/mac"}, {"name": "Velora-1.1.0-mac.zip.sig", "browser_download_url": "u/mac.sig"}, {"name": "Velora-1.1.0-mac.zip.sig2", "browser_download_url": "u/mac.sig2"},
+        {"name": "Velora-1.1.0-setup.exe", "browser_download_url": "u/win"}, {"name": "Velora-1.1.0-setup.exe.sig", "browser_download_url": "u/win.sig"}, {"name": "Velora-1.1.0-setup.exe.sig2", "browser_download_url": "u/win.sig2"}], **kw}).encode()
 
 
 @pytest.mark.parametrize("platform,name", [("darwin", "Velora-1.1.0-mac.zip"), ("win32", "Velora-1.1.0-setup.exe")])
@@ -102,13 +107,62 @@ def test_check_survives_network_failure(configured, monkeypatch):
 
 def test_download_verifies_signature(configured, monkeypatch, tmp_path):
     data = b"contenu de l'archive"
-    info = {"name": "Velora-1.1.0-mac.zip", "url": "u/mac", "sig_url": "u/mac.sig"}
-    fake_net(monkeypatch, {"u/mac": data, "u/mac.sig": sig(data).encode()})
+    info = {"version": "1.1.0", "name": "Velora-1.1.0-mac.zip", "url": "u/mac", "sig_url": "u/mac.sig2"}
+    fake_net(monkeypatch, {"u/mac": data, "u/mac.sig2": sig2(data).encode()})
     assert updater.download(info, tmp_path).read_bytes() == data
-    fake_net(monkeypatch, {"u/mac": data + b"!", "u/mac.sig": sig(data).encode()})  # archive modifiée en route
+    fake_net(monkeypatch, {"u/mac": data + b"!", "u/mac.sig2": sig2(data).encode()})  # archive modifiée en route
     with pytest.raises(RuntimeError):
         updater.download(info, tmp_path)
     assert not (tmp_path / info["name"]).exists()  # et rien ne reste sur le disque
+
+
+def test_a_signature_is_only_valid_for_its_own_version_and_file(configured, monkeypatch, tmp_path):
+    """Retour en arrière : quelqu'un qui contrôle la page des versions ne peut pas faire passer une ancienne version signée pour une nouvelle."""
+    old = b"ancienne version, peut-etre vulnerable"
+    info = {"version": "1.1.0", "name": "Velora-1.1.0-mac.zip", "url": "u/mac", "sig_url": "u/mac.sig2"}
+    # 1) signature légitime de la 1.0.50, présentée sous l'étiquette 1.1.0
+    fake_net(monkeypatch, {"u/mac": old, "u/mac.sig2": sig2(old, "1.0.50", "Velora-1.0.50-mac.zip").encode()})
+    with pytest.raises(RuntimeError):
+        updater.download(info, tmp_path)
+    # 2) ancien format (empreinte seule) : plus accepté
+    fake_net(monkeypatch, {"u/mac": old, "u/mac.sig2": sig(old).encode()})
+    with pytest.raises(RuntimeError):
+        updater.download(info, tmp_path)
+    # 3) bonne version mais autre nom de fichier (une signature d'un fichier ne sert pas pour un autre)
+    fake_net(monkeypatch, {"u/mac": old, "u/mac.sig2": sig2(old, "1.1.0", "Velora-1.1.0-setup.exe").encode()})
+    with pytest.raises(RuntimeError):
+        updater.download(info, tmp_path)
+    # 4) une version qui n'est pas plus récente que celle installée est refusée même si la signature est valide
+    monkeypatch.setattr(updater, "APP_VERSION", "1.1.0")
+    fake_net(monkeypatch, {"u/mac": old, "u/mac.sig2": sig2(old).encode()})
+    with pytest.raises(RuntimeError):
+        updater.download(info, tmp_path)
+    assert not list(tmp_path.glob("*.zip"))
+
+
+def test_a_release_without_the_version_bound_signature_is_not_offered(configured, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    legacy = json.dumps({"tag_name": "v1.1.0", "assets": [{"name": "Velora-1.1.0-mac.zip", "browser_download_url": "u/mac"},
+                                                         {"name": "Velora-1.1.0-mac.zip.sig", "browser_download_url": "u/mac.sig"}]}).encode()
+    fake_net(monkeypatch, {"https://api.github.com/repos/moi/velora/releases/latest": legacy})
+    assert updater.fetch_latest() is None  # seulement l'ancienne signature : une ancienne version signée pourrait être servie à la place
+
+
+def test_the_signing_tool_writes_both_signatures_and_the_app_accepts_the_new_one(configured, monkeypatch, tmp_path):
+    import importlib.util
+    import os
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location("sign_release", Path(__file__).resolve().parent.parent / "tools" / "sign_release.py")
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    f = tmp_path / "Velora-1.1.0-mac.zip"
+    f.write_bytes(b"archive")
+    monkeypatch.setitem(os.environ, "UPDATE_PRIVATE_KEY", base64.b64encode(KEY.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())).decode())
+    tool.sign(str(f), "1.1.0")
+    digest = hashlib.sha256(b"archive").hexdigest()
+    assert updater.verify(digest, (tmp_path / (f.name + ".sig")).read_text())  # ancien format, pour les Velora d'avant
+    assert updater.verify_release("1.1.0", f.name, digest, (tmp_path / (f.name + ".sig2")).read_text())
+    assert not updater.verify_release("1.1.1", f.name, digest, (tmp_path / (f.name + ".sig2")).read_text())
 
 
 def run_swap(tmp_path, pid, fail=False):

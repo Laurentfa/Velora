@@ -18,7 +18,7 @@ import urllib.request
 from pathlib import Path
 
 from . import db, tlsutil
-from .version import APP_VERSION, UPDATE_PUBKEY, UPDATE_REPO
+from .version import APP_VERSION, UPDATE_PUBKEY, UPDATE_REPO, release_message
 
 log = logging.getLogger("updater")
 CHECK_EVERY = 24 * 3600
@@ -63,8 +63,8 @@ def parse(v: str) -> tuple[int, ...]:
     return tuple(int(x) for x in re.findall(r"\d+", (v or "").split("-")[0])[:3])
 
 
-def is_newer(candidate: str, current: str = APP_VERSION) -> bool:
-    return parse(candidate) > parse(current)
+def is_newer(candidate: str, current: str | None = None) -> bool:
+    return parse(candidate) > parse(current or APP_VERSION)
 
 
 def _get(url: str, timeout: int = 15):
@@ -82,10 +82,11 @@ def fetch_latest() -> dict | None:
         return None
     assets = {a["name"]: a["browser_download_url"] for a in rel.get("assets") or []}
     name = next((n for n in assets if n.endswith(suffix)), None)
-    if not name or name + ".sig" not in assets:
+    if not name or name + ".sig2" not in assets:  # signature liée à la version obligatoire (une version publiée sans elle n'est pas proposée)
+        log.warning("version %s ignorée : signature liée à la version absente", rel.get("tag_name"))
         return None
     return {"version": ".".join(map(str, parse(rel["tag_name"]))), "notes": (rel.get("body") or "").strip()[:1500],
-            "name": name, "url": assets[name], "sig_url": assets[name + ".sig"]}
+            "name": name, "url": assets[name], "sig_url": assets[name + ".sig2"]}
 
 
 def check(force: bool = False) -> dict | None:
@@ -111,8 +112,19 @@ def verify(digest_hex: str, signature_b64: str) -> bool:
         return False
 
 
+def verify_release(version: str, name: str, digest_hex: str, signature_b64: str) -> bool:
+    """La signature couvre la version, le nom du fichier et son empreinte (voir version.release_message) : refusée pour toute autre version ou tout autre fichier."""
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    try:
+        Ed25519PublicKey.from_public_bytes(base64.b64decode(UPDATE_PUBKEY)).verify(base64.b64decode(signature_b64.strip()), release_message(version, name, digest_hex))
+        return True
+    except (InvalidSignature, ValueError):
+        return False
+
+
 def download(info: dict, dest: Path | None = None) -> Path:
-    """Télécharge puis vérifie la signature ; lève RuntimeError si elle ne correspond pas (le fichier est alors supprimé)."""
+    """Télécharge puis vérifie la signature (liée à la version et au nom du fichier) ; lève RuntimeError si elle ne correspond pas (le fichier est alors supprimé)."""
     dest = (dest or Path(tempfile.mkdtemp(prefix="velora-maj-"))) / info["name"]
     h = hashlib.sha256()
     with _get(info["url"], timeout=60) as r, open(dest, "wb") as f:
@@ -121,7 +133,7 @@ def download(info: dict, dest: Path | None = None) -> Path:
             h.update(chunk)
     with _get(info["sig_url"]) as r:
         sig = r.read().decode()
-    if not verify(h.hexdigest(), sig):
+    if not (is_newer(info["version"]) and verify_release(info["version"], info["name"], h.hexdigest(), sig)):  # jamais une version qui n'est pas plus récente que celle-ci
         dest.unlink(missing_ok=True)
         raise RuntimeError("La signature de la mise à jour ne correspond pas : elle est refusée.")
     return dest

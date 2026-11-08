@@ -125,12 +125,16 @@ def test_every_https_download_uses_the_bundled_certificates(clean_db, monkeypatc
     monkeypatch.setattr(urllib.request, "urlopen", fake)
     weather._get("https://example.org/w", {})
     updater._get("https://example.org/u")
+    assert len(seen) == 2 and all(isinstance(c, ssl.SSLContext) for c in seen)
+    # le flux passe par l'ouvreur de Velora (certificats embarqués, redirections limitées à https)
+    opened = []
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", lambda self, req, data=None, timeout=None: (opened.append(self), R(b"<rss/>"))[1])
+    db.kv_set("feed_url", "https://example.org/rss")
     try:
-        db.kv_set("feed_url", "https://example.org/rss")
         feed.fetch(force=True)
-    except Exception:  # noqa: BLE001 — le contenu n'est pas un flux : seul le contexte TLS nous intéresse
+    except Exception:  # noqa: BLE001 — le contenu n'est pas un flux : seul le chemin réseau nous intéresse
         pass
-    assert len(seen) == 3 and all(isinstance(c, ssl.SSLContext) for c in seen)
+    assert len(opened) == 1 and any(isinstance(h, urllib.request.HTTPSHandler) for h in opened[0].handlers)
 
 
 def test_a_lost_connection_is_dropped_so_the_next_cycle_reconnects(clean_db, monkeypatch) -> None:

@@ -1379,10 +1379,15 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
 
     async def reload(self, force: bool = False) -> None:
         self.hl = []  # remis plus bas par la liste de mails quand une recherche est en cours
-        self.counts = await run.io_bound(queries.counts)  # hors du fil de l'interface (voir tick)
+        counts = await run.io_bound(queries.counts)  # hors du fil de l'interface (voir tick)
+        if counts is None:  # l'appli se ferme : NiceGUI ne rend plus rien (avant, une erreur « NoneType… items » finissait dans le journal)
+            return
+        self.counts = counts
         if self.view == "brief":
             self.refresh_title()  # les compteurs du sous-titre suivent ce que vous gérez
             brief = await run.io_bound(queries.brief)  # variable locale : pendant l'attente, une autre mise à jour peut remplacer self.brief
+            if brief is None:
+                return
             self.brief = brief
             sig = ("b", self.account, brief["headline"], *[(x["id"], x["is_read"]) for k in ("todo", "info", "noise") for x in brief[k]])
         elif self.view == "drafts":

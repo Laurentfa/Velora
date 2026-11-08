@@ -58,7 +58,8 @@ jobs:
           UPDATE_PRIVATE_KEY: ${{ secrets.UPDATE_PRIVATE_KEY }}
         run: |
           PY=$([ "$RUNNER_OS" = Windows ] && echo .venv/Scripts/python || echo .venv/bin/python)
-          for f in dist/release/*-mac.zip dist/release/*-setup.exe; do [ -f "$f" ] && $PY tools/sign_release.py "$f"; done
+          for f in dist/release/*-mac.zip dist/release/*-setup.exe; do [ -f "$f" ] && $PY tools/sign_release.py --version "$VERSION" "$f"; done
+          ls dist/release/*.sig2 > /dev/null  # la signature liée à la version ne doit pas disparaître en silence (échec ici = pas de publication)
           ls -l dist/release
       - uses: actions/upload-artifact@v4
         with:

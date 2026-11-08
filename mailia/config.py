@@ -37,6 +37,19 @@ def _data_dir() -> Path:
 DATA_DIR = _data_dir()
 ENV_PATH = DATA_DIR / ".env"
 DB_PATH = DATA_DIR / "mail.db"
+
+
+def harden_permissions() -> None:
+    """Fichiers de données lisibles par vous seul (0600), en plus du dossier en 0700 : base de mails (et ses fichiers temporaires), boîtes, réglages. Les versions
+    précédentes les créaient lisibles par tous les comptes de l'ordinateur (protégés seulement par le dossier). Sans effet sous Windows (droits du profil)."""
+    if sys.platform == "win32":
+        return
+    for p in (DB_PATH, DB_PATH.with_name(DB_PATH.name + "-wal"), DB_PATH.with_name(DB_PATH.name + "-shm"), DATA_DIR / "accounts.json", ENV_PATH):
+        try:
+            if p.exists() and (p.stat().st_mode & 0o077):
+                p.chmod(0o600)
+        except OSError:
+            pass
 load_dotenv(ENV_PATH, interpolate=False)
 
 
@@ -422,7 +435,7 @@ def read_accounts() -> list[dict]:
 
 def write_accounts(data: list[dict]) -> None:
     global _acc_cache
-    atomic_write(ACCOUNTS_PATH, json.dumps(data, ensure_ascii=False, indent=1), private=False)
+    atomic_write(ACCOUNTS_PATH, json.dumps(data, ensure_ascii=False, indent=1), private=True)
     _acc_cache = (None, [])
 
 
