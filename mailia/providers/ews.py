@@ -466,20 +466,27 @@ class EwsProvider:
     # ----- réglages qui suivent la personne (voir settingsync) : une « configuration utilisateur » cachée de la boîte de réception, que Outlook n'affiche pas -----
     SETTINGS_NAME = "Velora.Settings"
 
-    def read_settings(self) -> str | None:
-        """Le texte des réglages gardés dans la boîte, ou None s'il n'y en a pas encore."""
+    def read_blob(self, name: str) -> str | None:
+        """Le texte gardé dans la configuration utilisateur cachée `name` de la boîte de réception, ou None s'il n'y en a pas encore."""
         try:
-            uc = self.account.inbox.get_user_configuration(self.SETTINGS_NAME)
+            uc = self.account.inbox.get_user_configuration(name)
         except ErrorItemNotFound:
             return None
         return (uc.dictionary or {}).get("blob") or None
 
-    def write_settings(self, raw: str) -> None:
+    def write_blob(self, name: str, raw: str) -> None:
         inbox = self.account.inbox
         try:
-            inbox.update_user_configuration(self.SETTINGS_NAME, dictionary={"blob": raw})
+            inbox.update_user_configuration(name, dictionary={"blob": raw})
         except ErrorItemNotFound:
-            inbox.create_user_configuration(self.SETTINGS_NAME, dictionary={"blob": raw})
+            inbox.create_user_configuration(name, dictionary={"blob": raw})
+
+    def read_settings(self) -> str | None:
+        """Le texte des réglages gardés dans la boîte, ou None s'il n'y en a pas encore."""
+        return self.read_blob(self.SETTINGS_NAME)
+
+    def write_settings(self, raw: str) -> None:
+        self.write_blob(self.SETTINGS_NAME, raw)
 
     def rules_client(self):
         return EwsRulesClient(self)

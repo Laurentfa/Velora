@@ -6,7 +6,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import ai, aishare, compose, config, db, htmlmail, notify, queries, rules, security, settingsync
+from . import ai, aishare, compose, config, db, fleet, htmlmail, notify, queries, rules, security, settingsync
 from .textutil import html_to_text
 from .config import AI_BATCH, AccountCfg, load_accounts
 from .providers.base import FolderInfo
@@ -483,6 +483,10 @@ def run_cycle(force: bool = False) -> dict:
         settingsync.tick()  # consignes de l'IA et nom : suivent la personne d'un ordinateur à l'autre (au plus toutes les deux minutes)
     except Exception:
         log.exception("réglages partagés")
+    try:
+        fleet.tick()  # fiche de cet ordinateur (version, crédits) et celles des autres : toutes les cinq minutes
+    except Exception:
+        log.exception("fiches des ordinateurs")
     report["analyzed"] = analyze_pending()
     return report
 

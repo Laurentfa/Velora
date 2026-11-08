@@ -1,7 +1,7 @@
 """Ce qui ne marche pas en ce moment, en une liste de phrases : alimente la pastille d'avertissement de la colonne de gauche."""
 import time
 
-from . import aipolicy, chromebridge, modules, sync
+from . import aipolicy, chromebridge, fleet, modules, sync
 
 
 def refresh() -> None:
@@ -25,6 +25,7 @@ def problems() -> list[str]:
     for mid, st in sorted(modules.status.items()):
         if st and st != "ok":
             out.append(f"Module « {mid} » en erreur : {st}")
+    out.extend(fleet.problems())
     old = chromebridge.extension_outdated()
     if old:
         out.append(old)

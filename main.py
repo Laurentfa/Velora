@@ -70,7 +70,7 @@ from nicegui import Client, app, background_tasks, native, run, ui
 
 from mailia import ai, aipolicy, apiserver, compose, config, db, folder_order, folder_tree, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, vault, wizard
 from html import escape as html_escape
-from mailia import alerts, chromebridge, health, modules
+from mailia import alerts, chromebridge, fleet, health, modules, ui_fleet
 from mailia.mailpdf import message_pdf
 from mailia.textutil import for_ai, split_links
 from mailia.ui_account import friendly_error
@@ -444,6 +444,10 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                                 ui.label(label)
         status = f"{c['pending']} à analyser" if (c["pending"] and use_ai) else ""
         ui.label(status).classes("rmeta q-px-sm")
+        credits = ui.label("").classes("rmeta q-px-sm cursor-pointer").mark("credits-counter").on("click", lambda: ui_fleet.dialog(self.settings))
+        credits.set_visibility(False)
+        with credits:
+            ctip = ui.tooltip("")
         with ui.row().classes("gap-2 q-px-sm"):
             ui.button(icon="sync", on_click=self.do_sync).props(f"flat dense round size=sm{' loading' if self.busy else ''}").tooltip("Synchroniser")
             auto = db.kv_get("side_auto") == "1"
@@ -453,7 +457,8 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
             ui.button(icon="settings", on_click=self.settings).props("flat dense round size=sm").tooltip("Paramètres")
             hb = ui.button(icon="warning_amber", on_click=lambda: self.settings()).props("flat dense round size=sm color=warning").mark("health")
             hb.set_visibility(False)
-            htip = hb.tooltip("")
+            with hb:
+                htip = ui.tooltip("")
 
             async def health_tick() -> None:
                 await run.io_bound(health.refresh)
@@ -461,6 +466,12 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                 hb.set_visibility(bool(found))
                 htip.set_text("\n".join(found))
                 htip.style("white-space:pre-line;max-width:360px")
+                snap = await run.io_bound(fleet.snapshot) or []
+                text = ui_fleet.summary_text(snap)
+                credits.set_text(text)
+                credits.set_visibility(bool(text))
+                ctip.set_text(ui_fleet.tooltip_text(snap))
+                ctip.style("white-space:pre-line;max-width:420px")
 
             ui.timer(30, health_tick)
             ui.timer(4, health_tick, once=True)
