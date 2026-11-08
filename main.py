@@ -98,6 +98,7 @@ from mailia.ui_search import SearchMixin
 from mailia.ui_settings import open_settings
 from mailia.ui_tasks import TasksMixin
 from mailia.ui_update import auto_check
+from mailia.ui_aishare import notice_once as ai_share_notice
 from mailia import ui_weather
 from mailia.ui_weather import WeatherMixin
 from mailia import ui_zoom
@@ -2061,6 +2062,7 @@ async def index_page() -> None:
     ui.timer(5, box.autosave)
     ui.timer(2, box.watch_outbox)
     ui.timer(20, auto_check, once=True)  # laisse l'appli s'afficher d'abord
+    ui.timer(35, ai_share_notice, once=True)  # avis unique : le partage des analyses entre ordinateurs
     ui.on('mailkey', box.on_key)
     if not config.read_accounts():
         await wizard.run_wizard(box.host, True, friendly_error)  # premier lancement : aucune boîte configurée

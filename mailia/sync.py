@@ -6,7 +6,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-from . import ai, compose, config, db, htmlmail, notify, queries, rules, security
+from . import ai, aishare, compose, config, db, htmlmail, notify, queries, rules, security
 from .textutil import html_to_text
 from .config import AI_BATCH, AccountCfg, load_accounts
 from .providers.base import FolderInfo
@@ -108,6 +108,13 @@ def _apply(account: str, folder: str, delta) -> None:
     for m in delta.upserts:
         if db.upsert(account, folder, m) and folder == "INBOX" and not delta.reset:
             arrived.append(db.msg_id(account, folder, m.uid))
+        if m.shared and folder == "INBOX":  # un autre ordinateur a déjà analysé ce mail : on reprend son résultat, sans appeler l'IA
+            try:
+                row = queries.get_message(db.msg_id(account, folder, m.uid))
+                if row:
+                    aishare.take(row, m.shared)
+            except Exception:  # noqa: BLE001
+                log.warning("reprise d'une analyse partagée impossible", exc_info=True)
     for uid, read in delta.read_changes:
         db.set_read(account, folder, uid, read)
     for uid, on in delta.flag_changes:
@@ -400,6 +407,13 @@ def analyze_pending() -> int:
     for r in rows:
         try:
             row = queries.get_message(r["id"])
+            if row and aishare.lookup(row):  # déjà analysé par un autre de vos ordinateurs : on reprend son résultat (avant tout chargement du contenu)
+                done += 1
+                fresh = queries.get_message(r["id"])
+                if fresh:
+                    rules.apply_to(fresh, "analysis")
+                    _notify_if_urgent(r["id"], {k: fresh[k] for k in ("summary", "category", "priority", "needs_reply", "suggested")})
+                continue
             if row and needs_details(row):  # un mail reçu par la synchro incrémentale peut n'avoir encore ni corps ni destinataires
                 try:
                     ensure_details(row)
@@ -426,6 +440,23 @@ def analyze_pending() -> int:
 _last_run: dict[str, float] = {}
 
 
+def connection_lost(e: BaseException) -> bool:
+    """L'erreur vient-elle d'une connexion devenue inutilisable (délai dépassé, coupure) plutôt que d'un refus du serveur ? Typique au réveil d'un Mac en veille."""
+    text = f"{type(e).__name__} {e}"
+    return isinstance(e, (OSError, TimeoutError)) or any(w in text for w in ("ReadTimeout", "ConnectTimeout", "ConnectionError", "Connection aborted", "Connection reset", "timed out"))
+
+
+def reset_connection(key: str) -> None:
+    """Oublie les connexions ouvertes d'une boîte : le prochain cycle en ouvre de neuves. Sans cela, une connexion Exchange morte pendant la veille faisait échouer
+    tous les cycles suivants jusqu'au redémarrage de Velora (les sessions d'exchangelib sont partagées et gardées entre les appels)."""
+    _providers.pop(key, None)
+    try:
+        from exchangelib.protocol import CachingProtocol
+        CachingProtocol.clear_cache()
+    except Exception:  # noqa: BLE001 — au pire on reste avec les anciennes connexions
+        log.debug("connexions Exchange non réinitialisées", exc_info=True)
+
+
 def run_cycle(force: bool = False) -> dict:
     """Synchronise les boîtes dont l'intervalle est écoulé (toutes si `force`), puis analyse les nouveaux mails."""
     report = {"synced": {}, "analyzed": 0, "errors": {}}
@@ -442,6 +473,8 @@ def run_cycle(force: bool = False) -> dict:
                 log.warning("synchro %s : %s", key, e)
             last_error[key] = str(e)
             report["errors"][key] = str(e)[:200]
+            if connection_lost(e):
+                reset_connection(key)  # le cycle suivant repart sur des connexions neuves
     try:
         _contacts_upkeep(any(report["synced"].values()))
     except Exception:

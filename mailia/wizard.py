@@ -106,6 +106,9 @@ async def run_wizard(host, first: bool, friendly_error, open_link=None, on_done=
                             ui.switch("Bloquer l'IA au plafond").bind_value(st, "hard")
                         ui.label("Vous pouvez désactiver l'IA, ou l'exclure pour certains expéditeurs, à tout moment (Paramètres › Confidentialité). "
                                  "Sans clé, l'appli fonctionne comme un client mail ordinaire.").classes("text-caption text-grey")
+                        ui.label("Boîte Exchange sur plusieurs ordinateurs : Velora partage ses analyses par votre boîte (le résultat est attaché au mail, sur votre "
+                                 "serveur, invisible dans Outlook) pour ne pas payer deux fois la même analyse. Réglable boîte par boîte dans Paramètres › "
+                                 "Intelligence artificielle.").classes("text-caption text-grey")
                     with ui.stepper_navigation():
                         ui.button("Continuer", icon="arrow_forward", on_click=lambda: stepper.next()).props("unelevated no-caps color=primary").mark("wiz-ai-next")
                         ui.button("Retour", on_click=lambda: stepper.previous()).props("flat no-caps")

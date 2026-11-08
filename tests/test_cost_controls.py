@@ -131,3 +131,28 @@ def test_every_https_download_uses_the_bundled_certificates(clean_db, monkeypatc
     except Exception:  # noqa: BLE001 — le contenu n'est pas un flux : seul le contexte TLS nous intéresse
         pass
     assert len(seen) == 3 and all(isinstance(c, ssl.SSLContext) for c in seen)
+
+
+def test_a_lost_connection_is_dropped_so_the_next_cycle_reconnects(clean_db, monkeypatch) -> None:
+    """Régression : après la veille du Mac, la connexion Exchange morte faisait échouer tous les cycles jusqu'au redémarrage de Velora."""
+    import requests
+    from exchangelib.protocol import CachingProtocol
+
+    from mailia import sync
+    cleared = []
+    monkeypatch.setattr(CachingProtocol, "clear_cache", classmethod(lambda cls: cleared.append(1)))
+    monkeypatch.setattr(sync, "_contacts_upkeep", lambda changed: None)
+    monkeypatch.setattr(sync, "analyze_pending", lambda: 0)
+    monkeypatch.setitem(sync.ACCOUNTS, "boite", type("C", (), {"kind": "ews"})())
+    monkeypatch.setitem(sync._providers, "boite", object())
+    assert sync.connection_lost(requests.exceptions.ReadTimeout("Read timed out")) and sync.connection_lost(RuntimeError("Reraised from ReadTimeout(…)"))
+    assert not sync.connection_lost(RuntimeError("401 Unauthorized"))
+    monkeypatch.setattr(sync, "sync_account", lambda key: (_ for _ in ()).throw(requests.exceptions.ReadTimeout("Read timed out")))
+    sync._last_run.clear()
+    sync.run_cycle(force=True)
+    assert "boite" not in sync._providers and cleared  # connexions oubliées
+    monkeypatch.setitem(sync._providers, "boite", object())
+    monkeypatch.setattr(sync, "sync_account", lambda key: (_ for _ in ()).throw(RuntimeError("401 Unauthorized")))
+    sync.run_cycle(force=True)
+    assert "boite" in sync._providers  # un refus du serveur n'efface rien
+    sync.last_error.clear()

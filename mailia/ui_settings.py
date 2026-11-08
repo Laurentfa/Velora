@@ -20,7 +20,7 @@ from mailia.ui_pet import pet_settings
 from mailia.ui_sigmodels import signature_models_dialog
 from mailia.ui_weather import weather_settings
 from mailia.ui_update import panel as update_panel
-from mailia import ui_zoom
+from mailia import ui_aishare, ui_zoom
 
 
 def state(ok: bool) -> str:
@@ -429,6 +429,7 @@ def _tab_ia(f) -> None:
     ui.switch("Seulement les mails non lus").bind_value(f, "AI_UNREAD_ONLY")
     ui.number("Ignorer les mails de plus de … jours (0 = aucune limite)", min=0, max=3650, step=1, precision=0).bind_value(f, "AI_MAX_AGE_DAYS").props("outlined dense").classes("w-full")
     ui.label("Les autres mails restent analysables à la demande (bouton « Analyser ce message »).").classes("text-caption text-grey")
+    ui_aishare.settings()
 
 
 def _tab_prm(f, host) -> None:

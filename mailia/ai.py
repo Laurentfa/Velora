@@ -218,6 +218,19 @@ def analyze_and_store(mid: str) -> dict:
         raise AIError("Message introuvable.")
     aipolicy.guard(m)
     d = analyze(m)
+    raw = dict(d)  # ce que dit l'IA, avant VOS corrections et expéditeurs prioritaires : c'est ce qui est partagé avec vos autres ordinateurs
+    d = store_analysis(m, d)
+    try:
+        from . import aishare
+        aishare.publish(m, raw)
+    except Exception:  # noqa: BLE001 — le partage ne doit jamais faire échouer une analyse réussie
+        logging.getLogger("ai").warning("partage de l'analyse impossible", exc_info=True)
+    return d
+
+
+def store_analysis(m: dict, d: dict) -> dict:
+    """Range une analyse sur le message en lui appliquant VOS règles locales : corrections de catégorie et expéditeurs prioritaires. Rend l'analyse finale."""
+    d = dict(d)
     forced = aipolicy.forced_category(m["sender"])  # vos corrections : l'adresse d'abord, puis le domaine
     if forced:
         d["category"] = forced
@@ -229,7 +242,7 @@ def analyze_and_store(mid: str) -> dict:
         c.execute(
             "UPDATE messages SET summary=?, category=?, priority=?, needs_reply=?, suggested=?, ai_at=? WHERE id=?",
             (d["summary"], d["category"], d["priority"], d["needs_reply"], d["suggested"],
-             datetime.now(timezone.utc).isoformat(), mid),
+             datetime.now(timezone.utc).isoformat(), m["id"]),
         )
     return d
 

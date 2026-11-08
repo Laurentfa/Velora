@@ -52,6 +52,14 @@ class _SupportMark(ExtendedProperty):
     property_type = "String"
 
 
+class _AIShare(ExtendedProperty):
+    """Analyse IA d'un message (résumé, catégorie…) publiée par Velora pour les autres ordinateurs qui lisent la même boîte (voir aishare). Invisible dans Outlook."""
+    distinguished_property_set_id = "PublicStrings"
+    property_name = "VeloraAnalysis"
+    property_type = "String"
+
+
+Message.register("ai_share", _AIShare)
 Message.register("support_mark", _SupportMark)
 Message.register("last_verb", _LastVerb)
 Message.register("icon_index", _IconIndex)
@@ -59,7 +67,7 @@ Message.register("flag_status", _FlagStatus)
 Message.register("followup_icon", _FollowupIcon)
 
 FIELDS = ["subject", "sender", "to_recipients", "cc_recipients", "datetime_received", "is_read", "body", "has_attachments", "attachments", "conversation_id", "flag_status", "last_verb", "importance", "is_read_receipt_requested",
-          "start", "end", "location"]  # les trois derniers : invitations à une réunion
+          "start", "end", "location", "ai_share"]  # start, end, location : invitations à une réunion ; ai_share : analyse publiée par un autre ordinateur
 EVENTS = ["NewMailEvent", "CreatedEvent", "DeletedEvent", "ModifiedEvent", "MovedEvent"]
 
 
@@ -145,6 +153,7 @@ def _to_msg(i) -> Msg | None:
         meeting=_meeting(i),
         importance=_importance(i),
         receipt_to=_receipt_to(i),
+        shared=getattr(i, "ai_share", None) or None,
     )
 
 
@@ -436,6 +445,23 @@ class EwsProvider:
         if r.status_code != 200:
             raise sr.RulesError(f"Réponse HTTP {r.status_code} du serveur.")
         return r.content
+
+    def read_analysis(self, uid: str) -> str | None:
+        """L'analyse IA publiée sur ce message par un autre ordinateur (JSON), ou None. Une seule petite requête, sans le corps du message."""
+        for item in self.account.fetch(ids=[ItemId(id=uid)], only_fields=["ai_share"]):
+            if isinstance(item, Exception):
+                raise item
+            return getattr(item, "ai_share", None) or None
+        return None
+
+    def write_analysis(self, uid: str, raw: str) -> None:
+        """Publie l'analyse sur le message, dans une propriété cachée : les autres ordinateurs la reprennent au lieu de relancer l'IA."""
+        for item in self.account.fetch(ids=[ItemId(id=uid)], only_fields=["ai_share"]):
+            if isinstance(item, Exception):
+                raise item
+            item.ai_share = raw
+            item.save(update_fields=["ai_share"])
+            return
 
     def rules_client(self):
         return EwsRulesClient(self)

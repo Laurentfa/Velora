@@ -15,7 +15,7 @@ from . import config, db, modules
 KV_PREFIXES = ("prompt:", "signature", "undo_delay", "ai_tone", "notify_urgent", "quick_replies", "ai_intents", "trusted_senders",
                "side_", "cols", "list_sort", "server_search", "folder_order:", "folder_fold", "archive:", "theme", "default_account", "user_name", "phish_safe",
                "ai_fallback", "ai_exclude", "ai_budget_", "onemin_allowance", "onemin_daily_cap", "apple_writer", "brief_off", "list_density", "update_auto",
-               "vip_senders", "safe_senders", "drafts_auto:", "modules_", "module:", "weather_on", "weather_place", "feed_on", "feed_url")
+               "vip_senders", "safe_senders", "drafts_auto:", "modules_", "module:", "weather_on", "weather_place", "feed_on", "feed_url", "ai_share:")
 SECRET = re.compile(r"(pass|pwd|secret|token|api_?key)", re.I)  # jamais dans le fichier, quelle que soit la clé
 SKIP_SUFFIX = (":src",)  # dossier d'origine d'un module sur l'autre machine : n'a aucun sens ici
 _MODULE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
