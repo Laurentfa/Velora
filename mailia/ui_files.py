@@ -7,7 +7,7 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 
-from nicegui import app, run, ui
+from nicegui import app, background_tasks, run, ui
 
 from mailia import ai, aipolicy, compose, config, htmlmail, preview, security, sync
 
@@ -51,14 +51,18 @@ class FilesMixin:
 
     @ui.refreshable_method
     def files_view(self) -> None:
+        if self.fwd_loading():  # pièces jointes d'un message transféré : elles arrivent une à une
+            with ui.row().classes("items-center gap-2 no-wrap").mark("fwd-loading"):
+                ui.spinner(size="16px")
+                ui.label(f"Chargement des pièces jointes… {int(self.draft.get('fwd_done') or 0)} sur {int(self.draft.get('fwd_total') or 0)}").classes("rmeta")
         for f in self.draft["files"]:
             with ui.row().classes("items-center gap-1 no-wrap w-full").style("min-width:0"):
                 ui.icon("attach_file", size="18px").classes("shrink-0")
                 ui.label(f"{f[0]} · {human_size(len(f[1]))}").classes("rmeta ellipsis").style("flex:1 1 0;min-width:0").tooltip(f[0])
                 if self.preview_kind(f[0]):
-                    ui.button(icon="visibility", on_click=lambda _, f=f: self.preview_draft(f)).props("flat dense round size=xs").classes("shrink-0").tooltip(
+                    ui.button(icon="visibility", on_click=lambda _, f=f: self.preview_draft(f)).props("flat dense round size=xs tabindex=-1").classes("shrink-0").tooltip(
                         "Aperçu (et résumé IA à la demande) avant l'envoi")
-                ui.button(icon="close", on_click=lambda _, f=f: self.drop_file(f)).props("flat dense round size=xs").classes("shrink-0")
+                ui.button(icon="close", on_click=lambda _, f=f: self.drop_file(f)).props("flat dense round size=xs tabindex=-1").classes("shrink-0")
 
     async def on_upload(self, e) -> None:
         data = await e.file.read()
@@ -89,26 +93,44 @@ class FilesMixin:
             return ui.notify(f"Téléchargement impossible : {e}", type="negative", multi_line=True)
         self._save_download(name, data)
 
-    def _save_download(self, name: str, data: bytes) -> None:
-        name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", os.path.basename(name)).strip(". ") or "piece-jointe"
-        if SERVER_MODE:  # navigateur / téléphone : téléchargement classique
-            ui.download.content(data, name)
-            return
+    @staticmethod
+    def write_download(name: str, data: bytes) -> Path:
+        """Écrit le fichier dans Téléchargements sous un nom libre. Peut bloquer longtemps (sous macOS, tant que la question « Velora veut accéder au dossier
+        Téléchargements » attend une réponse) : à lancer hors de la boucle de l'interface. Lève OSError si le système refuse."""
         folder = Path.home() / "Downloads"
         folder.mkdir(exist_ok=True)
         path, n = folder / name, 1
         while path.exists():
             path = folder / f"{Path(name).stem} ({n}){Path(name).suffix}"
             n += 1
-        try:
-            path.write_bytes(data)
-        except OSError as e:  # sous macOS : « Operation not permitted » tant que Velora n'a pas l'accès au dossier Téléchargements (avant, rien n'était dit)
-            log.warning("enregistrement de %s impossible : %s", name, e)
-            return ui.notify(f"Enregistrement impossible dans Téléchargements ({e.strerror or type(e).__name__}). Sous macOS, autorisez Velora dans Réglages Système › "
-                             "Confidentialité et sécurité › Fichiers et dossiers › Téléchargements.", type="negative", multi_line=True, timeout=0, close_button="OK")
+        path.write_bytes(data)
         mark_downloaded(path)
+        return path
+
+    def _download_done(self, name: str, path: Path | None, err: OSError | None) -> None:
+        if err is not None:  # sous macOS : « Operation not permitted » tant que Velora n'a pas l'accès au dossier Téléchargements
+            log.warning("enregistrement de %s impossible : %s", name, err)
+            ui.notify(f"Enregistrement impossible dans Téléchargements ({err.strerror or type(err).__name__}). Sous macOS, autorisez Velora dans Réglages Système › "
+                      "Confidentialité et sécurité › Fichiers et dossiers › Téléchargements.", type="negative", multi_line=True, timeout=0, close_button="OK")
+            return
         ui.notify(f"Enregistré dans Téléchargements : {path.name}", type="positive")
         reveal(path)
+
+    async def _save_download_async(self, name: str, data: bytes) -> None:
+        def work() -> tuple[Path | None, OSError | None]:
+            try:
+                return self.write_download(name, data), None
+            except OSError as e:
+                return None, e
+        path, err = await run.io_bound(work)  # l'interface reste libre pendant que macOS pose sa question d'autorisation
+        self._download_done(name, path, err)
+
+    def _save_download(self, name: str, data: bytes) -> None:
+        name = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "_", os.path.basename(name)).strip(". ") or "piece-jointe"
+        if SERVER_MODE:  # navigateur / téléphone : téléchargement classique
+            ui.download.content(data, name)
+            return
+        background_tasks.create(self._save_download_async(name, data))
 
     @staticmethod
     def zip_bundle(files: list[tuple[str, bytes]]) -> bytes:

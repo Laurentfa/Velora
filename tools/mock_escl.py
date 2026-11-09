@@ -19,6 +19,7 @@ CAPS = """<?xml version="1.0"?><scan:ScannerCapabilities xmlns:scan="http://sche
 </scan:ScannerCapabilities>"""
 
 JOBS: dict[str, dict] = {}
+LAST_POST: dict = {}  # dernière demande reçue : type de contenu et texte (les tests s'en servent)
 
 
 def page(n: int) -> bytes:
@@ -62,7 +63,8 @@ class H(BaseHTTPRequestHandler):
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0)).decode()
         if self.path == "/eSCL/ScanJobs":
             jid = str(len(JOBS) + 1)
-            JOBS[jid] = {"left": 3 if "Feeder" in body else 1, "done": 0, "body": body}
+            JOBS[jid] = {"left": 3 if "Feeder" in body else 1, "done": 0, "body": body, "ctype": self.headers.get("Content-Type", "")}
+            LAST_POST.update(ctype=self.headers.get("Content-Type", ""), body=body)
             return self.send(201, headers={"Location": f"http://faux-hote.invalide:1/eSCL/ScanJobs/{jid}"})
         self.send(404)
 

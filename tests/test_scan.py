@@ -93,3 +93,27 @@ def test_scanners_are_remembered_between_openings():
     assert scan.known()[0]["name"] == "HP Laser"
     scan.forget("http://192.168.1.30:80/eSCL")
     assert [s["name"] for s in scan.known()] == ["Brother MFC"]
+
+
+def test_the_request_is_sent_as_application_xml_so_brother_scanners_honour_the_source(scanner):
+    """Un scanner Brother accepte « text/xml » mais ignore alors TOUS les réglages (source, résolution) et numérise la vitre : la demande part en « application/xml »."""
+    scan.scan(scanner, "feeder", "color", 200)
+    assert mock.LAST_POST["ctype"] == "application/xml" and "<pwg:InputSource>Feeder</pwg:InputSource>" in mock.LAST_POST["body"]
+    scan.scan(scanner, "duplex", "color", 200)
+    assert "<scan:Duplex>true</scan:Duplex>" in mock.LAST_POST["body"] and "<pwg:InputSource>Feeder</pwg:InputSource>" in mock.LAST_POST["body"]
+    scan.scan(scanner, "platen", "color", 200)
+    assert "<pwg:InputSource>Platen</pwg:InputSource>" in mock.LAST_POST["body"]
+
+
+def test_a_scanner_that_refuses_application_xml_gets_text_xml(monkeypatch):
+    seen = []
+
+    def fake(method, url, body=None, headers=None, timeout=30):
+        seen.append((method, (headers or {}).get("Content-Type")))
+        return (415 if headers["Content-Type"] == "application/xml" else 201), {"location": "http://x/eSCL/ScanJobs/1"}, b""
+    monkeypatch.setattr(scan, "_http", fake)
+    assert scan._post_job("http://192.168.1.2/eSCL", "<x/>") == (201, {"location": "http://x/eSCL/ScanJobs/1"})
+    assert [c for _, c in seen] == ["application/xml", "text/xml"]
+    seen.clear()
+    monkeypatch.setattr(scan, "_http", lambda *a, **k: (seen.append(1), (409, {}, b""))[1])
+    assert scan._post_job("http://192.168.1.2/eSCL", "<x/>")[0] == 409 and len(seen) == 1  # chargeur vide : un autre type de contenu n'y changerait rien

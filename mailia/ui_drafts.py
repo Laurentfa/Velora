@@ -169,7 +169,7 @@ class DraftsMixin:
         if not accounts:
             return ui.notify("Aucun compte configuré (⚙ Paramètres).", type="warning")
         self.draft.update(account=self.account if self.account in accounts else accounts[0], to="", cc="", bcc="", subject="",
-                          body="", ins="", tone="neutre", files=[], quote=False, importance=1, html=compose.initial_html(account=self.account if self.account in accounts else accounts[0]), gen=False)
+                          body="", ins="", tone="neutre", files=[], fwd_total=0, fwd_done=0, quote=False, importance=1, html=compose.initial_html(account=self.account if self.account in accounts else accounts[0]), gen=False)
         self.new, self.cur, self.compose, self.fwd_src = True, None, True, None
         self.draft.update(id=uuid.uuid4().hex, reply_to=None)
         self._saved_sig = self._files_sig = None
@@ -194,12 +194,7 @@ class DraftsMixin:
                 for cid, uri in got.items():
                     body = re.sub(r"cid:(%3C)?" + re.escape(cid) + r"(%3E)?", lambda _: uri, body, flags=re.I)
                 m = {**m, "body_html": body}
-            files = []
-            for a in atts:
-                if a.get("inline"):
-                    continue
-                data, name = await run.io_bound(sync.fetch_attachment, m, a)
-                files.append((name or a.get("name") or "piece-jointe", data, a.get("type") or "application/octet-stream"))
+            pending = [a for a in atts if not a.get("inline")]  # les pièces jointes arrivent après l'ouverture de la fenêtre (voir _load_forward_files)
         except Exception as e:
             return ui.notify(f"Impossible de préparer le transfert : {e}", type="negative", multi_line=True)
         self.new_message()
@@ -208,11 +203,40 @@ class DraftsMixin:
         acct = m["account"] if m["account"] in sync.ACCOUNTS and sync.ACCOUNTS[m["account"]].password else self.draft["account"]
         subject = m["subject"] or ""
         # « TR: » sans espace avant les deux-points : Exchange ne reconnaît pas « TR : » et ouvrirait une autre conversation
-        self.draft.update(account=acct, subject=subject if re.match(r"(?i)\s*(tr|fwd?)\s*:", subject) else "TR: " + subject, files=files, importance=1,
-                          html=compose.initial_html(reply_to=m, account=acct, images=True), reply_to="fwd:" + m["id"])  # « fwd: » : à l'envoi, l'original est marqué « transféré »
+        self.draft.update(account=acct, subject=subject if re.match(r"(?i)\s*(tr|fwd?)\s*:", subject) else "TR: " + subject, files=[], importance=1,
+                          html=compose.initial_html(reply_to=m, account=acct, images=True), reply_to="fwd:" + m["id"],  # « fwd: » : à l'envoi, l'original est marqué « transféré »
+                          fwd_total=len(pending), fwd_done=0)
         self.fwd_src = m
         self.files_view.refresh()
-        self.reader.refresh()
+        self.reader.refresh()  # la fenêtre de rédaction s'ouvre tout de suite ; les pièces jointes viennent s'y ajouter une à une
+        if pending:
+            background_tasks.create(self._load_forward_files(self.draft["id"], m, pending))
+
+    def fwd_loading(self) -> bool:
+        """Des pièces jointes du transfert sont encore en cours de chargement."""
+        d = self.draft
+        return int(d.get("fwd_total") or 0) > int(d.get("fwd_done") or 0)
+
+    async def _load_forward_files(self, did: str, m: dict, pending: list[dict]) -> None:
+        """Charge les pièces jointes d'un message transféré, une à une, pendant que la fenêtre de rédaction est déjà ouverte. S'arrête si le message n'est plus celui-là."""
+        failed = []
+        for a in pending:
+            if self.draft.get("id") != did or not (self.new or self.compose):
+                return  # le message a été fermé ou remplacé : ces pièces ne sont plus attendues
+            try:
+                data, name = await run.io_bound(sync.fetch_attachment, m, a)
+            except Exception:  # noqa: BLE001 — une pièce qui ne vient pas ne bloque pas les autres ; on le dit à la fin
+                log.warning("transfert : pièce jointe %r non chargée", a.get("name"), exc_info=True)
+                failed.append(a.get("name") or "pièce jointe")
+                data = None
+            if self.draft.get("id") != did:
+                return
+            if data is not None:
+                self.draft["files"].append((name or a.get("name") or "piece-jointe", data, a.get("type") or "application/octet-stream"))
+            self.draft["fwd_done"] = int(self.draft.get("fwd_done") or 0) + 1
+            self.files_view.refresh()
+        if failed:
+            ui.notify("Pièce(s) jointe(s) non reprise(s) dans le transfert : " + ", ".join(failed[:5]) + ". Joignez-les à la main ou réessayez.", type="warning", multi_line=True)
 
     def open_compose(self, all_: bool = False, text: str = "") -> None:
         m = self.cur
@@ -245,7 +269,7 @@ class DraftsMixin:
 
     async def _save_draft_now(self) -> bool:
         d = self.draft
-        if not (self.compose or self.new) or not d.get("id") or not self._has_content():
+        if not (self.compose or self.new) or not d.get("id") or not self._has_content() or self.fwd_loading():  # pas de brouillon à moitié chargé : il perdrait des pièces jointes
             return False
         sig, files_sig = self._draft_sigs()
         if sig == self._saved_sig and files_sig == self._files_sig:
@@ -282,6 +306,8 @@ class DraftsMixin:
             if choice in (None, "stay"):
                 return
             if choice == "keep":
+                if self.fwd_loading():  # les pièces jointes du transfert arrivent encore : un brouillon enregistré maintenant en perdrait
+                    return ui.notify("Les pièces jointes du message transféré sont encore en cours de chargement : réessayez dans un instant.", type="warning")
                 await self._save_draft_now()
                 ui.notify("Brouillon conservé", type="positive")
                 background_tasks.create(run.io_bound(sync.mirror_drafts))  # sans attendre le passage suivant : il apparaît dans le dossier Brouillons

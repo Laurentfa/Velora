@@ -43,6 +43,7 @@ import logging
 import re
 import signal
 import subprocess
+from pathlib import Path
 from datetime import datetime
 
 if "--mcp-stdio" in sys.argv:  # pont pour les assistants qui lancent un programme local (Claude Desktop) : aucune interface, aucune base
@@ -147,12 +148,26 @@ def print_platform() -> str:
 AUTO_SUMMARY_MIN = 3  # nombre de mails à partir duquel une conversation est résumée sans clic (l'icône « Résumer la conversation » reste disponible avant)
 
 
+class _ReaderRefreshable(ui.refreshable_method):
+    """Le panneau de lecture se redessine à chaque clic (répondre, transférer, reporter…). Les outils des modules (fiche patient…) y sont rangés à l'abri juste avant, puis
+    remis en place : ils ne sont pas reconstruits (ni relus sur le serveur) à chaque clic."""
+
+    def _execute_refresh(self, args, kwargs, *, instance):
+        try:
+            if instance is not None:
+                instance.park_tools()
+        except Exception:  # noqa: BLE001 — au pire, les outils sont reconstruits comme avant
+            log.warning("outils des modules : rangement impossible", exc_info=True)
+        return super()._execute_refresh(args, kwargs, instance=instance)
+
+
 class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin, AppleWriterMixin, WeatherMixin, AgendaMixin, FeedMixin, ServerRulesMixin):
     """État et interface d'une fenêtre (chaque client a la sienne)."""
 
     def __init__(self) -> None:
         self.view, self.account, self.folder, self.q, self.limit = initial_view() + ("", 80)
         self.cur: dict | None = None
+        self._tools: dict | None = None  # outils de modules du message affiché : {"sig", "box"} (voir mount_tools)
         self.rows: list[dict] = []
         self.brief: dict | None = None
         self.counts: dict = queries.counts()
@@ -207,6 +222,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
 
     # ---------- construction ----------
     def build(self) -> None:
+        self.tools_home = ui.element("div").style("display:none")  # abri des outils de modules pendant que le panneau de lecture se redessine (jamais rafraîchi)
         cols = json.loads(db.kv_get("cols") or "{}")
         side_w, list_w = int(cols.get("side", 240)), int(cols.get("list", 400))
         with ui.element("div").classes("root").style(
@@ -838,7 +854,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
             ui.button("Afficher plus", on_click=self.more).props("flat no-caps").classes("self-center")
 
     # ---------- lecture ----------
-    @ui.refreshable_method
+    @_ReaderRefreshable
     def reader(self) -> None:
         m = self.cur
         if self.new:
@@ -848,7 +864,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
             with ui.scroll_area().classes("rbody"):
                 with ui.column().classes("rcontent gap-3"):
                     if self.fwd_src and str(self.draft.get("reply_to") or "").startswith("fwd:"):
-                        modules.render_slot("reader", self, self.fwd_src)
+                        self.mount_tools(self.fwd_src)  # transfert : la fiche du message transféré reste en place, comme pour une réponse
                     self.composer()
             return
         if not m and self.view == "brief":
@@ -904,6 +920,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                         ui.label("✦ IA").classes("tag")
                         ui.label("Pas encore analysé.").classes("sub")
                         ui.button("Analyser ce message", on_click=self.analyze_cur).props("unelevated no-caps color=primary").classes("q-mt-sm")
+                self.mount_tools(m)  # outils ajoutés par les modules personnels (fiche patient, recherche…) : sous le résumé IA, au-dessus des boutons du mail
                 self.translation_card(m)
                 self.phishing_banner(m)
                 self.meeting_card(m)
@@ -912,6 +929,33 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                 if self.compose:
                     self.composer()
                 self.body_view(m)
+
+    def park_tools(self) -> None:
+        """Avant que le panneau de lecture soit vidé : met les outils des modules à l'abri (ils seraient supprimés avec lui)."""
+        t = self._tools
+        if t and not t["box"].is_deleted and getattr(self, "tools_home", None) is not None and t["box"].parent_slot.parent is not self.tools_home:
+            t["box"].move(self.tools_home)
+
+    def mount_tools(self, m: dict) -> None:
+        """Outils des modules (fiche patient, recherche…) à cet endroit du panneau de lecture. Tant que c'est le même message, ils sont gardés tels quels d'un redessin à
+        l'autre : cliquer sur Répondre ne les reconstruit pas. Un autre message, ou un autre ensemble de modules, les reconstruit."""
+        slots = modules.slots.get("reader", [])
+        if not slots:
+            return
+        sig = (m["id"], tuple(x["module"] for x in slots))
+        t = self._tools
+        if t and (t["sig"] != sig or t["box"].is_deleted):
+            if not t["box"].is_deleted:
+                t["box"].delete()
+            t = self._tools = None
+        if t is None:
+            with self.tools_home:
+                box = ui.column().classes("w-full gap-0")
+            with box:
+                modules.render_slot("reader", self, m)
+            t = self._tools = {"sig": sig, "box": box}
+        t["box"].move(ui.context.slot.parent)
+        t["box"].set_visibility(bool(t["box"].default_slot.children))  # aucun outil affiché : pas d'espace vide
 
     def body_view(self, x: dict, trim: bool = False) -> None:
         """Corps du message : HTML d'origine (nettoyé, dans un cadre isolé) ; texte brut à défaut ou sur demande."""
@@ -1033,7 +1077,6 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
             for q in self.quick_replies():
                 ui.button(q["label"], on_click=lambda _, q=q: self.quick_reply(q["text"])).props("outline dense no-caps size=sm color=primary").tooltip(q["text"])
             ui.button(icon="tune", on_click=self.manage_quick).props("flat dense round size=sm").tooltip("Gérer mes réponses rapides")
-        modules.render_slot("reader", self, m)  # outils ajoutés par les modules personnels, sous les réponses rapides
         atts = json.loads(m["att_json"]) if m["att_json"] else []
         if atts:
             with ui.row().classes("gap-1 items-center q-mt-xs"):
@@ -1162,6 +1205,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                             with ui.row().classes("items-center gap-2 q-mt-xs"):
                                 ui.spinner(size="16px")
                                 ui.label("Résumé en cours…").classes("rmeta")
+                self.mount_tools(cur)  # idem pour une conversation : sous le résumé, au-dessus des boutons
                 self.translation_card(cur)
                 self.phishing_banner(cur)
                 self.meeting_card(cur)
@@ -2197,7 +2241,25 @@ async def _start_api() -> None:
     await run.io_bound(apiserver.ensure)  # ouvre l'API et/ou le serveur MCP si vous les avez activés
 
 
+def _ask_files_access() -> None:
+    """Sous macOS, le premier accès à Téléchargements fait poser la question « Velora veut accéder… » : on la déclenche au tout premier démarrage, hors de
+    tout enregistrement de pièce jointe (où l'attente figeait l'interface). Une seule fois : macOS ne repose pas la question après un refus."""
+    if sys.platform != "darwin" or SERVER_MODE or db.kv_get("files_access_asked"):
+        return
+    db.kv_set("files_access_asked", "1")
+    try:
+        os.listdir(Path.home() / "Downloads")
+    except OSError as e:
+        log.info("accès à Téléchargements non accordé : %s", e)
+
+
+async def _ask_files_access_later() -> None:
+    await asyncio.sleep(4)  # la fenêtre d'abord : la question de macOS s'affiche par-dessus
+    await run.io_bound(_ask_files_access)
+
+
 if not DB_ERROR:
+    app.on_startup(lambda: background_tasks.create(_ask_files_access_later()))
     app.on_startup(lambda: perf.mark("serveur de l'interface démarré"))
     app.on_startup(lambda: background_tasks.create(perf.lag_monitor()))
     app.on_startup(lambda: background_tasks.create(sync_loop()))

@@ -47,16 +47,18 @@ async def test_each_message_has_reply_and_forward_and_replying_targets_that_mess
     assert b.cur["id"] == "testbox|INBOX|0" and b.draft["reply_to"] == "testbox|INBOX|0" and "alice@example.com" in b.draft["to"]
 
 
-async def test_a_draft_in_the_thread_is_labelled_not_shown_as_an_unknown_sender(user, box) -> None:
-    from mailia import db
+async def test_a_draft_is_not_part_of_the_conversation(user, box) -> None:
+    from mailia import db, queries
     with db.conn() as c:
         c.execute("INSERT OR REPLACE INTO folders(account,key,name,path,role,sync) VALUES('testbox','Drafts','Brouillons','Brouillons','drafts',0)")
     add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv", date="2026-10-01T10:00:00+00:00")
     add_message("testbox|Drafts|1", sender="", subject="Dossier X", ckey="testbox|conv", date="2026-10-02T10:00:00+00:00", folder="Drafts")
+    assert [m["id"] for m in queries.thread("testbox|conv")] == ["testbox|INBOX|0"]
+    assert queries.list_messages()[0]["conv_n"] == 1
     await user.open("/")
     await box[-1].open("testbox|INBOX|0")
-    await user.should_see("Brouillon")
-    await user.should_see("Moi")
+    await user.should_not_see("Brouillon")
+    assert queries.thread("testbox|nope") == []
 
 
 async def test_module_tools_stay_visible_when_forwarding(user, box, monkeypatch) -> None:
@@ -180,3 +182,88 @@ async def test_a_two_message_conversation_is_not_summarised_automatically(user, 
     await box[-1].open("testbox|INBOX|1")
     await user.should_see("Court échange")
     await user.should_not_see("Résumé de la conversation")
+
+
+async def test_forward_opens_the_editor_at_once_and_attachments_arrive_one_by_one(user, box, monkeypatch) -> None:
+    """Un mail à nombreuses pièces jointes : la fenêtre de rédaction s'ouvre sans attendre ; l'envoi attend la dernière pièce ; une pièce qui échoue n'arrête pas les autres."""
+    import asyncio
+    import json
+    from tests.conftest import wait_until
+    atts = [{"name": f"p{i}.pdf", "type": "application/pdf", "size": 1000} for i in range(4)] + [{"name": "logo.png", "type": "image/png", "size": 50, "inline": True}]
+    add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", att_json=json.dumps(atts), has_att=1)
+    gate = asyncio.Event()
+    fetched = []
+
+    def fetch(m, a):
+        fetched.append(a["name"])
+        if a["name"] == "p2.pdf":
+            raise OSError("serveur")
+        return b"x" * 10, a["name"]
+    monkeypatch.setattr(sync, "fetch_attachment", fetch)
+    real_io = main.run.io_bound
+    waited = []
+
+    async def slow(fn, *a, **k):
+        if getattr(fn, "__name__", "") == "fetch":
+            waited.append(1)
+            await gate.wait()  # chaque pièce attend le feu vert : la fenêtre doit déjà être ouverte
+            gate.clear()
+        return await real_io(fn, *a, **k)
+    from mailia import ui_drafts
+    monkeypatch.setattr(ui_drafts.run, "io_bound", slow)
+    await user.open("/")
+    b = box[-1]
+    await b.open("testbox|INBOX|0")
+    await b.forward()
+    assert b.new and b.draft["files"] == [] and b.fwd_loading()  # ouverte avant la première pièce
+    await user.should_see("Chargement des pièces jointes")
+    sent = []
+    monkeypatch.setattr(b, "undo_delay", lambda: 0)
+    b.draft.update(to="bob@example.com")
+    await b.send()  # l'envoi est refusé tant que tout n'est pas arrivé
+    await user.should_see("encore en cours de chargement")
+    for _ in range(4):
+        await wait_until(lambda: waited)
+        waited.clear()
+        gate.set()
+        await asyncio.sleep(0.2)
+    await wait_until(lambda: not b.fwd_loading())
+    assert [f[0] for f in b.draft["files"]] == ["p0.pdf", "p1.pdf", "p3.pdf"] and fetched == ["p0.pdf", "p1.pdf", "p2.pdf", "p3.pdf"]  # dans l'ordre ; la pièce en échec est signalée ; l'image du texte n'est pas rejointe
+    assert not sent
+    await user.should_see("non reprise")
+
+
+async def test_scan_dialog_survives_a_scan_with_blank_pages(user, box, monkeypatch) -> None:
+    """Après une numérisation, la vérification des pages vides plantait (« await » dans un générateur) : l'erreur s'affichait dans le journal à chaque scan."""
+    import io
+    from PIL import Image
+    from mailia import scan
+    white = io.BytesIO()
+    Image.new("RGB", (300, 400), "white").save(white, "JPEG")
+    monkeypatch.setattr(scan, "scan", lambda base, source, mode, dpi: [white.getvalue()])
+    monkeypatch.setattr(scan, "discover", lambda t=3.0: [])
+    monkeypatch.setattr(scan, "known", lambda: [{"name": "Faux", "base": "http://192.168.1.9/eSCL"}])
+    add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X")
+    await user.open("/")
+    b = box[-1]
+    await b.open("testbox|INBOX|0")
+    await b.scan_dialog()
+    await user.should_see("Scanner un document")
+    user.find("Numériser").click()
+    await user.should_see("semblent vides")  # l'avertissement apparaît, sans erreur dans le journal (le test échoue sur toute erreur)
+
+
+async def test_attachment_buttons_never_take_the_keyboard(user, box) -> None:
+    """Entrée dans l'éditeur ouvrait l'aperçu d'une pièce jointe après un ajout : ces boutons (aperçu, retrait) ne reçoivent plus le clavier."""
+    add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", ckey="testbox|conv")
+    await user.open("/")
+    b = box[-1]
+    await b.open("testbox|INBOX|0")
+    await b.forward()
+    await user.should_see("Joindre un fichier")
+    b.draft["files"].append(("a.pdf", b"%PDF-1.4", "application/pdf"))
+    b.files_view.refresh()
+    await user.should_see("a.pdf")
+    btns = [e for e in b.host.client.elements.values() if isinstance(e, ui.button) and e._props.get("icon") in ("visibility", "close")
+            and not e.is_deleted and "shrink-0" in e._classes]
+    assert btns and all("tabindex" in e._props and str(e._props["tabindex"]) == "-1" for e in btns), [e._props for e in btns]

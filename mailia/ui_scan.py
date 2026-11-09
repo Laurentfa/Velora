@@ -54,9 +54,12 @@ class ScanMixin:
                 t_net = ui.tab("Scanner réseau", icon="print")
                 t_ph = ui.tab("Téléphone", icon="smartphone")
                 t_iph = ui.tab("iPhone (Mac)", icon="phone_iphone") if sys.platform == "darwin" else None
+            settings = None  # créé plus bas : l'événement de l'onglet peut arriver avant
+
             def tab_changed(e) -> None:
                 on_iphone_tab = t_iph is not None and e.value == t_iph._props["name"]
-                settings.set_visibility(not on_iphone_tab)
+                if settings is not None:
+                    settings.set_visibility(not on_iphone_tab)
                 if on_iphone_tab:
                     ask_iphone()  # le menu de l'iPhone s'ouvre dès qu'on choisit l'onglet
 
@@ -122,7 +125,7 @@ class ScanMixin:
                             found.set_options({s_["base"]: s_["name"] for s_ in scan.known()}, value=base)
                         await add_pages(raws, False)
                         net_msg.set_text(f"{len(raws)} page(s) ajoutée(s). Posez la suivante et recommencez si besoin.")
-                        blanks = sum(1 for r in raws if await run.io_bound(scan.is_blank, r))
+                        blanks = sum([1 for r in raws if await run.io_bound(scan.is_blank, r)])  # (une compréhension de liste : « await » dans un générateur plantait après chaque numérisation)
                         if blanks:
                             ui.notify(f"{blanks} page(s) semblent vides. Le document est peut-être dans le chargeur : choisissez la source "
                                       "« Chargeur automatique », ou posez-le sur la vitre.", type="warning", multi_line=True, timeout=8000)

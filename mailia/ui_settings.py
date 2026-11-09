@@ -881,11 +881,13 @@ def _tab_use(host) -> None:
         if SERVER_MODE:
             ui.download.content(raw, name)
             return
-        folder = Path.home() / "Downloads"
-        folder.mkdir(exist_ok=True)
-        path = folder / name
-        path.write_bytes(raw)
-        ui.notify(f"Sauvegarde enregistrée dans Téléchargements : {name}", type="positive")
+        from mailia.ui_files import FilesMixin
+        try:
+            path = await run.io_bound(FilesMixin.write_download, name, raw)  # hors de la boucle : macOS peut attendre une autorisation
+        except OSError as err:
+            return ui.notify(f"Enregistrement impossible dans Téléchargements ({err.strerror or type(err).__name__}). Sous macOS, autorisez Velora dans Réglages Système › "
+                             "Confidentialité et sécurité › Fichiers et dossiers › Téléchargements.", type="negative", multi_line=True, timeout=0, close_button="OK")
+        ui.notify(f"Sauvegarde enregistrée dans Téléchargements : {path.name}", type="positive")
         reveal(path)
 
     async def do_import(e) -> None:

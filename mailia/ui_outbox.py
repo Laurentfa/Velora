@@ -25,6 +25,8 @@ class OutboxMixin:
 
     async def send(self) -> None:
         d, m = self.draft, self.cur
+        if self.fwd_loading():
+            return ui.notify("Les pièces jointes du message transféré sont encore en cours de chargement : patientez un instant.", type="warning")
         account = d["account"] if self.new else m["account"]
         plain = html_to_text(d["html"] or "").strip()
         if not d["to"].strip() or not (plain or "<img" in (d["html"] or "")):

@@ -5,7 +5,8 @@ import pytest
 from nicegui import ui
 from nicegui.testing import User
 
-from mailia import db, modules
+import main
+from mailia import db, modules, sync
 from mailia.ui_common import NOLIST_VIEWS, VIEWS
 from mailia.ui_settings import open_settings
 
@@ -312,3 +313,59 @@ def test_an_archive_with_several_modules_imports_them_all(mod_dir, tmp_path_fact
     assert modules.import_bundle(single) == ["seul"]
     with pytest.raises(ValueError):
         modules.import_bundle(out)  # un dossier sans aucun module
+
+
+async def test_module_tools_sit_under_the_ai_summary_and_above_the_mail_buttons_and_survive_a_redraw(user, monkeypatch) -> None:
+    """La fiche patient et la recherche (outils de modules) viennent juste sous le résumé IA, avant les boutons répondre / transférer, et ne sont PAS reconstruites quand
+    le panneau se redessine (clic sur Répondre) ; un autre message les reconstruit."""
+    import asyncio
+    from tests.conftest import add_message
+    monkeypatch.setattr(sync, "run_cycle", lambda: None)
+    built = []
+    modules.slots["reader"].clear()
+    modules.slots["reader"].append({"module": "outil", "order": 100, "build": lambda api, mailbox, msg: (built.append(msg["id"]), ui.label("OUTIL-DE-MODULE").mark("outil-module"))})
+    try:
+        ui.page("/")(main.index_page)
+        db.kv_set("brief_day", __import__("datetime").datetime.now().strftime("%Y-%m-%d"))
+        boxes = []
+        real = main.Mailbox.__init__
+        monkeypatch.setattr(main.Mailbox, "__init__", lambda self, *a, **k: (real(self, *a, **k), boxes.append(self))[0])
+        one = add_message(mid="testbox|INBOX|1", summary="Résumé de test", category="info", priority=1, needs_reply=0, suggested="", ai_at="2026-01-01T00:00:00")
+        two = add_message(mid="testbox|INBOX|2", subject="Autre", summary="Autre résumé", category="info", priority=1, needs_reply=0, suggested="", ai_at="2026-01-01T00:00:00")
+        await user.open("/")
+        mb = boxes[-1]
+
+        def dom_order() -> list[str]:
+            """Éléments repérés, dans l'ordre où ils sont dessinés dans la page."""
+            found = []
+
+            def walk(el):
+                mark = " ".join(str(x) for x in getattr(el, "_markers", []) or [])
+                text = getattr(el, "text", "") or ""
+                for key in ("outil-module", "reply"):
+                    if key in mark:
+                        found.append(key)
+                if text == "Résumé de test":
+                    found.append("summary")
+                for ch in el.default_slot.children:
+                    walk(ch)
+            walk(mb.root.client.layout)
+            return found[len(found) - 1 - found[::-1].index("summary"):] if "summary" in found else found  # la liste des mails a aussi un « résumé » et des boutons : on ne garde que le panneau de lecture
+        await mb.open(one)
+        await asyncio.sleep(0.5)
+        order = dom_order()
+        assert order[0] == "summary" and order.index("outil-module") < order.index("reply"), order  # sous le résumé, avant « Répondre »
+        label = [e for e in user.find(marker="outil-module").elements][0]
+        mb.reader.refresh()  # ce que fait un clic sur Répondre, Transférer, Reporter…
+        await asyncio.sleep(0.5)
+        order = dom_order()
+        assert order[0] == "summary" and order.count("outil-module") == 1 and order.index("outil-module") < order.index("reply"), order
+        assert [e.id for e in user.find(marker="outil-module").elements] == [label.id] and built == [one]  # le même élément, jamais reconstruit
+        await mb.forward(mb.cur)  # Transférer : le panneau devient l'éditeur du nouveau message
+        await asyncio.sleep(1.0)
+        assert mb.new and [e.id for e in user.find(marker="outil-module").elements] == [label.id] and built == [one], (mb.new, built)  # la fiche est restée la même
+        await mb.open(two)
+        await asyncio.sleep(0.5)
+        assert built == [one, two] and dom_order().count("outil-module") == 1  # un autre message : outils reconstruits, l'ancien est supprimé
+    finally:
+        modules.slots["reader"].clear()

@@ -218,6 +218,21 @@ def is_blank(data: bytes) -> bool:
         return False
 
 
+def _post_job(base: str, xml: str) -> tuple[int, dict]:
+    """Envoie la demande de numérisation. « application/xml » d'abord : certains scanners (Brother…) acceptent la demande avec « text/xml » mais IGNORENT alors tous les
+    réglages (source, résolution, zone) et numérisent la vitre avec leurs réglages par défaut. Si le scanner refuse « application/xml », on réessaie en « text/xml »."""
+    status, hdr = 503, {}
+    for ctype in ("application/xml", "text/xml"):
+        for _ in range(8):  # scanner occupé : on réessaie un peu
+            status, hdr, _data = _http("POST", base + "/ScanJobs", xml.encode(), {"Content-Type": ctype}, timeout=20)
+            if status != 503:
+                break
+            time.sleep(1.5)
+        if status in (200, 201, 409, 503):  # accepté, ou occupé / chargeur vide : un autre type de contenu n'y changerait rien
+            break
+    return status, hdr
+
+
 def scan(base: str, source: str = "auto", color: str = "color", dpi: int = 200, caps: dict | None = None) -> list[bytes]:
     """Numérise et retourne les pages (JPEG). source : auto (chargeur s'il est garni, sinon vitre) | platen (vitre) | feeder (chargeur)
     | duplex (chargeur recto-verso)."""
@@ -244,12 +259,7 @@ def scan(base: str, source: str = "auto", color: str = "color", dpi: int = 200, 
 <pwg:DocumentFormat>image/jpeg</pwg:DocumentFormat>
 {'<scan:Duplex>true</scan:Duplex>' if source == 'duplex' else ''}
 </scan:ScanSettings>"""
-    status = 503
-    for _ in range(8):  # scanner occupé : on réessaie un peu
-        status, hdr, _data = _http("POST", base + "/ScanJobs", xml.encode(), {"Content-Type": "text/xml"}, timeout=20)
-        if status != 503:
-            break
-        time.sleep(1.5)
+    status, hdr = _post_job(base, xml)
     if status in (409, 503):
         raise ScanError("Le scanner est occupé, ou le chargeur est vide / un capot est ouvert.")
     if status not in (200, 201) or not hdr.get("location"):

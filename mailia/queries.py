@@ -131,7 +131,7 @@ def list_messages(account: str = "", q: str = "", unread: bool = False, view: st
         for n in range(0, len(keys), 400):
             part = keys[n:n + 400]
             marks = ",".join("?" * len(part))
-            for s in c.execute(f"SELECT ckey, COUNT(*) n, SUM(is_read=0) u FROM messages WHERE ckey IN ({marks}) GROUP BY ckey", part):
+            for s in c.execute(f"SELECT ckey, COUNT(*) n, SUM(is_read=0) u FROM messages WHERE ckey IN ({marks}) AND NOT EXISTS (SELECT 1 FROM folders f WHERE f.account=messages.account AND f.key=messages.folder AND f.role='drafts') GROUP BY ckey", part):
                 stats[s["ckey"]] = (s["n"], s["u"] or 0)
         for r in reps:
             r["conv_n"], r["conv_unread"] = stats.get(r["ckey"], (1, 0 if r["is_read"] else 1))
@@ -170,7 +170,12 @@ def add_snippets(rows: list[dict], terms: list[str]) -> None:
 
 
 def thread(ckey: str) -> list[dict]:
-    return db.thread_rows(ckey)
+    """Les messages d'un fil. Les brouillons n'en font pas partie : ils vivent dans le dossier Brouillons (seul fil réduit à un brouillon : on le garde, il faut bien afficher quelque chose)."""
+    rows = db.thread_rows(ckey)
+    with db.conn() as c:
+        drafts = {(r["account"], r["key"]) for r in c.execute("SELECT account, key FROM folders WHERE role='drafts'")}
+    kept = [r for r in rows if (r["account"], r["folder"]) not in drafts]
+    return kept or rows
 
 
 def get_message(mid: str) -> dict | None:

@@ -6,6 +6,8 @@ import pytest
 
 from mailia import autoconfig, backup, config, db, modules, safexml, scan, settingsync
 
+import main
+
 
 def hostile_backup(tmp_path, monkeypatch):
     monkeypatch.setattr(modules, "DIR", tmp_path / "mods")
@@ -70,12 +72,36 @@ def test_saving_an_attachment_reports_a_refused_write_instead_of_failing_silentl
             raise PermissionError(1, "Operation not permitted")
         return real_write(self, data)
     monkeypatch.setattr(Path, "write_bytes", refuse)
-    ui_files.FilesMixin._save_download(object(), "contrat.pdf", b"%PDF")
+    F = ui_files.FilesMixin
+
+    def save(name):  # ce que fait _save_download_async, sans la boucle
+        try:
+            return F._download_done(object(), name, F.write_download(name, b"%PDF"), None)
+        except OSError as e:
+            return F._download_done(object(), name, None, e)
+    save("contrat.pdf")
     assert len(notes) == 1 and notes[0][1]["type"] == "negative" and "Téléchargements" in notes[0][0][0] and "Confidentialité" in notes[0][0][0]
     assert not (tmp_path / "Downloads" / "contrat.pdf").exists()
     notes.clear()
-    ui_files.FilesMixin._save_download(object(), "ok.pdf", b"%PDF")  # un enregistrement normal marche toujours
+    save("ok.pdf")  # un enregistrement normal marche toujours
     assert (tmp_path / "Downloads" / "ok.pdf").read_bytes() == b"%PDF" and notes[0][1]["type"] == "positive"
+
+
+def test_the_downloads_question_is_asked_once_at_first_start(clean_db, monkeypatch, tmp_path) -> None:
+    """macOS pose sa question d'accès à Téléchargements au premier accès : on la provoque au démarrage (une fois), pas pendant l'enregistrement d'une pièce jointe."""
+    import os
+    import sys
+    from pathlib import Path
+
+    seen = []
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(main, "SERVER_MODE", False)
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    (tmp_path / "Downloads").mkdir()
+    monkeypatch.setattr(os, "listdir", lambda p: seen.append(str(p)) or [])
+    main._ask_files_access()
+    main._ask_files_access()
+    assert seen == [str(tmp_path / "Downloads")]
 
 
 def test_saved_attachments_are_marked_as_downloaded(monkeypatch, tmp_path) -> None:

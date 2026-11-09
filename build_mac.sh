@@ -15,6 +15,8 @@ PL="dist/Velora.app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :NSBonjourServices:1 string _uscans._tcp" "$PL" 2>/dev/null
 # Dictée vocale : micro (le petit programme natif écoute le micro de la part de Velora) ; sans l'un de ces textes, macOS ferme l'appli à la première écoute
 /usr/libexec/PlistBuddy -c "Add :NSMicrophoneUsageDescription string Velora écoute le micro quand vous dictez un message ; la reconnaissance se fait sur ce Mac." "$PL" 2>/dev/null
+# Pièces jointes : enregistrées dans Téléchargements (macOS pose la question une seule fois ; la demande est faite au premier démarrage)
+/usr/libexec/PlistBuddy -c "Add :NSDownloadsFolderUsageDescription string Velora enregistre dans Téléchargements les pièces jointes que vous téléchargez." "$PL" 2>/dev/null
 # Programme de dictée (Swift, macOS 26 ou plus) : s'il ne peut pas être construit ici, la dictée n'est simplement pas proposée
 if swiftc -swift-version 5 -parse-as-library -O -target "$(uname -m)-apple-macos26.0" tools/dictate/velora-dictate.swift -o dist/Velora.app/Contents/MacOS/velora-dictate 2>/tmp/velora-dictate-build.log; then
   echo "→ dictée vocale incluse"
