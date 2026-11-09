@@ -302,6 +302,14 @@ def _tab_aff(f) -> None:
     ui.select({z: ui_zoom.label(z) for z in ui_zoom.ZOOMS}, value=ui_zoom.zoom(), label="Zoom de l'interface",
               on_change=change_zoom).props("outlined dense stack-label").classes("w-full q-mt-sm").mark("ui-zoom")
     ui.label("Réduire le zoom affiche plus de choses à l'écran. Raccourcis : ⌘ + et ⌘ − (Ctrl sous Windows), ⌘ 0 pour revenir à 100 %.").classes("text-caption text-grey")
+    mail_scale = ui.label(f"Taille de lecture des mails : {htmlmail.scale()} %").classes("q-mt-sm")
+
+    def change_mail_scale(e) -> None:
+        db.kv_set("mail_scale", str(int(e.value)))
+        mail_scale.set_text(f"Taille de lecture des mails : {int(e.value)} %")
+    ui.slider(min=70, max=110, step=5, value=htmlmail.scale(), on_change=change_mail_scale).props("label dense").mark("mail-scale")
+    ui.label("Beaucoup de mails imposent un texte plus grand que l'application (12 pt, soit 16 px, au lieu de 14 px) : 90 % les ramène à peu près à la même taille. "
+             "Pris en compte à l'ouverture du message suivant.").classes("text-caption text-grey")
     ui.switch("Liste de mails compacte (plus de mails à l'écran)", value=ui_zoom.compact(),
               on_change=lambda e: ui_zoom.set_compact(bool(e.value))).props("dense").classes("q-mt-sm").mark("density-switch")
     ui.label("Une ligne par mail : expéditeur, objet et date, sans résumé de l'IA ni pastilles (sauf « Urgent »). Les actions apparaissent au survol.").classes("text-caption text-grey")

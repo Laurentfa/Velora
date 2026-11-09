@@ -104,3 +104,16 @@ async def test_plain_text_body_is_highlighted_when_a_search_is_active(user: User
     await asyncio.sleep(0.4)
     marked = [str(e.content) for e in user.find(kind=ui.html).elements if "mailbody" in " ".join(e.classes)]
     assert any("<mark>Lemasson</mark>" in c for c in marked)
+
+
+def test_mail_reading_scale_defaults_to_90_percent_and_is_adjustable(clean_db) -> None:
+    from mailia import db, htmlmail
+    assert htmlmail.scale() == 90 and "body{zoom:0.90}" in htmlmail.build_doc("<p>x</p>")
+    db.kv_set("mail_scale", "80")
+    assert "body{zoom:0.80}" in htmlmail.build_doc("<p>x</p>")
+    db.kv_set("mail_scale", "100")
+    assert "zoom" not in htmlmail.build_doc("<p>x</p>")  # 100 % : le mail s'affiche tel que l'expéditeur l'a fait
+    db.kv_set("mail_scale", "500")
+    assert htmlmail.scale() == 110  # borné
+    db.kv_set("mail_scale", "abc")
+    assert htmlmail.scale() == 90

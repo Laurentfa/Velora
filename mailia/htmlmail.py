@@ -140,6 +140,17 @@ HIGHLIGHT_JS = r"""(function (terms) {
 })"""
 
 
+SCALE_DEFAULT = 90  # %, réglable (Paramètres › Affichage) : beaucoup d'expéditeurs imposent du 12 pt (16 px), plus grand que l'interface (14 px)
+
+
+def scale() -> int:
+    """Taille de lecture des mails HTML, en % (70 à 110)."""
+    try:
+        return max(70, min(110, int(db.kv_get("mail_scale") or SCALE_DEFAULT)))
+    except ValueError:
+        return SCALE_DEFAULT
+
+
 MARK_CSS = "mark{background:#ffe566;color:#1d1d1f;border-radius:3px;padding:0 1px}"
 
 
@@ -156,13 +167,15 @@ def build_doc(clean: str, allow_images: bool = False, cid_map: dict[str, str] | 
     theme = db.kv_get("theme") or "auto"  # le cadre est inversé en thème sombre (voir .mailframe) : les images le sont de nouveau pour garder leurs couleurs
     undo = "body{background:#dae0e9}img,video,mark{filter:invert(1) hue-rotate(180deg)}"  # #dae0e9 devient le fond sombre #1a2029 une fois inversé ; le surlignage garde son jaune
     dark_css = undo if theme == "dark" else f"@media (prefers-color-scheme: dark){{{undo}}}" if theme == "auto" else ""
+    pct = scale()
+    zoom = f"body{{zoom:{pct / 100:.2f}}}" if pct != 100 else ""  # taille de lecture : le texte imposé par l'expéditeur est réduit (ou agrandi) dans les mêmes proportions
     hl = ""
     if terms:
         data = json.dumps(terms, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
         hl = f'<script nonce="{nonce}">{HIGHLIGHT_JS}({data})</script>'
     return (f'<!doctype html><html><head><meta charset="utf-8">'
             f'<meta http-equiv="Content-Security-Policy" content="{_html.escape(csp, quote=True)}">'
-            f'<style>{BASE_CSS}{MARK_CSS}{dark_css}</style></head><body>{clean}<script nonce="{nonce}">{PAGE_JS}</script>{hl}</body></html>')
+            f'<style>{BASE_CSS}{zoom}{MARK_CSS}{dark_css}</style></head><body>{clean}<script nonce="{nonce}">{PAGE_JS}</script>{hl}</body></html>')
 
 
 PRINT_CSS = """
