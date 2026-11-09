@@ -101,16 +101,16 @@ class DraftsMixin:
             up = ui.upload(on_upload=self.on_upload, multiple=True, auto_upload=True,
                            max_file_size=25 * 1024 * 1024).props("hide-upload-btn").style("position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden")
             ui.run_javascript(f"window.__mailiaUp = {up.id}")  # cible des fichiers déposés sur la rédaction
-            with ui.row().classes("q-mt-sm items-center gap-2"):
-                ui.button("Joindre un fichier (25 Mo max au total)", icon="attach_file",
+            with ui.row().classes("q-mt-xs items-center gap-2"):  # Envoyer et Annuler à gauche, les pièces jointes à droite : une seule rangée
+                ui.button("Envoyer", on_click=self.send).props("unelevated no-caps color=primary")
+                ui.button("Annuler", on_click=self.cancel_compose).props("flat no-caps")
+                ui.space()
+                ui.button("Joindre un fichier (25 Mo max)", icon="attach_file",
                           on_click=None).props("flat no-caps dense").on(
-                    "click", js_handler=f"() => getElement({up.id}).$refs.qRef.pickFiles()")
+                    "click", js_handler=f"() => getElement({up.id}).$refs.qRef.pickFiles()").tooltip("25 Mo au total pour toutes les pièces jointes")
                 ui.button("Scanner un document", icon="document_scanner", on_click=self.scan_dialog).props("flat no-caps dense").tooltip(
                     "Numériser avec un scanner du réseau ou avec votre téléphone, et joindre le résultat en PDF")
             self.files_view()
-            with ui.row().classes("q-mt-sm"):
-                ui.button("Envoyer", on_click=self.send).props("unelevated no-caps color=primary")
-                ui.button("Annuler", on_click=self.cancel_compose).props("flat no-caps")
             # la barre d'actions (et le bouton Envoyer) est au-dessus du texte : on n'a pas à descendre en bas d'un long message
             self.editor = make_editor(d["html"], lambda e: d.__setitem__("html", e.value or ""))
             self.editor.classes("q-mt-sm")

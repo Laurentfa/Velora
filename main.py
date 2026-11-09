@@ -862,7 +862,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                 ui.button("‹ Retour", on_click=self.back).props("flat dense no-caps").classes("lt-md self-start")
                 ui.label("Nouveau message").classes("text-h6").style("font-weight:700")
             with ui.scroll_area().classes("rbody"):
-                with ui.column().classes("rcontent gap-3"):
+                with ui.column().classes("rcontent"):
                     if self.fwd_src and str(self.draft.get("reply_to") or "").startswith("fwd:"):
                         self.mount_tools(self.fwd_src)  # transfert : la fiche du message transféré reste en place, comme pour une réponse
                     self.composer()
@@ -885,7 +885,9 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                 ui.avatar(initials(m["sender_name"] or m["sender"]), color="blue-1", text_color="blue-9", size="34px")
                 when = full_date(m["date"])
                 with ui.column().classes("gap-0"):
-                    ui.label(f"{m['sender_name'] or m['sender']} <{m['sender']}>").classes("rmeta").style("color:var(--text);font-weight:600")
+                    with ui.row().classes("items-center gap-2 no-wrap"):
+                        ui.label(f"{m['sender_name'] or m['sender']} <{m['sender']}>").classes("rmeta").style("color:var(--text);font-weight:600")
+                        self.verified_badge(m)
                     with ui.row().classes("items-center gap-2 no-wrap"):
                         ui.label(f"{when} · {label_of(m['account'])}").classes("rmeta")
                         if m.get("importance") in (0, 2):
@@ -903,7 +905,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
             elif self.is_bcc_to_me(m):
                 ui.label("🙈 Vous êtes en copie cachée (votre adresse n'apparaît pas dans les destinataires)").classes("rmeta")
         with ui.scroll_area().classes("rbody"):
-            with ui.column().classes("rcontent gap-3"):
+            with ui.column().classes("rcontent"):
                 use_ai = config.ai_enabled()
                 if use_ai and m["summary"]:
                     with ui.element("div").classes("aicard"):
@@ -1184,9 +1186,11 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         with ui.column().classes("rhead gap-1"):
             ui.button("‹ Retour", on_click=self.back).props("flat dense no-caps").classes("lt-md self-start")
             ui.label(subject).classes("text-h6").style("line-height:1.3;font-weight:700")
-            ui.label(f"{len(th)} messages · " + ", ".join(names[:4]) + ("…" if len(names) > 4 else "")).classes("rmeta")
+            with ui.row().classes("items-center gap-2 no-wrap"):
+                ui.label(f"{len(th)} messages · " + ", ".join(names[:4]) + ("…" if len(names) > 4 else "")).classes("rmeta")
+                self.verified_badge(cur)
         with ui.scroll_area().classes("rbody"):
-            with ui.column().classes("rcontent gap-3"):
+            with ui.column().classes("rcontent"):
                 if config.ai_enabled():
                     summary = self.tsum.get(cur["ckey"])
                     cached = db.kv_get(f"thread_sum:{cur['ckey']}")

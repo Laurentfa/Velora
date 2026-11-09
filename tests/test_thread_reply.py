@@ -267,3 +267,15 @@ async def test_attachment_buttons_never_take_the_keyboard(user, box) -> None:
     btns = [e for e in b.host.client.elements.values() if isinstance(e, ui.button) and e._props.get("icon") in ("visibility", "close")
             and not e.is_deleted and "shrink-0" in e._classes]
     assert btns and all("tabindex" in e._props and str(e._props["tabindex"]) == "-1" for e in btns), [e._props for e in btns]
+
+
+async def test_verified_sender_is_a_badge_in_the_header_not_a_line_of_its_own(user, box) -> None:
+    """Gain de hauteur : « Expéditeur vérifié » est une pastille à côté du nom, plus une ligne séparée."""
+    add_message("testbox|INBOX|0", sender="alice@example.com", subject="Dossier X", auth='{"dmarc": "pass"}')
+    add_message("testbox|INBOX|1", sender="bob@example.com", subject="Autre")
+    await user.open("/")
+    await box[-1].open("testbox|INBOX|0")
+    await user.should_see(marker="sender-verified")
+    await user.should_not_see("Expéditeur vérifié")
+    await box[-1].open("testbox|INBOX|1")
+    await user.should_not_see(marker="sender-verified")

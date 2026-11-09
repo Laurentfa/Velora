@@ -396,10 +396,20 @@ class MailToolsMixin:
         self.reader.refresh()
         self.rows_view.refresh()
 
+    def verified_badge(self, m: dict) -> None:
+        """Petite pastille « vérifié » à côté de l'expéditeur : le serveur de messagerie a contrôlé que le message vient bien de l'adresse affichée."""
+        if m["folder"] != "INBOX" and not m.get("body"):
+            return
+        if security.assess(m)["level"] or not authcheck.verified(security._json(m.get("auth"), {})):
+            return
+        with ui.row().classes("items-center gap-0 no-wrap").style("opacity:.85") as row:
+            ui.icon("verified_user", size="14px").style("color:var(--accent)")
+            ui.label("vérifié").classes("rmeta").style("font-size:12px;margin-left:2px")
+        row.tooltip("Votre serveur de messagerie a contrôlé que ce message vient bien de l'adresse affichée. "
+                    "Cela ne garantit pas que son contenu soit honnête.").mark("sender-verified")
+
     def phishing_ai_card(self, m: dict, res: dict) -> None:
         """Résultats techniques d'authentification de l'expéditeur, et avis de l'IA s'il a été demandé."""
-        auth = security._json(m.get("auth"), {})
-        verified = not res["level"] and authcheck.verified(auth)
         cached = db.kv_get(f"phish:{m['id']}") if config.ai_enabled() else ""
         op = None
         if cached:
@@ -407,12 +417,7 @@ class MailToolsMixin:
                 op = json.loads(cached)
             except ValueError:
                 op = None
-        if verified:  # une seule petite ligne : l'expéditeur est bien celui qu'il prétend être
-            with ui.row().classes("items-center gap-1 no-wrap q-px-sm").style("opacity:.8") as vrow:
-                ui.icon("verified_user", size="14px").style("color:var(--accent)")
-                ui.label("Expéditeur vérifié").classes("rmeta")
-            vrow.tooltip("Votre serveur de messagerie a vérifié que ce message vient bien de l'adresse affichée. "
-                         "Cela ne garantit pas que son contenu soit honnête.")
+        # « Expéditeur vérifié » n'a plus sa propre ligne : une pastille à côté du nom de l'expéditeur, dans l'en-tête (voir verified_badge)
         if not op:
             return
         with ui.element("div").classes("aicard"):
