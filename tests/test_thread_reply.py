@@ -74,6 +74,30 @@ async def test_module_tools_stay_visible_when_forwarding(user, box, monkeypatch)
     await user.should_see("CARTE testbox|INBOX|0")
 
 
+async def test_the_module_card_is_not_rebuilt_when_opening_or_closing_messages_of_a_conversation(user, box, monkeypatch) -> None:
+    import asyncio
+
+    from mailia import modules
+    from tests.conftest import wait_until
+    built = []
+    monkeypatch.setitem(modules.slots, "reader", [{"module": "essai", "order": 1, "build": lambda api, mb, msg: (built.append(msg["id"]), ui.label("FICHE"))[1]}])
+    _thread()
+    await user.open("/")
+    b = box[-1]
+    await b.open("testbox|INBOX|2")
+    await user.should_see("FICHE")
+    n = len(built)
+    for i in (0, 1, 2, 0, 1):  # ouvrir, fermer, passer d'un message à l'autre
+        await b.toggle_card(f"testbox|INBOX|{i}")
+        await asyncio.sleep(0.2)
+    await wait_until(lambda: True)
+    assert len(built) == n, built
+    await b.open("testbox|INBOX|2")  # une autre conversation reconstruit bien la fiche
+    add_message("testbox|INBOX|9", sender="zoe@example.com", subject="Autre sujet", ckey="testbox|autre", date="2026-10-05T10:00:00+00:00")
+    await b.open("testbox|INBOX|9")
+    await wait_until(lambda: len(built) > n)
+
+
 async def _print_first_message(user, box, monkeypatch, platform: str, native):
     """Clique sur l'imprimante du premier message d'une conversation de deux ; rend ce que l'aperçu a reçu : [(nom, octets, sans_resume_ia)]."""
     monkeypatch.setattr(main, "print_platform", lambda: platform)

@@ -938,13 +938,13 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         if t and not t["box"].is_deleted and getattr(self, "tools_home", None) is not None and t["box"].parent_slot.parent is not self.tools_home:
             t["box"].move(self.tools_home)
 
-    def mount_tools(self, m: dict) -> None:
+    def mount_tools(self, m: dict, key: str | None = None) -> None:
         """Outils des modules (fiche patient, recherche…) à cet endroit du panneau de lecture. Tant que c'est le même message, ils sont gardés tels quels d'un redessin à
         l'autre : cliquer sur Répondre ne les reconstruit pas. Un autre message, ou un autre ensemble de modules, les reconstruit."""
         slots = modules.slots.get("reader", [])
         if not slots:
             return
-        sig = (m["id"], tuple(x["module"] for x in slots))
+        sig = (key or m["id"], tuple(x["module"] for x in slots))  # conversation : une seule fiche pour tout le fil, ouvrir ou fermer ses messages ne la reconstruit pas
         t = self._tools
         if t and (t["sig"] != sig or t["box"].is_deleted):
             if not t["box"].is_deleted:
@@ -1209,7 +1209,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                             with ui.row().classes("items-center gap-2 q-mt-xs"):
                                 ui.spinner(size="16px")
                                 ui.label("Résumé en cours…").classes("rmeta")
-                self.mount_tools(cur)  # idem pour une conversation : sous le résumé, au-dessus des boutons
+                self.mount_tools(cur, "conv:" + cur["ckey"])  # idem pour une conversation : sous le résumé, au-dessus des boutons
                 self.translation_card(cur)
                 self.phishing_banner(cur)
                 self.meeting_card(cur)

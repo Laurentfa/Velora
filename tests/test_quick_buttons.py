@@ -6,7 +6,7 @@ from conftest import add_message, wait_until
 from nicegui import ui
 
 import main
-from mailia import ai, config, sync
+from mailia import config, sync
 
 
 @pytest.fixture
