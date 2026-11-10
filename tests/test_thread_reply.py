@@ -283,7 +283,14 @@ async def test_verified_sender_is_a_badge_in_the_header_not_a_line_of_its_own(us
 
 async def test_conversation_order_follows_the_setting(user, box) -> None:
     from mailia import db
+    from tests.conftest import wait_until
     _thread()
+
+    def drawn() -> bool:  # « Dossier X » est aussi dans la liste : on attend que les trois cartes de la conversation soient dessinées
+        try:
+            return all(user.find(marker=f"tc-reply-testbox|INBOX|{i}").elements for i in range(3))
+        except AssertionError:  # find lève quand rien n'est encore dessiné
+            return False
 
     def order() -> list[int]:
         ids = {i: user.find(marker=f"tc-reply-testbox|INBOX|{i}").elements.pop().id for i in range(3)}
@@ -292,13 +299,13 @@ async def test_conversation_order_follows_the_setting(user, box) -> None:
     assert queries.thread_order() == "old"
     await user.open("/")
     await box[-1].open("testbox|INBOX|2")
-    await user.should_see("Dossier X")
+    await wait_until(drawn)
     assert order() == [0, 1, 2]  # par défaut : du plus ancien au plus récent
     db.kv_set("thread_order", "new")
     assert queries.thread_order() == "new"
     await user.open("/")
     await box[-1].open("testbox|INBOX|2")
-    await user.should_see("Dossier X")
+    await wait_until(drawn)
     assert order() == [2, 1, 0]  # le plus récent en haut
     db.kv_set("thread_order", "autre chose")
     assert queries.thread_order() == "old"
