@@ -6,7 +6,9 @@ from nicegui import ui
 from nicegui.testing import User
 
 import main
-from mailia import config, perf, ui_common
+from datetime import datetime
+
+from mailia import config, db, perf, ui_common
 from mailia.ui_settings import _tab_use
 
 
@@ -114,3 +116,23 @@ def test_windows_window_uses_a_permanent_profile_in_the_data_folder(monkeypatch)
     monkeypatch.delenv("VELORA_WEBVIEW_PRIVATE")
     monkeypatch.setattr(sys, "platform", "darwin")
     assert main._webview_args() == {}  # Mac : inchangé
+
+
+async def test_statistics_tab_shows_totals_and_switches_box(user: User):
+    from mailia.ui_settings import _tab_stats
+    with db.conn() as c:
+        c.execute("INSERT OR REPLACE INTO folders(account,key,name,path,role,sync) VALUES('s1','INBOX','INBOX','INBOX','inbox',1)")
+        c.execute("DELETE FROM messages WHERE account='s1'")
+        c.execute("INSERT INTO messages(id,account,uid,folder,date,is_read) VALUES('s1|INBOX|1','s1','1','INBOX',?,1)", (datetime.now().isoformat(timespec="seconds"),))
+
+    @ui.page("/stats")
+    def page():
+        _tab_stats()
+
+    await user.open("/stats")
+    await user.should_see("Statistiques")
+    await user.should_see("Reçus")
+    await user.should_see("Envoyés")
+    await user.should_see(marker="stats-period")
+    user.find(marker="stats-period").elements.pop().set_value("30j")
+    await user.should_see("Reçus")

@@ -210,6 +210,15 @@ def test_analyze(m: dict, criteria: str, rules: str) -> dict:
 
 
 def analyze(m, system: str | None = None) -> dict:
+    try:
+        target = m["id"]
+    except (KeyError, IndexError, TypeError):
+        target = ""
+    with db.usage_for(target):
+        return _analyze(m, system)
+
+
+def _analyze(m, system: str | None = None) -> dict:
     raw = _ask(system or analyze_system(), _mail_block(m, config.ai_body_limit()), model=config.model("ANALYZE"), max_tokens=500, feature="analyze")
     match = re.search(r"\{.*\}", raw, re.S)
     if not match:
@@ -291,6 +300,11 @@ def _thread_context(m: dict, keep: int = 4) -> str:
 
 
 def summarize_thread(ckey: str) -> str:
+    with db.usage_for("conv:" + ckey):
+        return _summarize_thread(ckey)
+
+
+def _summarize_thread(ckey: str) -> str:
     """Résumé d'une conversation entière (mis en cache tant que le nombre de messages ne change pas)."""
     msgs = db.thread_rows(ckey)
     for x in msgs:
@@ -312,6 +326,11 @@ Pas de liste, pas de titre, pas de mise en forme."""
 
 
 def draft_reply(mid: str, instruction: str = "", tone: str = "neutre") -> str:
+    with db.usage_for(mid):
+        return _draft_reply(mid, instruction, tone)
+
+
+def _draft_reply(mid: str, instruction: str = "", tone: str = "neutre") -> str:
     with db.conn() as c:
         m = c.execute("SELECT * FROM messages WHERE id=?", (mid,)).fetchone()
     m = dict(m) if m else None

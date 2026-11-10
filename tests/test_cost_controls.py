@@ -183,3 +183,24 @@ def test_the_text_sent_to_the_ai_for_analysis_is_capped_and_adjustable(clean_db,
     assert len(seen[0]) < 1200  # la valeur choisie dans les paramètres s'applique
     short = dict(m, body="Bonjour, pouvez-vous me rappeler ? Merci.")
     assert "pouvez-vous me rappeler" in ai._mail_block(short, 500)  # un mail court n'est pas touché
+
+
+def test_each_ai_call_is_traced_to_its_mail_without_content(clean_db):
+    from datetime import datetime, timedelta
+    with db.conn() as c:
+        c.execute("DELETE FROM usage_trace")  # les essais d'avant ont laissé leurs traces
+    with db.usage_for("exchange|INBOX|42"):
+        spend(5000)
+        spend(5100)
+    spend(7, "brief_structured")  # hors bloc : aucune cible
+    with db.conn() as c:
+        rows = [tuple(r) for r in c.execute("SELECT feature, target, credits FROM usage_trace ORDER BY rowid")]
+        assert rows == [("analyze", "exchange|INBOX|42", 5000), ("analyze", "exchange|INBOX|42", 5100), ("brief_structured", "", 7)]
+        # une trace de plus d'un mois est effacée (une fois par jour), les récentes restent
+        c.execute("INSERT INTO usage_trace(at,feature,model,target) VALUES(?,?,?,?)", ((datetime.now() - timedelta(days=db.TRACE_DAYS + 2)).isoformat(timespec="seconds"), "analyze", "m", "vieux"))
+        c.execute("DELETE FROM kv WHERE k='usage_trace_purged'")
+    db._kv_cache.pop("usage_trace_purged", None)
+    spend(1)
+    with db.conn() as c:
+        assert c.execute("SELECT COUNT(*) FROM usage_trace WHERE target='vieux'").fetchone()[0] == 0
+        assert c.execute("SELECT COUNT(*) FROM usage_trace WHERE target='exchange|INBOX|42'").fetchone()[0] == 2

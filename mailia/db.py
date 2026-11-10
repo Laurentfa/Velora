@@ -1,4 +1,5 @@
 import atexit
+import contextvars
 import json
 import threading
 import logging
@@ -41,6 +42,8 @@ CREATE TABLE IF NOT EXISTS api_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEX
 CREATE TABLE IF NOT EXISTS api_idem (key_id TEXT, idem TEXT, response TEXT, ts TEXT, PRIMARY KEY (key_id, idem));
 CREATE TABLE IF NOT EXISTS usage_log (day TEXT, model TEXT, feature TEXT, calls INTEGER DEFAULT 0, tokens_in INTEGER DEFAULT 0,
   tokens_out INTEGER DEFAULT 0, PRIMARY KEY (day, model, feature));
+CREATE TABLE IF NOT EXISTS usage_trace (at TEXT, feature TEXT, model TEXT, target TEXT, tokens_in INTEGER DEFAULT 0, tokens_out INTEGER DEFAULT 0, credits INTEGER DEFAULT 0);
+CREATE INDEX IF NOT EXISTS idx_usage_trace_at ON usage_trace(at);
 CREATE TABLE IF NOT EXISTS corrections (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, sender TEXT, domain TEXT, subject TEXT, old_cat TEXT, new_cat TEXT);
 CREATE TABLE IF NOT EXISTS templates (
   id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, subject TEXT DEFAULT '', html TEXT DEFAULT '', updated TEXT
@@ -508,10 +511,30 @@ def kv_set(k: str, v: str) -> None:
         c.execute("INSERT INTO kv(k,v) VALUES(?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, v))
 
 
+TRACE_DAYS = 30  # une trace d'appel est gardée un mois : de quoi retrouver pourquoi une journée a coûté cher, sans que la base grossisse
+_usage_target: contextvars.ContextVar[str] = contextvars.ContextVar("usage_target", default="")
+
+
+@contextmanager
+def usage_for(target: str):
+    """Pendant ce bloc, les appels à l'IA sont rattachés à `target` (identifiant d'un mail « compte|dossier|uid » ou d'une conversation « conv:… »). Jamais de contenu."""
+    tok = _usage_target.set(str(target or "")[:200])
+    try:
+        yield
+    finally:
+        _usage_target.reset(tok)
+
+
 def record_usage(model: str, tokens_in: int, tokens_out: int, feature: str = "", credits: int = 0, credits_est: int = 0) -> None:
     """Consommation d'un appel à l'IA. credits : crédits 1min.AI dépensés (mesurés ou estimés) ; credits_est : la part qui est une estimation."""
     day, month = datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%Y-%m")
     with conn() as c:
+        c.execute("INSERT INTO usage_trace(at,feature,model,target,tokens_in,tokens_out,credits) VALUES(?,?,?,?,?,?,?)",
+                  (datetime.now().isoformat(timespec="seconds"), feature, model, _usage_target.get(), tokens_in, tokens_out, credits))
+        if kv_get("usage_trace_purged") != day:  # une fois par jour
+            c.execute("DELETE FROM usage_trace WHERE at < ?", ((datetime.now() - timedelta(days=TRACE_DAYS)).isoformat(timespec="seconds"),))
+            c.execute("INSERT INTO kv(k,v) VALUES('usage_trace_purged',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v", (day,))
+            _kv_cache.pop("usage_trace_purged", None)
         c.execute(
             "INSERT INTO usage_log(day,model,feature,calls,tokens_in,tokens_out,credits,credits_est) VALUES(?,?,?,1,?,?,?,?) "
             "ON CONFLICT(day,model,feature) DO UPDATE SET calls=calls+1, tokens_in=tokens_in+excluded.tokens_in, "

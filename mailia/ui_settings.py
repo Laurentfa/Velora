@@ -8,7 +8,7 @@ from pathlib import Path
 
 from nicegui import run, ui
 
-from mailia import ai, aipolicy, api_ui, apple_writer, dictation, folder_order, gcal, oaicompat, onemin, outgoing, compose, config, db, htmlmail, i18n, logs, notify, perf, queries, settings_ui, sync, wizard
+from mailia import ai, aipolicy, api_ui, apple_writer, dictation, folder_order, gcal, oaicompat, onemin, outgoing, compose, config, db, htmlmail, i18n, logs, notify, perf, queries, settings_ui, stats, sync, wizard
 from mailia.textutil import html_to_text
 
 from mailia.ui_account import delete_account_dialog, friendly_error, open_account
@@ -818,6 +818,63 @@ def _tab_cal() -> None:
                   on_click=lambda: ui.navigate.to("https://console.cloud.google.com/apis/credentials", new_tab=True)).props("flat no-caps dense size=sm")
 
 
+def _tab_stats() -> None:
+    """Onglet « Statistiques » : mails reçus, lus et envoyés, par boîte et par période."""
+    ui.label("Statistiques").classes("text-h6").style("font-weight:700")
+    state = {"account": "", "period": "12m"}
+
+    @ui.refreshable
+    def body() -> None:
+        s = stats.summary(state["account"], state["period"])
+        with ui.row().classes("w-full gap-3 no-wrap"):
+            for label, value, sub in (
+                ("Reçus", f"{s['received']:,}".replace(",", " "), f"{s['per_day_received']:.1f} par jour en moyenne".replace(".", ",")),
+                ("Lus", f"{round(100 * s['read'] / s['received']) if s['received'] else 0} %", f"{s['read']:,} sur {s['received']:,}".replace(",", " ")),
+                ("Envoyés", f"{s['sent']:,}".replace(",", " "), f"{s['per_day_sent']:.1f} par jour en moyenne".replace(".", ",")),
+            ):
+                with ui.card().props("flat bordered").classes("col").style("padding:10px 14px"):
+                    ui.label(label).classes("text-caption text-grey")
+                    ui.label(value).style("font-size:22px;font-weight:700")
+                    ui.label(sub).classes("text-caption text-grey")
+        top = max((max(r, e) for _, r, e in s["buckets"]), default=0) or 1
+        with ui.row().classes("items-center gap-3 text-caption text-grey q-mt-sm"):
+            ui.html("<span style='display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--accent);margin-right:4px'></span>Reçus")
+            ui.html("<span style='display:inline-block;width:10px;height:10px;border-radius:2px;background:#eb6834;margin-right:4px'></span>Envoyés")
+        with ui.row().classes("items-end no-wrap gap-1").style("height:120px;overflow-x:auto;width:100%"):
+            for label, r, e in s["buckets"]:
+                with ui.column().classes("items-center no-wrap gap-0").style("min-width:" + ("22px" if len(s["buckets"]) > 20 else "34px")):
+                    with ui.row().classes("items-end no-wrap gap-0").style("height:100px"):
+                        ui.element("div").style(f"width:10px;height:{max(2, int(100 * r / top)) if r else 0}px;background:var(--accent);border-radius:2px 2px 0 0").tooltip(
+                            f"{label} : {r} reçus")
+                        ui.element("div").style(f"width:10px;height:{max(2, int(100 * e / top)) if e else 0}px;background:#eb6834;border-radius:2px 2px 0 0").tooltip(
+                            f"{label} : {e} envoyés")
+                    ui.label(label).classes("text-caption text-grey").style("font-size:10px")
+        if s["accounts"]:
+            with ui.row().classes("w-full items-center no-wrap gap-2 text-caption text-grey q-mt-sm"):
+                ui.label("Boîte").classes("col")
+                for t in ("Reçus", "Lus", "Envoyés"):
+                    ui.label(t).style("min-width:80px;text-align:right")
+            for name, rec, rd, snt in s["accounts"]:
+                with ui.row().classes("w-full items-center no-wrap gap-2"):
+                    ui.label(name).classes("col")
+                    ui.label(f"{rec:,}".replace(",", " ")).style("min-width:80px;text-align:right")
+                    ui.label(f"{round(100 * rd / rec) if rec else 0} %").style("min-width:80px;text-align:right")
+                    ui.label(f"{snt:,}".replace(",", " ")).style("min-width:80px;text-align:right")
+        ui.label("Chiffres calculés sur les mails gardés sur cet ordinateur (les mails supprimés ou jamais synchronisés ne comptent pas ; Corbeille, Courrier "
+                 "indésirable et Brouillons sont exclus). « Lus » est l'état actuel : Velora ne sait pas quand un mail a été lu.").classes("text-caption text-grey")
+
+    def choose(key: str, value: str) -> None:
+        state[key] = value
+        body.refresh()
+
+    with ui.row().classes("items-center gap-3"):
+        boxes = {"": "Toutes", **dict(stats.accounts())}
+        ui.toggle(boxes, value="", on_change=lambda e: choose("account", e.value)).props("no-caps dense unelevated").mark("stats-account")
+        ui.space()
+        ui.toggle(stats.PERIODS, value="12m", on_change=lambda e: choose("period", e.value)).props("no-caps dense unelevated").mark("stats-period")
+    body()
+
+
 def _tab_use(host) -> None:
     """Onglet « Utilisation et données »."""
     ui.label("Utilisation et données").classes("text-h6").style("font-weight:700")
@@ -982,12 +1039,13 @@ def open_settings(host, on_folders) -> None:
                 ui.tab("priv", label="Confidentialité et sécurité", icon="lock")
                 ui.tab("api", label="API et assistants", icon="hub")
                 ui.tab("use", label="Utilisation et données", icon="insights")
+                ui.tab("stats", label="Statistiques", icon="bar_chart")
                 if dictation.usable():
                     ui.tab("dict", label="Dictée vocale", icon="mic")
                 ui.tab("mod", label="Modules", icon="extension")
                 ui.tab("about", label="À propos", icon="info")
             with ui.tab_panels(tabs, value="boites").props("vertical").classes("col").style("min-width:0;height:100%;background:transparent"):
-                sec = {k: ui.tab_panel(k).classes("q-pa-lg").style("overflow-y:auto") for k in ("boites", "aff", "dos", "ia", "prm", "rules", "abs", "cal", "auto", "priv", "api", "use", "mod", "about", *(("dict",) if dictation.usable() else ()))}
+                sec = {k: ui.tab_panel(k).classes("q-pa-lg").style("overflow-y:auto") for k in ("boites", "aff", "dos", "ia", "prm", "rules", "abs", "cal", "auto", "priv", "api", "use", "stats", "mod", "about", *(("dict",) if dictation.usable() else ()))}
         if "dict" in sec:
             with sec["dict"], ui.column().classes("w-full gap-2").style("max-width:700px"):
                 _tab_dictation(host)
@@ -1029,6 +1087,9 @@ def open_settings(host, on_folders) -> None:
 
         with sec["use"], ui.column().classes("w-full gap-2").style("max-width:700px"):
             _tab_use(host)
+
+        with sec["stats"], ui.column().classes("w-full gap-2").style("max-width:760px"):
+            _tab_stats()
 
         def save() -> None:
             db.kv_set("ai_fallback", "1" if f["AI_FALLBACK"] else "0")
