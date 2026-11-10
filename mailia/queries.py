@@ -170,8 +170,8 @@ def add_snippets(rows: list[dict], terms: list[str]) -> None:
 
 
 def thread_order() -> str:
-    """« old » : du plus ancien au plus récent (par défaut) ; « new » : le plus récent en haut."""
-    return "new" if db.kv_get("thread_order") == "new" else "old"
+    """« new » : le plus récent en haut (par défaut) ; « old » : du plus ancien au plus récent."""
+    return "old" if db.kv_get("thread_order") == "old" else "new"
 
 
 def thread(ckey: str) -> list[dict]:

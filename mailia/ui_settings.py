@@ -311,7 +311,7 @@ def _tab_aff(f) -> None:
     ui.label("Beaucoup de mails imposent un texte plus grand que l'application (12 pt, soit 16 px, au lieu de 14 px) : 90 % les ramène à peu près à la même taille. "
              "Pris en compte à l'ouverture du message suivant.").classes("text-caption text-grey")
     ui.label("Ordre des messages d'une conversation").classes("q-mt-md")
-    ui.radio({"old": "Du plus ancien au plus récent", "new": "Du plus récent au plus ancien"}, value=queries.thread_order(),
+    ui.radio({"new": "Du plus récent au plus ancien", "old": "Du plus ancien au plus récent"}, value=queries.thread_order(),
              on_change=lambda e: db.kv_set("thread_order", e.value)).mark("thread-order")
     ui.label("S'applique à toutes les conversations, à l'ouverture suivante. Le résumé, les outils et les boutons de réponse restent en haut.").classes("text-caption text-grey")
     ui.switch("Liste de mails compacte (plus de mails à l'écran)", value=ui_zoom.compact(),

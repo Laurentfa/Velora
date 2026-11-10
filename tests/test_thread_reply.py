@@ -296,16 +296,16 @@ async def test_conversation_order_follows_the_setting(user, box) -> None:
         ids = {i: user.find(marker=f"tc-reply-testbox|INBOX|{i}").elements.pop().id for i in range(3)}
         return sorted(ids, key=lambda i: ids[i])  # un élément créé plus tôt a un numéro plus petit : c'est le plus haut dans la page
 
+    assert queries.thread_order() == "new"  # par défaut : le plus récent en haut
+    await user.open("/")
+    await box[-1].open("testbox|INBOX|2")
+    await wait_until(drawn)
+    assert order() == [2, 1, 0]
+    db.kv_set("thread_order", "old")
     assert queries.thread_order() == "old"
     await user.open("/")
     await box[-1].open("testbox|INBOX|2")
     await wait_until(drawn)
-    assert order() == [0, 1, 2]  # par défaut : du plus ancien au plus récent
-    db.kv_set("thread_order", "new")
-    assert queries.thread_order() == "new"
-    await user.open("/")
-    await box[-1].open("testbox|INBOX|2")
-    await wait_until(drawn)
-    assert order() == [2, 1, 0]  # le plus récent en haut
+    assert order() == [0, 1, 2]  # du plus ancien au plus récent
     db.kv_set("thread_order", "autre chose")
-    assert queries.thread_order() == "old"
+    assert queries.thread_order() == "new"

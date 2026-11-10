@@ -22,7 +22,7 @@ from . import db, tlsutil
 from .version import APP_VERSION, UPDATE_PUBKEY, UPDATE_REPO, release_message
 
 log = logging.getLogger("updater")
-CHECK_EVERY = 24 * 3600
+CHECK_EVERY = 6 * 3600  # une recherche toutes les 6 heures au plus (l'appli reste souvent ouverte des jours : une recherche par jour la laissait en retard)
 ASSET_SUFFIX = {"darwin": "-mac.zip", "win32": "-setup.exe"}
 
 # Remplace l'appli une fois fermée, puis la relance ; en cas d'échec l'ancienne version est remise en place.
@@ -165,8 +165,13 @@ def fetch_latest() -> dict | None:
             "name": name, "url": assets[name], "sig_url": assets[name + ".sig2"], "api_url": api_assets.get(name, ""), "sig_api_url": api_assets.get(name + ".sig2", "")}
 
 
+def auto_install() -> bool:
+    """L'installation automatique (quand vous ne travaillez pas) : activée par défaut, désactivable dans Paramètres › Utilisation et données."""
+    return db.kv_get("update_install") != "0" and can_install()
+
+
 def check(force: bool = False) -> dict | None:
-    """Vérifie au plus une fois par jour (sauf demande explicite). Ne lève jamais d'erreur : sans réseau, on réessaiera plus tard."""
+    """Vérifie au plus toutes les 6 heures (sauf demande explicite). Ne lève jamais d'erreur : sans réseau, on réessaiera plus tard."""
     if not available() or (not force and (db.kv_get("update_auto") == "0" or time.time() - float(db.kv_get("update_checked") or 0) < CHECK_EVERY)):
         return None
     try:

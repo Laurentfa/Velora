@@ -608,6 +608,9 @@ SWIPE_JS = """<script>
       for (const f of inline) await window.mailiaAddImage(f, rootId);
     }
   });
+  // dernière activité (souris, clavier, défilement) : l'installation automatique d'une mise à jour attend 20 minutes de calme
+  window.__lastAct = Date.now();
+  ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'].forEach(ev => document.addEventListener(ev, () => { window.__lastAct = Date.now(); }, {passive: true, capture: true}));
   // raccourcis clavier : ignorés quand on écrit, ou qu'une fenêtre est ouverte
   document.addEventListener('keydown', e => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return;

@@ -46,12 +46,43 @@ def offer(info: dict) -> None:
     dlg.open()
 
 
-async def auto_check() -> None:
-    """Au démarrage, une fois par jour au plus : une simple notification, jamais de fenêtre qui interrompt le travail."""
-    info = await run.io_bound(updater.check)
-    if info:  # (NiceGUI ne sait pas transmettre une fonction Python dans les « actions » d'une notification : l'envoi échouait avec « Type is not JSON serializable »)
+IDLE_SECONDS = 20 * 60  # sans toucher à Velora depuis ce temps : l'installation automatique peut avoir lieu
+_pending: dict | None = None  # version trouvée, en attente d'un moment où vous ne travaillez pas
+_installing = False
+
+
+def _found(info: dict) -> None:
+    """Une version plus récente existe : installation automatique au prochain moment calme, ou simple notification si elle est désactivée."""
+    global _pending
+    if updater.auto_install():
+        _pending = info
+    else:  # (NiceGUI ne sait pas transmettre une fonction Python dans les « actions » d'une notification : l'envoi échouait avec « Type is not JSON serializable »)
         ui.notification(f"Velora {info['version']} est disponible.", type="info", timeout=0, close_button="Voir",
                         on_dismiss=lambda _=None: offer(info))
+
+
+async def auto_check() -> None:
+    """Au démarrage, puis toutes les 10 minutes (la recherche elle-même n'a lieu que toutes les 6 heures) : jamais de fenêtre qui interrompt le travail."""
+    global _installing, _pending
+    if _installing:
+        return
+    if _pending is None:
+        info = await run.io_bound(updater.check)
+        if info:
+            _found(info)
+    if _pending is not None and updater.auto_install() and await _quiet():
+        _installing = True
+        await install(_pending)
+        _pending = None  # on n'arrive ici que si l'installation a échoué (sinon l'appli s'est fermée) : prochaine tentative à la prochaine recherche, dans 6 heures
+        _installing = False
+
+
+async def _quiet() -> bool:
+    """Personne n'a touché à Velora depuis 20 minutes, aucun message n'est en cours de rédaction, aucune fenêtre n'est ouverte."""
+    try:
+        return bool(await ui.run_javascript(f"(Date.now() - (window.__lastAct || Date.now())) / 1000 > {IDLE_SECONDS} && !document.querySelector('.q-editor') && !document.querySelector('.q-dialog')", timeout=5))
+    except Exception:  # noqa: BLE001 — page absente ou occupée : on réessaiera
+        return False
 
 
 def panel() -> None:
@@ -73,5 +104,9 @@ def panel() -> None:
             offer(info)
 
     ui.button("Rechercher une mise à jour", icon="system_update", on_click=search).props("flat no-caps dense").mark("update-search")
-    ui.switch("Vérifier automatiquement une fois par jour", value=db.kv_get("update_auto") != "0",
+    ui.switch("Vérifier automatiquement (toutes les 6 heures)", value=db.kv_get("update_auto") != "0",
               on_change=lambda e: db.kv_set("update_auto", "1" if e.value else "0"))
+    ui.switch("Installer automatiquement quand vous ne travaillez pas", value=db.kv_get("update_install") != "0",
+              on_change=lambda e: db.kv_set("update_install", "1" if e.value else "0")).mark("update-install")
+    ui.label("Au bout de 20 minutes sans utiliser Velora, sans message en cours de rédaction. Une copie de la base est faite avant, puis Velora redémarre seule.").classes(
+        "text-caption text-grey")

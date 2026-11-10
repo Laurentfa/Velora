@@ -2130,6 +2130,7 @@ async def index_page() -> None:
     ui.timer(5, box.autosave)
     ui.timer(2, box.watch_outbox)
     ui.timer(20, auto_check, once=True)  # laisse l'appli s'afficher d'abord
+    ui.timer(600, auto_check)  # puis toutes les 10 minutes : la recherche a lieu toutes les 6 heures, l'installation attend un moment calme
     ui.timer(35, ai_share_notice, once=True)  # avis unique : le partage des analyses entre ordinateurs
     ui.timer(55, settings_notice, once=True)  # avis unique : les consignes de l'IA suivent d'un ordinateur à l'autre
     ui.on('mailkey', box.on_key)
