@@ -310,6 +310,10 @@ def _tab_aff(f) -> None:
     ui.slider(min=70, max=110, step=5, value=htmlmail.scale(), on_change=change_mail_scale).props("label dense").mark("mail-scale")
     ui.label("Beaucoup de mails imposent un texte plus grand que l'application (12 pt, soit 16 px, au lieu de 14 px) : 90 % les ramène à peu près à la même taille. "
              "Pris en compte à l'ouverture du message suivant.").classes("text-caption text-grey")
+    ui.label("Ordre des messages d'une conversation").classes("q-mt-md")
+    ui.radio({"old": "Du plus ancien au plus récent", "new": "Du plus récent au plus ancien"}, value=queries.thread_order(),
+             on_change=lambda e: db.kv_set("thread_order", e.value)).mark("thread-order")
+    ui.label("S'applique à toutes les conversations, à l'ouverture suivante. Le résumé, les outils et les boutons de réponse restent en haut.").classes("text-caption text-grey")
     ui.switch("Liste de mails compacte (plus de mails à l'écran)", value=ui_zoom.compact(),
               on_change=lambda e: ui_zoom.set_compact(bool(e.value))).props("dense").classes("q-mt-sm").mark("density-switch")
     ui.label("Une ligne par mail : expéditeur, objet et date, sans résumé de l'IA ni pastilles (sauf « Urgent »). Les actions apparaissent au survol.").classes("text-caption text-grey")

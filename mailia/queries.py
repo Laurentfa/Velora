@@ -169,6 +169,11 @@ def add_snippets(rows: list[dict], terms: list[str]) -> None:
                     r["snip"] = search.snippet(x["body"] or "", terms)
 
 
+def thread_order() -> str:
+    """« old » : du plus ancien au plus récent (par défaut) ; « new » : le plus récent en haut."""
+    return "new" if db.kv_get("thread_order") == "new" else "old"
+
+
 def thread(ckey: str) -> list[dict]:
     """Les messages d'un fil. Les brouillons n'en font pas partie : ils vivent dans le dossier Brouillons (seul fil réduit à un brouillon : on le garde, il faut bien afficher quelque chose)."""
     rows = db.thread_rows(ckey)

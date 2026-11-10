@@ -1173,7 +1173,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
 
 
     def thread_view(self) -> None:
-        """Conversation : les messages empilés du plus ancien au plus récent, les récents/non lus dépliés."""
+        """Conversation : les messages empilés (du plus ancien au plus récent, ou l'inverse selon le réglage), les récents/non lus dépliés."""
         th, cur = self.thread, self.cur
         me = sync.ACCOUNTS[cur["account"]].email.lower()
         subject = re.sub(r"^\s*((re|tr|fwd?|rép?)\s*:\s*)+", "", th[-1]["subject"], flags=re.I) or th[-1]["subject"]
@@ -1217,7 +1217,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                 self.toolbar(cur)
                 if self.compose:
                     self.composer()
-                for x in th:
+                for x in (reversed(th) if queries.thread_order() == "new" else th):
                     self.thread_card(x, me)
 
     def thread_card(self, x: dict, me: str) -> None:

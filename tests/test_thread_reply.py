@@ -279,3 +279,26 @@ async def test_verified_sender_is_a_badge_in_the_header_not_a_line_of_its_own(us
     await user.should_not_see("Expéditeur vérifié")
     await box[-1].open("testbox|INBOX|1")
     await user.should_not_see(marker="sender-verified")
+
+
+async def test_conversation_order_follows_the_setting(user, box) -> None:
+    from mailia import db
+    _thread()
+
+    def order() -> list[int]:
+        ids = {i: user.find(marker=f"tc-reply-testbox|INBOX|{i}").elements.pop().id for i in range(3)}
+        return sorted(ids, key=lambda i: ids[i])  # un élément créé plus tôt a un numéro plus petit : c'est le plus haut dans la page
+
+    assert queries.thread_order() == "old"
+    await user.open("/")
+    await box[-1].open("testbox|INBOX|2")
+    await user.should_see("Dossier X")
+    assert order() == [0, 1, 2]  # par défaut : du plus ancien au plus récent
+    db.kv_set("thread_order", "new")
+    assert queries.thread_order() == "new"
+    await user.open("/")
+    await box[-1].open("testbox|INBOX|2")
+    await user.should_see("Dossier X")
+    assert order() == [2, 1, 0]  # le plus récent en haut
+    db.kv_set("thread_order", "autre chose")
+    assert queries.thread_order() == "old"
