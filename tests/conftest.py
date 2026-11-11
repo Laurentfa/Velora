@@ -34,6 +34,15 @@ def clean_db():
     yield
 
 
+@pytest.fixture(autouse=True)
+def no_github(monkeypatch):
+    """Aucun test ne contacte GitHub : sinon chaque lancement des tests (la page de Velora cherche une mise à jour au bout de 20 s) consommait les 60 appels par heure
+    accordés sans identifiant à toute votre adresse IP, et la vraie recherche de mise à jour de Velora échouait ensuite (erreur 403). Les tests de la mise à jour
+    remettent eux-mêmes un dépôt et des faux téléchargements."""
+    from mailia import updater
+    monkeypatch.setattr(updater, "UPDATE_REPO", "")
+
+
 def add_message(mid="testbox|INBOX|1", account="testbox", sender="alice@example.com", subject="Bonjour", body="texte", date=None,
                 **extra):
     from datetime import datetime, timedelta, timezone
