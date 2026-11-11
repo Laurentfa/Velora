@@ -12,6 +12,10 @@ from mailia.textutil import html_to_text
 from mailia.ui_common import ago, label_of, log, make_editor
 from mailia.ui_sigmodels import signature_models_dialog
 
+# Après un clic sur « Joindre un fichier », le focus restait sur ce bouton : la touche Entrée tapée ensuite le réactivait et rouvrait le sélecteur de fichiers.
+# On rend le focus à l'éditeur (le texte et Entrée y retournent) ; sans éditeur, on le retire simplement du bouton.
+FOCUS_EDITOR_JS = "const ed = document.querySelector('.mailedit [contenteditable=true]'); if (ed) ed.focus(); else if (document.activeElement) document.activeElement.blur();"
+
 
 class DraftsMixin:
     def draft_row(self, dr: dict) -> None:
@@ -107,7 +111,7 @@ class DraftsMixin:
                 ui.space()
                 ui.button("Joindre un fichier (25 Mo max)", icon="attach_file",
                           on_click=None).props("flat no-caps dense").on(
-                    "click", js_handler=f"() => getElement({up.id}).$refs.qRef.pickFiles()").tooltip("25 Mo au total pour toutes les pièces jointes")
+                    "click", js_handler=f"() => {{ getElement({up.id}).$refs.qRef.pickFiles(); {FOCUS_EDITOR_JS} }}").tooltip("25 Mo au total pour toutes les pièces jointes")
                 ui.button("Scanner un document", icon="document_scanner", on_click=self.scan_dialog).props("flat no-caps dense").tooltip(
                     "Numériser avec un scanner du réseau ou avec votre téléphone, et joindre le résultat en PDF")
             self.files_view()
