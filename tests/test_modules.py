@@ -369,3 +369,28 @@ async def test_module_tools_sit_under_the_ai_summary_and_above_the_mail_buttons_
         assert built == [one, two] and dom_order().count("outil-module") == 1  # un autre message : outils reconstruits, l'ancien est supprimé
     finally:
         modules.slots["reader"].clear()
+
+
+async def test_a_module_view_takes_the_width_of_the_list_and_the_reader_and_a_mail_view_gets_it_back(user, monkeypatch, mod_dir) -> None:
+    import asyncio
+    make(mod_dir, "large", "def register(api):\n    api.add_view('v', 'Large', 'L', lambda api: None)\n")
+    modules.set_enabled("large", True)
+    db.kv_set("modules_on", "1")
+    modules.load_all()
+    calls: list = []
+    monkeypatch.setattr(ui, "run_javascript", lambda code, **k: calls.append(code))
+    seen: list = []
+    init = main.Mailbox.__init__
+    monkeypatch.setattr(main.Mailbox, "__init__", lambda self, *a, **k: (init(self, *a, **k), seen.append(self))[0])
+    ui.page("/")(main.index_page)
+    await user.open("/")
+    box = seen[-1]
+    await box.go("mod_large_v", "", "")
+    await asyncio.sleep(0.4)
+    assert any("wide-view" in c and "'wide-view', true" in c for c in calls)  # la vue du module élargie
+    calls.clear()
+    await box.go("inbox", "", "")
+    await asyncio.sleep(0.4)
+    assert any("'wide-view', false" in c for c in calls)  # une vue de mails : colonnes habituelles
+    from mailia.ui_assets import CSS
+    assert "html.wide-view .readercol" in CSS and "@media (min-width:1024px)" in CSS  # seulement sur grand écran : le téléphone garde sa mise en page

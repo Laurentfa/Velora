@@ -506,6 +506,16 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                     f"{'unelevated color=primary' if self.account == key else 'outline'} dense no-caps size=sm")
 
     # ---------- liste ----------
+    def set_wide(self, wide: bool) -> None:
+        """Pose (ou retire) la classe de page « wide-view ». Sans effet hors d'une page ouverte (tâche de fond) : elle sera reposée au prochain affichage."""
+        if getattr(self, "_wide", None) == wide:
+            return
+        try:
+            ui.run_javascript(f"document.documentElement.classList.toggle('wide-view', {'true' if wide else 'false'})")
+        except RuntimeError:
+            return
+        self._wide = wide
+
     def refresh_title(self) -> None:
         if self.view == "folder":
             fo = next((f for f in db.folders(self.account) if f["key"] == self.folder), None)
@@ -515,6 +525,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         self.title.set_text(name + (" · tous les dossiers" if self.search_everywhere() else "")
                             + (" · recherche sur le serveur…" if self.remote_busy else ""))
         self.search_row.set_visibility(self.view not in NOLIST_VIEWS)
+        self.set_wide(self.view in modules.views)  # la vue d'un module prend la largeur de la liste et du panneau de lecture (vide à ce moment-là)
         brief = self.view == "brief"
         self.title_icon.set_content(icons.svg("sparkle", 24) if brief else "")
         self.title_icon.style("display:flex;color:var(--accent)" if brief else "display:none")

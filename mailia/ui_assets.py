@@ -253,6 +253,12 @@ html.s-hide:not(.s-peek) .resizer.r2{left:var(--w-list,400px)}
 html.s-hide .sidehot{display:block;position:fixed;left:0;top:0;bottom:0;width:8px;z-index:70}
 html:not(.s-hide) .sidepinbtn,html.s-hide:not(.s-peek) .sidepinbtn{display:none}
 html.s-hide .sidehidebtn{display:none}
+@media (min-width:1024px){
+  html.wide-view .root{grid-template-columns:var(--w-side,240px) minmax(0,1fr)}
+  html.wide-view .readercol,html.wide-view .resizer.r2{display:none}
+  html.wide-view.s-hide .root{grid-template-columns:0 minmax(0,1fr)}
+  html.wide-view.s-hide.s-peek .root{grid-template-columns:var(--w-side,240px) minmax(0,1fr)}
+}
 .q-editor__content table{max-width:100%}
 /* écran peu haut : la liste des onglets défile comme le reste (molette, pavé tactile, barre fine) au lieu des petites flèches de Quasar */
 .settings-tabs .q-tabs__arrow{display:none!important}
