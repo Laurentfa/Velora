@@ -41,6 +41,7 @@ def no_github(monkeypatch):
     remettent eux-mêmes un dépôt et des faux téléchargements."""
     from mailia import updater
     monkeypatch.setattr(updater, "UPDATE_REPO", "")
+    monkeypatch.setattr(updater, "_page_tag", lambda repo: (_ for _ in ()).throw(OSError("réseau coupé en test")))
 
 
 def add_message(mid="testbox|INBOX|1", account="testbox", sender="alice@example.com", subject="Bonjour", body="texte", date=None,

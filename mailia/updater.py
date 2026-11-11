@@ -139,6 +139,35 @@ def _try_each(sources: list[tuple[str, bool]], work, pause: float = 1.5):
     raise last or RuntimeError("aucune adresse de téléchargement")
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+def _page_tag(repo: str) -> str:
+    """Dernière version, lue sur la page publique des versions (elle redirige vers « …/tag/vX.Y.Z »). Contrairement à l'API, cette page n'est pas limitée à 60 appels par heure et par adresse IP."""
+    opener = urllib.request.build_opener(_NoRedirect, urllib.request.HTTPSHandler(context=tlsutil.context()))
+    try:
+        opener.open(urllib.request.Request(f"https://github.com/{repo}/releases/latest", headers={"User-Agent": f"Velora/{APP_VERSION}"}), timeout=15).close()
+    except urllib.error.HTTPError as e:
+        loc = e.headers.get("Location", "") if e.code in (301, 302, 303, 307, 308) else ""
+        m = re.search(r"/releases/tag/(v?\d+(?:\.\d+)*)$", loc)
+        if m:
+            return m.group(1)
+    raise OSError("page des versions illisible")
+
+
+def _latest_from_page(suffix: str) -> dict | None:
+    """Même résultat que fetch_latest() quand l'API refuse (quota) : adresses de téléchargement déduites du nom des fichiers publiés. Sans notes (elles ne sont que dans l'API) ; la signature reste vérifiée au téléchargement."""
+    tag = _page_tag(UPDATE_REPO)
+    if not is_newer(tag):
+        return {}  # à jour
+    v = ".".join(map(str, parse(tag)))
+    name = f"Velora-{v}{suffix}"
+    base = f"https://github.com/{UPDATE_REPO}/releases/download/{tag}/{name}"
+    return {"version": v, "notes": "", "name": name, "url": base, "sig_url": base + ".sig2", "api_url": "", "sig_api_url": ""}
+
+
 def fetch_latest() -> dict | None:
     """Dernière version publiée pour ce système, ou None si l'on est à jour / rien de publié."""
     suffix = ASSET_SUFFIX.get(sys.platform)
@@ -147,8 +176,14 @@ def fetch_latest() -> dict | None:
     try:
         with _get(f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest") as r:
             rel = json.load(r)
-    except (urllib.error.URLError, OSError, TimeoutError, ValueError) as e:  # GitHub injoignable : un module (miroir) peut dire s'il y a mieux
-        log.warning("GitHub ne répond pas (%s)", type(e).__name__)
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError) as e:  # l'API refuse (quota partagé de l'adresse IP, panne) : on lit la page publique, puis un module (miroir)
+        log.warning("l'API de GitHub ne répond pas (%s)", type(e).__name__)
+        try:
+            page = _latest_from_page(suffix)
+        except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+            page = None
+        if page is not None:
+            return page or None
         found = _hook_latest(suffix)
         if found:
             return found

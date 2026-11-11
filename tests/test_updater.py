@@ -355,3 +355,37 @@ def test_unloading_a_module_removes_its_update_source(monkeypatch):
     monkeypatch.setitem(updater.hooks, "miroir", {"sources": lambda i, k: []})
     modules.unload("miroir")
     assert "miroir" not in updater.hooks
+
+
+def test_when_the_api_refuses_the_public_release_page_gives_the_version(configured, hook, monkeypatch):
+    import urllib.error
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    def refused(url, timeout=15, octet=False):
+        raise urllib.error.HTTPError(url, 403, "rate limit exceeded", {}, None)
+    monkeypatch.setattr(updater, "_get", refused)
+    monkeypatch.setattr(updater, "_page_tag", lambda repo: "v1.1.0")
+    info = updater.fetch_latest()
+    assert info["version"] == "1.1.0" and info["name"] == "Velora-1.1.0-mac.zip"
+    assert info["url"] == "https://github.com/moi/velora/releases/download/v1.1.0/Velora-1.1.0-mac.zip" and info["sig_url"] == info["url"] + ".sig2"
+    monkeypatch.setattr(updater, "_page_tag", lambda repo: "v1.0.0")  # à jour
+    assert updater.fetch_latest() is None
+    monkeypatch.setattr(updater, "_page_tag", lambda repo: (_ for _ in ()).throw(OSError("x")))  # page illisible : le miroir prend le relais, sinon l'erreur remonte
+    with pytest.raises(urllib.error.HTTPError):
+        updater.fetch_latest()
+
+
+REAL_PAGE_TAG = updater._page_tag  # la vraie fonction, avant que conftest ne coupe le réseau
+
+
+def test_page_tag_reads_the_redirect_without_following_it(monkeypatch):
+    import email.message
+    import urllib.error
+
+    class Op:
+        def open(self, req, timeout=15):
+            h = email.message.Message()
+            h["Location"] = "https://github.com/moi/velora/releases/tag/v1.0.83"
+            raise urllib.error.HTTPError(req.full_url, 302, "Found", h, None)
+    monkeypatch.setattr(updater.urllib.request, "build_opener", lambda *a: Op())
+    assert REAL_PAGE_TAG("moi/velora") == "v1.0.83"
