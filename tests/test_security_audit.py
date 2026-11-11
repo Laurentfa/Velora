@@ -64,6 +64,7 @@ def test_saving_an_attachment_reports_a_refused_write_instead_of_failing_silentl
     notes = []
     monkeypatch.setattr(ui_files.ui, "notify", lambda *a, **k: notes.append((a, k)))
     monkeypatch.setattr(ui_files, "SERVER_MODE", False)
+    monkeypatch.setattr(ui_files, "reveal", lambda path: None)  # sinon le Finder s'ouvre pour de bon à chaque lancement des tests
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     real_write = Path.write_bytes
 

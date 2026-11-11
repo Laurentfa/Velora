@@ -115,12 +115,22 @@ def tick(force: bool = False) -> bool:
             _last["w"] = time.time()
         db.kv_set("fleet:cache", encode(machines))
         _note_top(machines)
+        _credits_notice()
         db.kv_set("fleet:error", "")
         return True
     except Exception as e:  # noqa: BLE001 — pas de réseau, pas de droit… : on réessaiera au prochain tour
         db.kv_set("fleet:error", type(e).__name__)
         log.info("échange des fiches impossible : %s", type(e).__name__)
         return False
+
+
+def _credits_notice() -> None:
+    """Une notification par jour quand la consommation de tous vos ordinateurs dépasse le seuil d'alerte."""
+    from . import aipolicy, notify
+    day, month = totals()
+    alert = aipolicy.credits_alert(day, month)
+    if alert:
+        notify.once(f"credits-alert:{datetime.now().strftime('%Y-%m-%d')}", "Consommation IA élevée", aipolicy.credits_alert_text(alert))
 
 
 def _note_top(machines: dict[str, dict]) -> None:

@@ -204,3 +204,30 @@ def test_each_ai_call_is_traced_to_its_mail_without_content(clean_db):
     with db.conn() as c:
         assert c.execute("SELECT COUNT(*) FROM usage_trace WHERE target='vieux'").fetchone()[0] == 0
         assert c.execute("SELECT COUNT(*) FROM usage_trace WHERE target='exchange|INBOX|42'").fetchone()[0] == 2
+
+
+def test_credit_alert_threshold_projection_and_default(clean_db):
+    from datetime import datetime
+
+    from mailia import aipolicy, db
+    assert aipolicy.credits_alert_threshold() == 300_000  # actif par défaut
+    assert aipolicy.credits_alert(299_999, 0) is None
+    a = aipolicy.credits_alert(312_450, 3_000_000, datetime(2026, 11, 10))
+    assert a and a["used"] == 312_450 and a["projection"] == 9_000_000  # 3 M en 10 jours sur un mois de 30
+    assert "312 450" in aipolicy.credits_alert_text(a) and "9,0 M" in aipolicy.credits_alert_text(a)
+    db.kv_set("credits_alert", "0")
+    assert aipolicy.credits_alert(10**9, 0) is None  # 0 = jamais
+    db.kv_set("credits_alert", "1000")
+    assert aipolicy.credits_alert(1000, 0)
+
+
+def test_credit_alert_shows_in_the_warning_list_and_the_counter(clean_db, monkeypatch):
+    from mailia import db, fleet, health, ui_fleet
+    monkeypatch.setattr(fleet, "totals", lambda: (400_000, 2_000_000))
+    db.kv_set("credits_alert", "300000")
+    assert any("Consommation IA élevée" in p and "400 000" in p for p in health.problems())
+    snap = [{"cr_day": 400_000, "cr_month": 2_000_000, "me": True, "name": "x", "version": "1", "seen": None}]
+    assert "seuil dépassé" in ui_fleet.summary_text(snap)
+    db.kv_set("credits_alert", "0")
+    assert not any("Consommation IA élevée" in p for p in health.problems())
+    assert "seuil dépassé" not in ui_fleet.summary_text(snap)

@@ -1678,7 +1678,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
             ui.notify(f"Lu en local, pas sur le serveur : {e}", type="warning")
 
     def settings(self) -> None:
-        open_settings(self.host, self.folders_dialog)
+        open_settings(self.host, self.folders_dialog, self.open)
 
     def back(self) -> None:
         self.root.classes(remove="reading")

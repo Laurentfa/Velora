@@ -36,5 +36,11 @@ fi
 /usr/libexec/PlistBuddy -c "Set :CFBundleDevelopmentRegion fr" "$PL" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleDevelopmentRegion string fr" "$PL" 2>/dev/null
 /usr/libexec/PlistBuddy -c "Add :CFBundleLocalizations array" "$PL" 2>/dev/null
 n=0; for lang in fr en; do /usr/libexec/PlistBuddy -c "Add :CFBundleLocalizations:$n string $lang" "$PL" 2>/dev/null; n=$((n+1)); done
-codesign --force --deep --sign - "dist/Velora.app" 2>/dev/null  # la modification du plist invalide la signature ad hoc : on la refait
+# Signature : avec CODESIGN_IDENTITY (nom ou empreinte d'un certificat du trousseau), l'identité reste la même d'une version à l'autre et macOS garde les autorisations
+# (contrôle de Chrome, micro, réseau local…). Sans elle, signature « ad hoc » : macOS les redemande à chaque mise à jour.
+if [ -n "$CODESIGN_IDENTITY" ]; then
+  codesign --force --deep --sign "$CODESIGN_IDENTITY" "dist/Velora.app" && echo "→ signée avec $CODESIGN_IDENTITY" || { echo "→ signature impossible avec $CODESIGN_IDENTITY"; exit 1; }
+else
+  codesign --force --deep --sign - "dist/Velora.app" 2>/dev/null  # la modification du plist invalide la signature ad hoc : on la refait
+fi
 echo "→ dist/Velora.app"

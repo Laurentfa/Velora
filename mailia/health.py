@@ -22,6 +22,10 @@ def problems() -> list[str]:
     if cap:
         out.append(f"Plafond quotidien de crédits 1min.AI atteint ({cap[0]:,} sur {cap[1]:,}) : l'IA est suspendue jusqu'à demain. ".replace(",", " ")
                    + "Relevez le plafond dans Paramètres › Utilisation et données.")
+    day_total, month_total = fleet.totals()
+    alert = aipolicy.credits_alert(day_total, month_total)
+    if alert and not cap:  # le plafond atteint est déjà signalé plus haut
+        out.append("Consommation IA élevée : " + aipolicy.credits_alert_text(alert))
     for mid, st in sorted(modules.status.items()):
         if st and st != "ok":
             out.append(f"Module « {mid} » en erreur : {st}")

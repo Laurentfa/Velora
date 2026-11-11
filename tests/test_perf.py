@@ -136,3 +136,23 @@ async def test_statistics_tab_shows_totals_and_switches_box(user: User):
     await user.should_see(marker="stats-period")
     user.find(marker="stats-period").elements.pop().set_value("30j")
     await user.should_see("Reçus")
+
+
+async def test_statistics_tab_shows_response_time_and_waiting_mails(user, monkeypatch) -> None:
+    from mailia import config, stats
+    monkeypatch.setattr(config, "ai_enabled", lambda: True)
+    monkeypatch.setattr(stats, "waiting", lambda days=3, account="", now=None, limit=50: [{"id": "x|INBOX|1", "account": "x", "sender": "Alice", "subject": "Devis", "date": "2026-11-01T10:00:00+00:00", "days": 9}])
+    monkeypatch.setattr(stats, "response_time", lambda period="30j", account="", today=None: {"median_hours": 3.5, "n": 4})
+    opened = []
+
+    async def on_open(mid):
+        opened.append(mid)
+    ui.page("/")(main.index_page)
+    await user.open("/")
+    with user:
+        from mailia import ui_settings
+        with ui.dialog() as dlg, ui.card():
+            ui_settings._tab_stats(dlg, on_open)
+    await user.should_see("3 h 30")
+    await user.should_see("Devis")
+    await user.should_see("1 mail(s)")

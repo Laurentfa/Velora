@@ -10,7 +10,8 @@ def summary_text(snap: list[dict]) -> str:
     if not month and not day:
         return ""
     cap = aipolicy.daily_credit_cap()
-    return f"IA : {fleet.compact(day)}" + (f" sur {fleet.compact(cap)}" if cap and len(snap) == 1 else "") + f" crédits aujourd'hui · {fleet.compact(month)} ce mois-ci"
+    over = " · seuil dépassé" if aipolicy.credits_alert(day, month) else ""
+    return f"IA : {fleet.compact(day)}" + (f" sur {fleet.compact(cap)}" if cap and len(snap) == 1 else "") + f" crédits aujourd'hui · {fleet.compact(month)} ce mois-ci{over}"
 
 
 def tooltip_text(snap: list[dict]) -> str:
@@ -36,7 +37,8 @@ def dialog(open_settings) -> None:
             with ui.row().classes("w-full items-center no-wrap gap-2").mark("fleet-row"):
                 with ui.column().classes("col gap-0"):
                     ui.label(m["name"] + (" (cet ordinateur)" if m["me"] else ""))
-                    ui.label(f"Velora {m['version'] or '?'} · vu {fleet.ago(m['seen'])}" + (f" · en retard sur la {top}" if old else "")).classes(
+                    current = bool(top and m["version"] and fleet.updater.parse(m["version"]) >= fleet.updater.parse(top))
+                    ui.label(f"Velora {m['version'] or '?'} · vu {fleet.ago(m['seen'])}" + (f" · en retard sur la {top}" if old else (" · à jour" if current else ""))).classes(
                         "text-caption " + ("text-negative" if old else "text-grey"))
                 ui.label(fleet.compact(m["cr_day"])).style("width:100px;text-align:right")
                 ui.label(fleet.compact(m["cr_month"])).style("width:100px;text-align:right")
@@ -45,6 +47,9 @@ def dialog(open_settings) -> None:
             ui.label("Total").classes("col")
             ui.label(fleet.compact(sum(m["cr_day"] for m in snap))).style("width:100px;text-align:right")
             ui.label(fleet.compact(sum(m["cr_month"] for m in snap))).style("width:100px;text-align:right")
+        if any(fleet.updater.parse(m["version"] or "0") < fleet.updater.parse(top or "0") for m in snap):
+            ui.label("Un ordinateur en retard se met à jour tout seul : Velora cherche une nouvelle version toutes les 6 heures et l'installe après 20 minutes sans l'utiliser "
+                     "(Paramètres › Utilisation et données). Il faut simplement que Velora soit ouverte dessus.").classes("text-caption text-grey")
         if len(snap) == 1:
             ui.label("Les autres ordinateurs n'apparaissent qu'une fois Velora ouverte dessus (dans cette version ou une plus récente), avec la synchronisation des réglages allumée.").classes("text-caption text-grey")
         with ui.row().classes("w-full justify-end gap-2"):

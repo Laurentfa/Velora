@@ -165,13 +165,16 @@ def usage_panel() -> None:
         allowance = ui.number("Crédits 1min.AI par mois (0 = aucun plafond)", value=allow, min=0, step=100000, precision=0).props("outlined dense").style("width:330px")
         daily = ui.number("Plafond par jour (crédits, 0 = aucun)", value=cap, min=0, step=10000, precision=0).props("outlined dense").style("width:280px").mark("daily-cap")
         hard = ui.switch("Bloquer l'IA au plafond", value=u["hard"])
+        alert = ui.number("Me prévenir au-dessus de (crédits par jour, tous vos ordinateurs, 0 = jamais)", value=aipolicy.credits_alert_threshold(), min=0, step=10000,
+                          precision=0).props("outlined dense").style("width:520px").mark("credits-alert")
 
     def save_budget() -> None:
         db.kv_set("ai_budget_eur", str(bud.value or 0))
         db.kv_set("onemin_allowance", str(int(allowance.value or 0)))
         db.kv_set("onemin_daily_cap", str(int(daily.value or 0)))
+        db.kv_set("credits_alert", str(int(alert.value or 0)))
         db.kv_set("ai_budget_hard", "1" if hard.value else "0")
-        ui.notify("Plafonds enregistrés. Une alerte vous prévient à 80 %. Le plafond par jour suspend toujours l'IA une fois atteint.", type="positive")
+        ui.notify("Enregistré. Une alerte vous prévient à 80 % du plafond et au-dessus du seuil de consommation. Le plafond par jour suspend toujours l'IA une fois atteint ; le seuil, lui, ne bloque rien.", type="positive")
 
     ui.button("Enregistrer les plafonds", icon="save", on_click=save_budget).props("outline no-caps dense")
     if u["credits_by_feature"]:

@@ -184,6 +184,38 @@ def daily_credit_cap() -> int:
         return 0
 
 
+ALERT_DEFAULT = 300_000  # crédits par jour : au-dessus, Velora prévient (sans rien bloquer)
+
+
+def credits_alert_threshold() -> int:
+    """Seuil d'alerte de consommation (crédits 1min.AI par jour, tous vos ordinateurs). 0 = pas d'alerte. Contrairement au plafond, il ne bloque jamais l'IA."""
+    raw = db.kv_get("credits_alert")
+    if raw is None:
+        return ALERT_DEFAULT
+    try:
+        return max(0, int(float(raw)))
+    except ValueError:
+        return ALERT_DEFAULT
+
+
+def credits_alert(day_total: int, month_total: int, today=None) -> dict | None:
+    """{'used', 'threshold', 'projection'} si le seuil du jour est dépassé, sinon None. projection = crédits attendus ce mois-ci au rythme actuel (jours écoulés)."""
+    thr = credits_alert_threshold()
+    if not thr or day_total < thr:
+        return None
+    today = today or datetime.now()
+    import calendar
+    days = calendar.monthrange(today.year, today.month)[1]
+    return {"used": day_total, "threshold": thr, "projection": int(month_total / max(1, today.day) * days)}
+
+
+def credits_alert_text(a: dict) -> str:
+    n = lambda v: f"{v:,}".replace(",", " ")  # noqa: E731
+    proj = a["projection"]
+    return f"{n(a['used'])} crédits 1min.AI aujourd'hui, au-dessus de votre seuil de {n(a['threshold'])}. Projection ce mois-ci : " + (
+        f"{proj / 1_000_000:.1f} M".replace(".", ",") if proj >= 1_000_000 else n(proj)) + "."
+
+
 def day_credits(day: str | None = None) -> int:
     day = day or datetime.now().strftime("%Y-%m-%d")
     with db.conn() as c:

@@ -1,6 +1,6 @@
 """Statistiques de courrier : mails reçus, lus et envoyés, par boîte et par période.
 Calculées sur les mails gardés sur cet ordinateur (ceux supprimés ou jamais synchronisés ne comptent pas). « Lus » est l'état actuel : Velora ne sait pas quand un mail a été lu."""
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from . import config, db
 
@@ -99,3 +99,79 @@ def summary(account: str = "", period: str = "12m", today: date | None = None) -
 def accounts() -> list[tuple[str, str]]:
     """[(clé, libellé)] des boîtes connues."""
     return [(k, c.label) for k, c in config.load_accounts(enabled_only=False).items()]
+
+
+WAIT_MAX_DAYS = 60  # au-delà, un mail sans réponse n'est plus une relance mais un oubli assumé
+
+
+def waiting(days: int = 3, account: str = "", now: datetime | None = None, limit: int = 50) -> list[dict]:
+    """Mails reçus qui attendent une réponse depuis plus de `days` jours : [{id, account, sender, subject, date, days}], du plus ancien au plus récent.
+    Un mail attend une réponse quand l'IA l'a jugé « à répondre », qu'il n'a ni réponse ni transfert, et qu'aucun mail envoyé n'est parti depuis dans sa conversation."""
+    now = now or datetime.now().astimezone()
+    old = (now - timedelta(days=days)).isoformat()
+    floor = (now - timedelta(days=WAIT_MAX_DAYS)).isoformat()
+    where, args = "COALESCE(f.role,'') IN ('inbox','') AND m.needs_reply = 1 AND COALESCE(m.verb,0) = 0 AND m.date <= ? AND m.date >= ?", [old, floor]
+    if account:
+        where += " AND m.account = ?"
+        args.append(account)
+    with db.conn() as c:
+        rows = c.execute(
+            f"SELECT m.id, m.account, m.ckey, m.sender, m.sender_name, m.subject, m.date FROM messages m "
+            f"LEFT JOIN folders f ON f.account=m.account AND f.key=m.folder WHERE {where} "
+            "AND NOT EXISTS (SELECT 1 FROM messages s JOIN folders sf ON sf.account=s.account AND sf.key=s.folder "
+            "                WHERE s.ckey=m.ckey AND sf.role='sent' AND s.date > m.date) "
+            "ORDER BY m.date LIMIT ?", [*args, limit * 4]).fetchall()
+    out, seen = [], set()
+    for r in rows:
+        if r["ckey"] in seen:  # un seul mail par conversation : le plus ancien en attente
+            continue
+        seen.add(r["ckey"])
+        try:
+            age = (now - datetime.fromisoformat(r["date"])).days
+        except ValueError:
+            continue
+        out.append({"id": r["id"], "account": r["account"], "sender": r["sender_name"] or r["sender"], "subject": r["subject"] or "(sans objet)", "date": r["date"], "days": age})
+        if len(out) >= limit:
+            break
+    return out
+
+
+def response_time(period: str = "30j", account: str = "", today: date | None = None) -> dict:
+    """Temps de réponse habituel : pour chaque conversation, délai entre un mail reçu et le premier mail envoyé ensuite. {'median_hours': float|None, 'n': nombre de réponses}.
+    La médiane évite qu'une réponse très tardive fausse le chiffre."""
+    today = today or date.today()
+    first, _ = _bounds(period if period in PERIODS else "30j", today)
+    where, args = "s.date >= ?", [first]
+    if account:
+        where += " AND s.account = ?"
+        args.append(account)
+    with db.conn() as c:
+        rows = c.execute(
+            "SELECT s.ckey, s.date sd, (SELECT MAX(m.date) FROM messages m JOIN folders mf ON mf.account=m.account AND mf.key=m.folder "
+            "                          WHERE m.ckey=s.ckey AND COALESCE(mf.role,'') NOT IN ('sent','drafts','trash','junk') AND m.date < s.date) rd "
+            f"FROM messages s JOIN folders sf ON sf.account=s.account AND sf.key=s.folder WHERE sf.role='sent' AND {where}", args).fetchall()
+    hours = []
+    seen = set()
+    for r in sorted(rows, key=lambda r: r["sd"]):
+        if not r["rd"] or (r["ckey"], r["rd"]) in seen:  # une seule réponse par mail reçu : la première
+            continue
+        seen.add((r["ckey"], r["rd"]))
+        try:
+            delta = datetime.fromisoformat(r["sd"]) - datetime.fromisoformat(r["rd"])
+        except ValueError:
+            continue
+        h = delta.total_seconds() / 3600
+        if 0 <= h <= 24 * 30:
+            hours.append(h)
+    hours.sort()
+    return {"median_hours": (hours[len(hours) // 2] if len(hours) % 2 else (hours[len(hours) // 2 - 1] + hours[len(hours) // 2]) / 2) if hours else None, "n": len(hours)}
+
+
+def hours_text(h: float | None) -> str:
+    if h is None:
+        return "—"
+    if h < 1:
+        return f"{max(1, round(h * 60))} min"
+    if h < 24:
+        return f"{int(h)} h {round((h - int(h)) * 60):02d}"
+    return f"{round(h / 24, 1)} j".replace(".", ",")

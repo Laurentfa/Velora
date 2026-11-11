@@ -822,10 +822,15 @@ def _tab_cal() -> None:
                   on_click=lambda: ui.navigate.to("https://console.cloud.google.com/apis/credentials", new_tab=True)).props("flat no-caps dense size=sm")
 
 
-def _tab_stats() -> None:
+def _tab_stats(dlg=None, on_open=None) -> None:
     """Onglet « Statistiques » : mails reçus, lus et envoyés, par boîte et par période."""
     ui.label("Statistiques").classes("text-h6").style("font-weight:700")
     state = {"account": "", "period": "12m"}
+
+    async def go(mid: str) -> None:
+        if dlg:
+            dlg.close()
+        await on_open(mid)
 
     @ui.refreshable
     def body() -> None:
@@ -840,6 +845,28 @@ def _tab_stats() -> None:
                     ui.label(label).classes("text-caption text-grey")
                     ui.label(value).style("font-size:22px;font-weight:700")
                     ui.label(sub).classes("text-caption text-grey")
+        rt = stats.response_time("30j", state["account"])
+        wait = stats.waiting(3, state["account"])
+        with ui.row().classes("w-full gap-3 no-wrap q-mt-sm"):
+            with ui.card().props("flat bordered").classes("col").style("padding:10px 14px"):
+                ui.label("Temps de réponse habituel").classes("text-caption text-grey")
+                ui.label(stats.hours_text(rt["median_hours"])).style("font-size:22px;font-weight:700").mark("stats-response-time")
+                ui.label(f"médiane sur 30 jours · {rt['n']} réponse(s)" if rt["n"] else "pas encore de réponse mesurée").classes("text-caption text-grey")
+            with ui.card().props("flat bordered").classes("col").style("padding:10px 14px"):
+                ui.label("Sans réponse depuis plus de 3 jours").classes("text-caption text-grey")
+                ui.label(f"{len(wait)} mail(s)" if config.ai_enabled() else "—").style("font-size:22px;font-weight:700").mark("stats-waiting")
+                ui.label("mails que l'IA juge à répondre" if config.ai_enabled() else "demande l'IA pour repérer les mails à répondre").classes("text-caption text-grey")
+        if wait:
+            ui.label("Mails qui attendent une réponse").classes("text-caption text-grey q-mt-sm")
+            for w in wait[:8]:
+                with ui.row().classes("w-full items-center no-wrap gap-2").mark("stats-waiting-row"):
+                    ui.label(w["sender"]).style("width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
+                    ui.label(w["subject"]).classes("col").style("overflow:hidden;text-overflow:ellipsis;white-space:nowrap")
+                    ui.label(f"{w['days']} jours").classes("text-caption text-grey").style("width:70px;text-align:right")
+                    if on_open:
+                        ui.button("Ouvrir", on_click=lambda _, i=w["id"]: go(i)).props("flat dense no-caps size=sm color=primary")
+            if len(wait) > 8:
+                ui.label(f"… et {len(wait) - 8} autre(s), les plus récents.").classes("text-caption text-grey")
         top = max((max(r, e) for _, r, e in s["buckets"]), default=0) or 1
         with ui.row().classes("items-center gap-3 text-caption text-grey q-mt-sm"):
             ui.html("<span style='display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--accent);margin-right:4px'></span>Reçus")
@@ -1010,7 +1037,7 @@ def _tab_use(host) -> None:
     ui.switch("Stocker mes mots de passe et ma clé API dans le Trousseau", value=config.keychain_enabled(), on_change=keychain_toggle)
 
 
-def open_settings(host, on_folders) -> None:
+def open_settings(host, on_folders, on_open=None) -> None:
     """Dossiers, IA (interrupteur, modèles, limites), clé API et mots de passe : écrits dans le .env de l'utilisateur."""
     cfgs = sync.ACCOUNTS
     f = {"ANTHROPIC_API_KEY": "", "ONEMIN_API_KEY": "", "OAI_API_KEY": "", "OAI_BASE_URL": config.env("OAI_BASE_URL"), "OAI_VISION": oaicompat.vision_setting(),
@@ -1093,7 +1120,7 @@ def open_settings(host, on_folders) -> None:
             _tab_use(host)
 
         with sec["stats"], ui.column().classes("w-full gap-2").style("max-width:760px"):
-            _tab_stats()
+            _tab_stats(dlg, on_open)
 
         def save() -> None:
             db.kv_set("ai_fallback", "1" if f["AI_FALLBACK"] else "0")
