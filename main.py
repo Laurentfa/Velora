@@ -2280,6 +2280,7 @@ if not DB_ERROR:
     app.on_startup(lambda: background_tasks.create(_ask_files_access_later()))
     app.on_startup(lambda: perf.mark("serveur de l'interface démarré"))
     app.on_startup(lambda: background_tasks.create(perf.lag_monitor()))
+    app.on_startup(lambda: background_tasks.create(perf.page_pulse()))
     app.on_startup(lambda: background_tasks.create(sync_loop()))
     app.on_startup(lambda: background_tasks.create(outbox_loop()))
     app.on_startup(lambda: background_tasks.create(_start_api()))

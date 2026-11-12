@@ -136,6 +136,39 @@ def _watchdog(thread_id: int) -> None:
             reported = False
 
 
+async def page_pulse(every: float = 10.0, wait: float = 8.0, alert_after: int = 3) -> None:
+    """Pouls des fenêtres : toutes les `every` s, le serveur demande à chaque page connectée son état de visibilité (un aller-retour JavaScript).
+    Une page connectée qui ne répond plus (JavaScript figé : boutons sans effet) est notée dans le journal après `alert_after` essais manqués, puis
+    quand elle répond de nouveau. Ne fait que noter : rien n'est rechargé ni modifié."""
+    from nicegui import Client
+    silent: dict[str, float] = {}  # client -> début du silence
+    misses: dict[str, int] = {}
+    while True:
+        await asyncio.sleep(every)
+        try:
+            clients = [c for c in list(Client.instances.values()) if getattr(c, "has_socket_connection", False)]
+        except Exception:  # noqa: BLE001
+            continue
+        known = set(Client.instances)  # un client déconnecté un moment (réseau, veille) existe encore : son silence se poursuit à la reconnexion
+        for gone in [k for k in misses if k not in known]:
+            misses.pop(gone, None)
+            silent.pop(gone, None)
+        for c in clients:
+            try:
+                state = await asyncio.wait_for(c.run_javascript("document.visibilityState", timeout=wait), wait + 2)
+            except Exception:  # noqa: BLE001
+                misses[c.id] = misses.get(c.id, 0) + 1
+                silent.setdefault(c.id, time.monotonic())
+                if misses[c.id] == alert_after:
+                    log.warning("page connectée mais muette depuis %.0f s [client %s] : JavaScript figé ? (boutons sans effet)", time.monotonic() - silent[c.id], c.id[:6])
+                continue
+            if c.id in silent:
+                if misses.get(c.id, 0) >= alert_after:
+                    log.warning("page de nouveau réactive [client %s] après %.0f s de silence (visibilité : %s)", c.id[:6], time.monotonic() - silent[c.id], state)
+                silent.pop(c.id, None)
+                misses.pop(c.id, None)
+
+
 async def lag_monitor() -> None:
     """Mesure de combien la boucle du serveur est bloquée : si elle l'est, l'interface se fige (un traitement long dans le mauvais fil)."""
     threading.Thread(target=_watchdog, args=(threading.get_ident(),), daemon=True, name="perf-watchdog").start()
