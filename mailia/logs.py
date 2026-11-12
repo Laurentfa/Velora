@@ -21,6 +21,27 @@ def log_dir():
     return d
 
 
+class ConsoleHandler(logging.StreamHandler):
+    """Sortie console qui ne casse jamais l'appli : sous Windows la console est souvent en cp1252, qui ne sait pas écrire « → » ou « ✓ ». Une erreur d'encodage
+    d'un message de journal remontait alors jusqu'au code qui journalisait (par le traitement d'erreur de logging, qui réécrit le message sur la même console)."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            stream = self.stream
+            try:
+                stream.write(msg + self.terminator)
+            except UnicodeEncodeError:
+                enc = getattr(stream, "encoding", None) or "ascii"
+                stream.write(msg.encode(enc, "replace").decode(enc) + self.terminator)
+            self.flush()
+        except Exception:  # noqa: BLE001
+            pass  # un journal ne doit jamais faire échouer ce qu'il décrit
+
+    def handleError(self, record: logging.LogRecord) -> None:
+        pass
+
+
 def setup() -> None:
     root = logging.getLogger()
     root.setLevel(logging.INFO)
@@ -33,7 +54,7 @@ def setup() -> None:
         except OSError:
             pass  # dossier en lecture seule : on continue sans fichier
     if not root.handlers or all(isinstance(h, logging.handlers.RotatingFileHandler) for h in root.handlers):
-        sh = logging.StreamHandler()
+        sh = ConsoleHandler()
         sh.setFormatter(fmt)
         root.addHandler(sh)
     logging.getLogger("httpx").setLevel(logging.WARNING)  # inutile et bavard
