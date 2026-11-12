@@ -52,6 +52,12 @@ URGENCY = (
     "your account has been", "verify your account", "unusual activity", "activité inhabituelle", "mot de passe expire",
     "cliquez ci-dessous", "régulariser", "dernier rappel", "amende", "impayé",
 )
+# marques citées dans le corps d'un faux avis d'abonnement ou de facture -> marque de BRANDS dont l'adresse d'envoi doit venir
+BODY_BRANDS = {"prime vidéo": "amazon", "prime video": "amazon", "prime music": "amazon", "amazon prime": "amazon", "amazon": "amazon", "netflix": "netflix",
+               "paypal": "paypal", "apple": "apple", "icloud": "apple", "microsoft": "microsoft", "google": "google", "orange": "orange"}
+BILLING_WORDS = ("abonnement", "renouvellement", "renouvelé", "facture", "prélev", "débit", "montant", "paiement", "formule")
+_AMOUNT = re.compile(r"\d+[.,]\d{2}\s?(?:eur|€|euros?)|(?:eur|€)\s?\d+[.,]\d{2}")
+_DELAY = re.compile(r"\b\d{1,2} jours? pour (?:modifier|annuler|contester|résilier|réagir|vous opposer)|(?:modifier|annuler|contester|résilier) (?:votre|ce) (?:formule|abonnement|paiement)")
 SHORTENERS = {"bit.ly", "tinyurl.com", "goo.gl", "ow.ly", "is.gd", "cutt.ly", "rb.gy", "t.co", "shorturl.at", "tiny.cc"}
 RISKY_TLDS = {"xyz", "top", "click", "work", "icu", "rest", "buzz", "monster", "cfd", "sbs", "shop", "online", "site", "live"}
 SECOND_LEVEL = {"co", "com", "org", "net", "gov", "ac", "gouv"}
@@ -214,6 +220,18 @@ def check(sender: str, name: str = "", subject: str = "", html: str = "", body: 
     if hits and (links or "http" in text):
         reasons.append((min(2, len(hits)), "Ton d'urgence ou de menace (« " + hits[0] + " »)."))
 
+    # 5b. débit ou abonnement qu'on n'a pas demandé : marque citée dans le corps (pas seulement l'objet) et délai pour réagir
+    if not trusted:
+        low = (body or "")[:6000].lower()
+        billing = bool(_AMOUNT.search(low)) and any(k in low for k in BILLING_WORDS)
+        if billing:
+            cited = [(w, b) for w, b in BODY_BRANDS.items() if _mentions(low, w)]
+            if any(dom and _matches(dom, BRANDS[b]) for _, b in cited):
+                pass  # la marque citée écrit bien depuis son propre domaine
+            elif cited and dom:
+                reasons.append((3, f"Annonce un abonnement ou un débit « {cited[0][0]} » mais l'adresse d'envoi est @{dom}."))
+            elif _DELAY.search(low):
+                reasons.append((2, "Annonce un débit et laisse un délai pour réagir : classique des fausses factures."))
     # 6. authentification de l'expéditeur par votre serveur (SPF / DKIM / DMARC) et adresse « Répondre à »
     auth = auth or {}
     if auth.get("dmarc") in ("fail", "permerror"):

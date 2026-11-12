@@ -926,7 +926,9 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                                       on_click=lambda: self.category_dialog(m)).props("flat dense no-caps size=sm color=primary").tooltip(
                                 "Ce n'est pas la bonne catégorie ? Corrigez-la")
                         ui.label(m["summary"]).classes("q-mt-xs")
-                        if m["suggested"]:
+                        if security.assess(m)["level"]:  # message suspect : jamais « Archiver » ou « Répondre », on conseille la prudence
+                            ui.label("Suggestion : ne cliquer sur rien, vérifier l'expéditeur ou signaler comme indésirable").classes("sub")
+                        elif m["suggested"]:
                             ui.label(f"Suggestion : {m['suggested']}").classes("sub")
                 elif use_ai:
                     with ui.element("div").classes("aicard"):
