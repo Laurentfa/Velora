@@ -209,9 +209,12 @@ def test_windows_update_runs_a_script_that_installs_then_relaunches(configured, 
     (cmd, kw), = calls
     assert cmd[:2] == ["cmd", "/c"] and cmd[2].endswith("maj.bat") and cmd[3] == "4321" and cmd[4].endswith("Velora-setup.exe") and cmd[5] == sys.executable
     assert "RESTARTAPPLICATIONS" not in " ".join(cmd) and cmd[6].endswith("mise-a-jour.log")
+    assert cmd[7].endswith("update-en-cours.flag") and open(cmd[7]).read() == "4321"  # fichier d'arrêt posé avant le script : le relais de Chrome ne se relance plus
+    assert 'del "%FLAG%"' in (tmp_path / "maj.bat").read_text(encoding="cp1252")
     text = (tmp_path / "maj.bat").read_text(encoding="cp1252")
     assert text.index("tasklist") < text.index("/VERYSILENT") < text.index('start "" "%~3"')  # attendre, installer jusqu'au bout, relancer
     assert "start /wait" in text and "/CLOSEAPPLICATIONS" in text
+    assert text.index("/VERYSILENT") < text.index('del "%FLAG%"') < text.index('start "" "%~3"')  # le fichier d'arrêt est retiré après l'installation, avant la relance
     assert text.index("tasklist") < text.index("taskkill /F /IM") < text.index("/VERYSILENT")  # les processus Velora restants sont fermés avant l'installation (le relais de Chrome la bloquait)
 
 

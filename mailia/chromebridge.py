@@ -177,6 +177,11 @@ def register() -> Path:
 def run_host() -> None:
     """Relais : entrées/sorties de Chrome (messages préfixés par leur longueur) ↔ connexion locale vers Velora. Se reconnecte tant que Chrome est là."""
     import time
+    try:  # mise à jour en cours : on ne reste pas (Chrome relance le relais toutes les 5 s, et un Velora.exe actif bloque l'installation, code 5)
+        if time.time() - config.UPDATE_FLAG.stat().st_mtime < config.UPDATE_FLAG_MAX_AGE:
+            return
+    except OSError:
+        pass
     out = sys.stdout.buffer
     out_lock = threading.Lock()
     sock: list[socket.socket | None] = [None]

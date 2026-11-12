@@ -37,6 +37,8 @@ def _data_dir() -> Path:
 DATA_DIR = _data_dir()
 ENV_PATH = DATA_DIR / ".env"
 DB_PATH = DATA_DIR / "mail.db"
+UPDATE_FLAG = DATA_DIR / "update-en-cours.flag"  # posé par la mise à jour : le relais de Chrome (--chrome-host) ne se lance pas tant qu'il existe
+UPDATE_FLAG_MAX_AGE = 15 * 60  # secondes : un fichier plus ancien est un reste (mise à jour interrompue), on l'ignore
 
 
 def harden_permissions() -> None:

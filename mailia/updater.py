@@ -42,6 +42,7 @@ if mv "$DST" "$BAK" && mv "$NEW" "$DST"; then rm -rf "$BAK"; note "application r
 WIN_SCRIPT = """@echo off
 set PID=%~1
 set LOG=%~4
+set FLAG=%~5
 echo %date% %time% mise a jour : attente de la fermeture de Velora (processus %PID%)>> "%LOG%"
 :wait
 tasklist /FI "PID eq %PID%" /NH 2>nul | find "%PID%" >nul
@@ -53,7 +54,9 @@ rem les autres processus Velora (fenetre native, relais lance par Chrome pour l'
 taskkill /F /IM "%~nx3" >nul 2>&1
 echo %date% %time% mise a jour : processus Velora restants fermes>> "%LOG%"
 start /wait "" "%~2" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS
-echo %date% %time% mise a jour : installateur termine (code %errorlevel%)>> "%LOG%"
+set CODE=%errorlevel%
+del "%FLAG%" >nul 2>&1
+echo %date% %time% mise a jour : installateur termine (code %CODE%)>> "%LOG%"
 start "" "%~3"
 echo %date% %time% mise a jour : relance demandee>> "%LOG%"
 """
@@ -295,8 +298,18 @@ def install(archive: Path, pid: int | None = None, opener: str = "open") -> None
         # lance l'installateur puis relance Velora (voir WIN_SCRIPT).
         script = archive.parent / "maj.bat"
         script.write_text(WIN_SCRIPT, encoding="cp1252", errors="replace")
-        subprocess.Popen(["cmd", "/c", str(script), str(pid or os.getpid()), str(archive), sys.executable, str(log)],
-                         creationflags=0x08000000 | 0x00000200, close_fds=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # sans fenêtre, hors du groupe de Velora
+        from . import config
+        # Fichier d'arrêt : tant qu'il existe, le relais que Chrome lance pour l'extension quitte aussitôt au lieu de bloquer l'installation (le script le supprime à la fin)
+        try:
+            config.UPDATE_FLAG.write_text(str(pid or os.getpid()), encoding="utf-8")
+        except OSError:
+            pass
+        try:
+            subprocess.Popen(["cmd", "/c", str(script), str(pid or os.getpid()), str(archive), sys.executable, str(log), str(config.UPDATE_FLAG)],
+                             creationflags=0x08000000 | 0x00000200, close_fds=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # sans fenêtre, hors du groupe de Velora
+        except OSError:
+            config.UPDATE_FLAG.unlink(missing_ok=True)
+            raise
         return
     target = app_bundle()
     if target is None:

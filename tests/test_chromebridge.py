@@ -69,3 +69,23 @@ def test_the_host_manifest_only_lets_our_extension_start_the_relay(tmp_path, mon
     der = base64.b64decode(ext["key"])
     assert "".join(chr(97 + int(c, 16)) for c in hashlib.sha256(der).hexdigest()[:32]) == cb.EXTENSION_ID
     assert ext["host_permissions"] == ["https://prescripteurs.ventilea.fr/*"]
+
+
+def test_the_chrome_relay_quits_at_once_while_an_update_runs(tmp_path, monkeypatch):
+    """Régression : Chrome relançait le relais (Velora.exe --chrome-host) toutes les 5 s pendant la mise à jour ; l'installateur échouait (code 5, fichiers utilisés)."""
+    import io
+    import os
+    from mailia import config
+    flag = tmp_path / "update-en-cours.flag"
+    monkeypatch.setattr(config, "UPDATE_FLAG", flag)
+    monkeypatch.setattr(sys, "stdin", type("In", (), {"buffer": io.BytesIO(b"")})())  # Chrome ferme tout de suite : le relais s'arrête après son démarrage
+    monkeypatch.setattr(sys, "stdout", type("Out", (), {"buffer": io.BytesIO()})())
+    started = []
+    monkeypatch.setattr(cb.threading, "Thread", lambda *a, **k: started.append(1) or type("T", (), {"start": lambda self: None})())
+    flag.write_text("1")
+    cb.run_host()
+    assert not started  # fichier frais : le relais est parti sans rien démarrer
+    old = time.time() - config.UPDATE_FLAG_MAX_AGE - 60
+    os.utime(flag, (old, old))
+    cb.run_host()
+    assert started  # fichier ancien (mise à jour interrompue) : ignoré, le relais fonctionne normalement
