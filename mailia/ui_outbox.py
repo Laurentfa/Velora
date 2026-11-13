@@ -1,4 +1,5 @@
 """Envoi : fenêtre d'envoi, programmation, annulation, file d'attente."""
+import logging
 from datetime import datetime, timedelta, timezone
 
 from nicegui import ui
@@ -7,6 +8,9 @@ from mailia import checks, compose, db, i18n, outgoing, settings_ui, sync
 from mailia.textutil import html_to_text
 
 from mailia.ui_common import JOURS, MOIS_COURTS, label_of
+
+
+log = logging.getLogger("mailia")
 
 
 class OutboxMixin:
@@ -71,6 +75,7 @@ class OutboxMixin:
                 arch = ui.checkbox("Archiver la conversation après l'envoi", value=False).props("dense").mark("send-archive")
 
             def confirm() -> None:
+                log.info("envoi : clic sur « %s » reçu", go.text)  # si cette ligne manque au journal, le clic n'est pas arrivé jusqu'au serveur (page figée)
                 dlg.submit({"when": when.value, "custom": custom.value, "follow": int(follow.value or 0), "archive": bool(arch and arch.value), "receipt": bool(receipt.value)})
 
             with ui.row().classes("justify-end w-full gap-2 q-mt-sm"):
@@ -94,6 +99,7 @@ class OutboxMixin:
             at = opts[choice["when"]]
         oid = outgoing.queue(account, d["to"], d["cc"], d.get("bcc", ""), d["subject"], d["html"], d["files"], at, draft_id=d.get("id"),
                              reply_to=d.get("reply_to"), followup_days=choice["follow"], importance=d.get("importance", 1), receipt=choice["receipt"])
+        log.info("envoi : message mis en file (%s)", choice["when"])
         self.close_compose()
         self._watch[oid] = d["subject"] or "(sans objet)"
         with self.host:  # le bouton cliqué a disparu avec l'éditeur : on repart d'un élément stable
