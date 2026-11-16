@@ -306,9 +306,9 @@ PUSH = env("PUSH_NOTIFICATIONS", "0") == "1"
 def sync_limit() -> int:
     """Nombre de mails récents gardés par dossier (modifiable dans la fenêtre « Dossiers »)."""
     try:
-        return max(50, int(env("SYNC_LIMIT", "150")))
+        return max(50, int(env("SYNC_LIMIT", "2000")))
     except ValueError:
-        return 150
+        return 2000
 
 
 
