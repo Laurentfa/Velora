@@ -51,7 +51,7 @@ def test_snapshot_sums_machines_and_ignores_yesterday(monkeypatch, clean_db):
     assert snap[0]["me"] and [m["name"] for m in snap] == ["Mac · bureau", "PC Windows · pc", "Mac · portable"]
     assert fleet.totals() == (1300, 7000)  # la fiche d'un autre jour ou d'un autre mois ne compte pas
     from mailia import ui_fleet
-    assert "1 300 crédits aujourd'hui" in ui_fleet.summary_text(snap) and "7 000 ce mois-ci" in ui_fleet.summary_text(snap)
+    assert "1 300 crédits aujourd'hui" in ui_fleet.summary_text(snap) and "7 000 crédits ce mois-ci" in ui_fleet.summary_text(snap)
     assert ui_fleet.summary_text([dict(m, cr_day=0, cr_month=0) for m in snap]) == ""
 
 

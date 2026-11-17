@@ -46,9 +46,28 @@ def month_credits(month: str | None = None) -> int:
         return int(c.execute("SELECT SUM(credits) FROM usage WHERE month=? AND model LIKE '1min:%'", (month,)).fetchone()[0] or 0)
 
 
+def machine_id() -> str:
+    """Identifiant stable de cet ordinateur (le nom réseau change selon le Wi-Fi : « .local » / « .home »). Haché, jamais l'identifiant matériel brut."""
+    import hashlib
+    import subprocess
+    import sys
+    raw = ""
+    try:
+        if sys.platform == "darwin":
+            out = subprocess.run(["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"], capture_output=True, text=True, timeout=5).stdout
+            raw = next((l.split('"')[-2] for l in out.splitlines() if "IOPlatformUUID" in l), "")
+        elif sys.platform == "win32":
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Cryptography") as k:
+                raw = str(winreg.QueryValueEx(k, "MachineGuid")[0])
+    except Exception:  # noqa: BLE001
+        raw = ""
+    return hashlib.sha256(("velora:" + raw).encode()).hexdigest()[:12] if raw else ""
+
+
 def own_entry() -> dict:
     from . import aipolicy
-    return {"v": APP_VERSION, "os": config.machine_label().split(" · ")[0], "at": _iso(_now()), "day": datetime.now().strftime("%Y-%m-%d"),
+    return {"id": machine_id(), "v": APP_VERSION, "os": config.machine_label().split(" · ")[0], "at": _iso(_now()), "day": datetime.now().strftime("%Y-%m-%d"),
             "cr_day": aipolicy.day_credits(), "month": datetime.now().strftime("%Y-%m"), "cr_month": month_credits()}
 
 
@@ -63,7 +82,7 @@ def _clean(raw: object) -> dict:
     """Une fiche lue dans la boîte : on ne garde que les champs attendus, bornés (la boîte peut avoir été modifiée)."""
     if not isinstance(raw, dict):
         return {}
-    return {"v": str(raw.get("v", ""))[:20], "os": str(raw.get("os", ""))[:20], "at": str(raw.get("at", ""))[:24], "day": str(raw.get("day", ""))[:10],
+    return {"id": str(raw.get("id", ""))[:16], "v": str(raw.get("v", ""))[:20], "os": str(raw.get("os", ""))[:20], "at": str(raw.get("at", ""))[:24], "day": str(raw.get("day", ""))[:10],
             "cr_day": _num(raw, "cr_day"), "month": str(raw.get("month", ""))[:7], "cr_month": _num(raw, "cr_month")}
 
 
@@ -88,11 +107,32 @@ def _cache() -> dict[str, dict]:
     return decode(db.kv_get("fleet:cache"))
 
 
+def _base(name: str) -> str:
+    return name.split(" · ")[-1].split(".")[0].lower()
+
+
+def _drop_duplicates(machines: dict, me: str) -> dict:
+    """Une même machine apparaît sous plusieurs noms quand son nom réseau change : on garde la fiche de cet ordinateur et on écarte ses anciens noms
+    (même identifiant ; ou, pour les anciennes fiches sans identifiant, même nom de base ou mêmes crédits du mois)."""
+    mine = machines[me]
+    out = {}
+    for k, x in machines.items():
+        if k != me:
+            same_id = bool(mine.get("id")) and x.get("id") == mine["id"]
+            legacy = not x.get("id") and x.get("os") == mine.get("os") and (
+                _base(k) == _base(me) or (mine.get("cr_month") and x.get("month") == mine.get("month") and x.get("cr_month") == mine["cr_month"]))
+            if same_id or (legacy and mine.get("id")):
+                continue
+        out[k] = x
+    return out
+
+
 def merge(machines: dict[str, dict], me: str, mine: dict, now: datetime, last_write: float, now_ts: float) -> tuple[dict, bool]:
     """Ajoute notre fiche aux fiches lues, oublie les très anciennes. Rend (fiches, faut-il écrire dans la boîte)."""
     old = machines.get(me)
     changed = (not old or any(old.get(k) != mine[k] for k in ("v", "day", "cr_day", "month", "cr_month")) or now_ts - last_write > REFRESH)
     out = {**machines, me: mine}
+    out = _drop_duplicates(out, me)
     cut = _iso(now - timedelta(days=FORGET_DAYS))
     out = {k: x for k, x in out.items() if k == me or (x.get("at") or "") >= cut}
     write = changed and (not old or now_ts - last_write > MIN_WRITE or old.get("v") != mine["v"])
@@ -150,6 +190,12 @@ def snapshot() -> list[dict]:
     me = config.machine_label()
     machines = _cache()
     machines[me] = own_entry()
+    machines = _drop_duplicates(machines, me)
+    newest: dict = {}
+    for k, x in machines.items():  # deux noms pour un même identifiant (autre ordinateur renommé) : on garde la fiche la plus récente
+        if x.get("id") and (x["id"] not in newest or (x.get("at") or "") > (machines[newest[x["id"]]].get("at") or "")):
+            newest[x["id"]] = k
+    machines = {k: x for k, x in machines.items() if not x.get("id") or newest[x["id"]] == k}
     today, month = datetime.now().strftime("%Y-%m-%d"), datetime.now().strftime("%Y-%m")
     out = [{"name": k, "me": k == me, "version": x.get("v", ""), "os": x.get("os", ""), "seen": _parse_iso(x.get("at")),
             "cr_day": x["cr_day"] if x.get("day") == today else 0, "cr_month": x["cr_month"] if x.get("month") == month else 0} for k, x in machines.items()]

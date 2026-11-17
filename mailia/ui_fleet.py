@@ -11,7 +11,7 @@ def summary_text(snap: list[dict]) -> str:
         return ""
     cap = aipolicy.daily_credit_cap()
     over = " · seuil dépassé" if aipolicy.credits_alert(day, month) else ""
-    return f"IA : {fleet.compact(day)}" + (f" sur {fleet.compact(cap)}" if cap and len(snap) == 1 else "") + f" crédits aujourd'hui · {fleet.compact(month)} ce mois-ci{over}"
+    return f"IA : {fleet.compact(day)}" + (f" sur {fleet.compact(cap)}" if cap and len(snap) == 1 else "") + f" crédits aujourd'hui · {fleet.compact(month)} crédits ce mois-ci (≈ {fleet.compact(month // 5)} tokens){over}"
 
 
 def tooltip_text(snap: list[dict]) -> str:
