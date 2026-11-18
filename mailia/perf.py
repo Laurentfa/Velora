@@ -136,13 +136,42 @@ def _watchdog(thread_id: int) -> None:
             reported = False
 
 
+# Ce que la page dit d'elle-même à chaque pouls (aucun texte, aucun nom : seulement des compteurs et des noms de classes) : si elle se fige, le journal sait ce qui était ouvert juste avant.
+CONTEXT_JS = """(() => { const d = document, q = s => d.querySelectorAll(s).length;
+  const top = (x, y) => { const e = d.elementFromPoint(x, y); return e ? (e.tagName + '.' + String(e.className && e.className.baseVal !== undefined ? e.className.baseVal : e.className).split(' ').slice(0, 3).join('.')).slice(0, 60) : null; };
+  const w = innerWidth, h = innerHeight, a = d.activeElement;
+  return JSON.stringify({v: d.visibilityState, f: d.hasFocus(), idle: Math.round((Date.now() - (window.__lastAct || Date.now())) / 1000),
+    dlg: q('.q-dialog'), menu: q('.q-menu'), ed: q('.q-editor'), nodes: q('*'), rows: q('.q-item'), spin: q('.q-spinner,.q-loading'),
+    lock: d.body.classList.contains('q-body--prevent-scroll'), focus: a ? a.tagName : null, c: top(w / 2, h / 2), tl: top(40, 40), br: top(w - 40, h - 40), size: w + 'x' + h}); })()"""
+
+
+def context_text(ctx: dict | None, age: float | None = None) -> str:
+    """Le contexte rendu lisible pour le journal : « 2 fenêtre(s) ouverte(s), 4 120 éléments, au centre div.q-dialog__backdrop… »."""
+    if not isinstance(ctx, dict):
+        return "contexte inconnu"
+    bits = [f"visibilité {ctx.get('v')}", "fenêtre active" if ctx.get("f") else "fenêtre inactive", f"dernier geste il y a {ctx.get('idle')} s"]
+    for k, label in (("dlg", "fenêtre(s) de dialogue"), ("menu", "menu(s)"), ("ed", "éditeur(s)"), ("spin", "indicateur(s) d'attente")):
+        if ctx.get(k):
+            bits.append(f"{ctx[k]} {label}")
+    bits.append(f"{ctx.get('nodes')} éléments dont {ctx.get('rows')} lignes")
+    if ctx.get("lock"):
+        bits.append("défilement verrouillé")
+    bits.append(f"focus {ctx.get('focus')}")
+    bits.append(f"au centre {ctx.get('c')}, en haut à gauche {ctx.get('tl')}, en bas à droite {ctx.get('br')}")
+    if age is not None:
+        bits.append(f"relevé il y a {age:.0f} s")
+    return " ; ".join(str(b) for b in bits)
+
+
 async def page_pulse(every: float = 10.0, wait: float = 8.0, alert_after: int = 3) -> None:
-    """Pouls des fenêtres : toutes les `every` s, le serveur demande à chaque page connectée son état de visibilité (un aller-retour JavaScript).
-    Une page connectée qui ne répond plus (JavaScript figé : boutons sans effet) est notée dans le journal après `alert_after` essais manqués, puis
+    """Pouls des fenêtres : toutes les `every` s, le serveur demande à chaque page connectée son état (visibilité, fenêtres ouvertes, ce qui est au-dessus de l'écran : un aller-retour JavaScript).
+    Une page connectée qui ne répond plus (JavaScript figé : boutons sans effet) est notée dans le journal après `alert_after` essais manqués, avec le dernier état connu, puis
     quand elle répond de nouveau. Ne fait que noter : rien n'est rechargé ni modifié."""
+    import json
     from nicegui import Client
     silent: dict[str, float] = {}  # client -> début du silence
     misses: dict[str, int] = {}
+    last: dict[str, tuple[float, dict]] = {}  # client -> (moment, dernier contexte reçu)
     while True:
         await asyncio.sleep(every)
         try:
@@ -153,18 +182,27 @@ async def page_pulse(every: float = 10.0, wait: float = 8.0, alert_after: int = 
         for gone in [k for k in misses if k not in known]:
             misses.pop(gone, None)
             silent.pop(gone, None)
+        for k in [k for k in last if k not in known]:
+            last.pop(k, None)
         for c in clients:
             try:
-                state = await asyncio.wait_for(c.run_javascript("document.visibilityState", timeout=wait), wait + 2)
+                raw = await asyncio.wait_for(c.run_javascript(CONTEXT_JS, timeout=wait), wait + 2)
+                try:
+                    ctx = json.loads(raw) if isinstance(raw, str) else {"v": raw}
+                except ValueError:
+                    ctx = {"v": str(raw)[:20]}
             except Exception:  # noqa: BLE001
                 misses[c.id] = misses.get(c.id, 0) + 1
                 silent.setdefault(c.id, time.monotonic())
                 if misses[c.id] == alert_after:
-                    log.warning("page connectée mais muette depuis %.0f s [client %s] : JavaScript figé ? (boutons sans effet)", time.monotonic() - silent[c.id], c.id[:6])
+                    t, prev = last.get(c.id, (None, None))
+                    log.warning("page connectée mais muette depuis %.0f s [client %s] : JavaScript figé ? (boutons sans effet) ; dernier état connu : %s",
+                                time.monotonic() - silent[c.id], c.id[:6], context_text(prev, None if t is None else time.monotonic() - t))
                 continue
+            last[c.id] = (time.monotonic(), ctx)
             if c.id in silent:
                 if misses.get(c.id, 0) >= alert_after:
-                    log.warning("page de nouveau réactive [client %s] après %.0f s de silence (visibilité : %s)", c.id[:6], time.monotonic() - silent[c.id], state)
+                    log.warning("page de nouveau réactive [client %s] après %.0f s de silence ; état à la reprise : %s", c.id[:6], time.monotonic() - silent[c.id], context_text(ctx))
                 silent.pop(c.id, None)
                 misses.pop(c.id, None)
 
