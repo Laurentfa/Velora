@@ -8,12 +8,15 @@ Rien n'est chargé tant que les modules ne sont pas activés dans les Paramètre
 il n'est jamais téléchargé ni chargé depuis un mail ou un site, seulement depuis ce dossier. Un module qui échoue est noté dans le journal et
 n'empêche jamais l'application de démarrer. Ce dossier ne fait pas partie de ce qui est distribué."""
 import importlib.util
+import itertools
 import json
 import logging
 import re
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 import zipfile
 from pathlib import Path
 
@@ -25,6 +28,10 @@ API_VERSION = 1
 DIR = config.DATA_DIR / "modules"
 views: dict[str, dict] = {}   # identifiant de vue -> {"title", "icon", "build", "module"}
 services: dict[str, dict] = {}  # services optionnels publiés par les modules : nom -> {"module", "fn"} (un module peut s'en servir s'il existe, et fonctionne sans sinon)
+busy_tasks: dict[int, dict] = {}  # opérations longues en cours déclarées par les modules (jeton -> {"module", "label", "since"}) : tant qu'il y en a, Velora ne se met pas à jour tout seul
+_busy_lock = threading.Lock()
+_busy_counter = itertools.count(1)
+BUSY_MAX_SECONDS = 4 * 3600  # une déclaration oubliée ne bloque pas les mises à jour plus longtemps que cela
 slots: dict[str, list] = {"reader": []}  # emplacements dans l'interface : "reader" = sous les réponses rapides d'un message
 status: dict[str, str] = {}   # identifiant de module -> "ok" ou message d'erreur
 
@@ -234,6 +241,18 @@ class ModuleAPI:
         order : position parmi les outils des modules (les plus petits d'abord, à égalité par nom de module)."""
         slots["reader"].append({"module": self.id, "build": build, "order": order})
 
+    def begin_busy(self, label: str) -> int:
+        """Déclare une opération longue en cours (analyse, import, envoi en lot…) : Velora n'installe pas de mise à jour automatique, et donc ne se ferme pas, tant qu'elle dure.
+        Rend un jeton à passer à `end_busy` (dans un `finally` : une déclaration oubliée est de toute façon ignorée au bout de 4 heures)."""
+        with _busy_lock:
+            token = next(_busy_counter)
+            busy_tasks[token] = {"module": self.id, "label": str(label)[:80], "since": time.time()}
+        return token
+
+    def end_busy(self, token: int) -> None:
+        with _busy_lock:
+            busy_tasks.pop(token, None)
+
     def provide(self, name: str, fn) -> None:
         """Publie un service optionnel que d'autres modules peuvent utiliser (voir `service`). fn(*args) est bloquant : à appeler avec run_blocking."""
         services[name] = {"module": self.id, "fn": fn}
@@ -369,3 +388,12 @@ def render_slot(name: str, mailbox, message: dict) -> None:
         except Exception as e:  # noqa: BLE001
             log.exception("module %s : échec d'affichage", it["module"])
             ui.label(f"Module « {it['module']} » en erreur : {type(e).__name__}").classes("rmeta")
+
+
+def busy_labels() -> list[str]:
+    """Les opérations longues en cours, déclarées par les modules (voir ModuleAPI.begin_busy). Une déclaration de plus de BUSY_MAX_SECONDS est considérée comme oubliée."""
+    now = time.time()
+    with _busy_lock:
+        for t in [t for t, v in busy_tasks.items() if now - v["since"] > BUSY_MAX_SECONDS]:
+            busy_tasks.pop(t, None)
+        return [f"{v['label']}" for v in busy_tasks.values()]

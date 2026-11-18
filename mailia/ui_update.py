@@ -78,7 +78,11 @@ async def auto_check() -> None:
 
 
 async def _quiet() -> bool:
-    """Personne n'a touché à Velora depuis 20 minutes, aucun message n'est en cours de rédaction, aucune fenêtre n'est ouverte."""
+    """Personne n'a touché à Velora depuis 20 minutes, aucun message n'est en cours de rédaction, aucune fenêtre n'est ouverte, et aucun module n'a une opération longue en cours
+    (analyse, import… : l'installation ferme Velora et l'interromprait)."""
+    from . import modules
+    if modules.busy_labels():
+        return False
     try:
         return bool(await ui.run_javascript(f"(Date.now() - (window.__lastAct || Date.now())) / 1000 > {IDLE_SECONDS} && !document.querySelector('.q-editor') && !document.querySelector('.q-dialog')", timeout=5))
     except Exception:  # noqa: BLE001 — page absente ou occupée : on réessaiera
