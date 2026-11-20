@@ -1,5 +1,4 @@
 """Pages de module (Ventiléa Connect…) : cliquer dans la colonne de gauche sur la page déjà ouverte ne la recharge pas, et en y revenant l'ascenseur est là où on l'avait laissé."""
-import asyncio
 import time
 import types
 
