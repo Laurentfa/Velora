@@ -12,7 +12,7 @@ CSS = """
 .srcrow{display:flex;align-items:center;gap:12px;width:100%;padding:8px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}.srcrow:hover{background:var(--accent-soft)}
 .srcnum{flex:none;min-width:26px;height:26px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;background:var(--surface2);color:var(--muted)}.srcnum.cited{background:var(--accent);color:#fff}
 input::-webkit-caps-lock-indicator{visibility:hidden!important;display:none!important;opacity:0!important}
-.sidetop{display:flex;flex-direction:column;flex:none;box-sizing:border-box;height:104px;margin:0 -10px;padding:0 10px;border-bottom:1px solid var(--line);width:calc(100% + 20px)}
+.sidetop{display:flex;flex-direction:column;flex:none;box-sizing:border-box;height:116.5px;margin:0 -10px;padding:0 10px;border-bottom:1px solid var(--line);width:calc(100% + 20px)}
 .sidescroll{flex:1 1 auto;min-height:0;width:calc(100% + 10px);margin-right:-10px;padding-top:8px}
 .sidescroll .q-scrollarea__content{width:100%;max-width:100%;padding-right:10px}
 body.body--dark{--bg:#13171e;--side:#171c25;--surface:#1a2029;--surface2:#232b37;--text:#e8edf4;--muted:#8a98ab;--line:#29323f;
@@ -85,7 +85,7 @@ body.resizing iframe{pointer-events:none}
 .nav.ghost{color:var(--muted)}.nav.ghost .lbl{opacity:.8}
 .grp{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);padding:11px 10px 3px}
 .listcol{background:var(--surface);border-right:1px solid var(--line);height:100vh;min-width:0;flex-wrap:nowrap}
-.lhead{box-sizing:border-box;height:120px;padding:14px 14px 0;border-bottom:1px solid var(--line);width:100%}
+.lhead{box-sizing:border-box;height:132.5px;padding:26.5px 14px 0;border-bottom:1px solid var(--line);width:100%}
 .lhead .title{font-size:19px;font-weight:700;letter-spacing:-.02em}
 .ephem{display:flex;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:1px}.eph-i{display:inline-flex;align-items:center;gap:3px}.eph-i img{width:24px;height:24px;margin:-3px 0}.ephem .sep{margin:0 8px}
 .agenda{width:100%;height:100vh;background:transparent;flex-wrap:nowrap}.ag-head{padding:14px 18px 0;width:100%}.ag-sub{padding:2px 18px 6px}.ag-title{font-size:19px;font-weight:700;letter-spacing:-.01em}
