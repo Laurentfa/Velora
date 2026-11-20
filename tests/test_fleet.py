@@ -117,7 +117,9 @@ async def test_credits_counter_shows_every_computer_and_opens_the_detail(user: U
     db.kv_set("fleet:top", json.dumps({"v": "1.0.69", "t": _iso(datetime.now(timezone.utc) - timedelta(days=2))}))
     await user.open("/")
     await asyncio.sleep(5.5)  # la première lecture de l'état de santé a lieu à 4 s
-    await user.should_see("crédits aujourd'hui")
+    await user.should_see("aujourd'hui")
+    await user.should_see("/ mois")
+    await user.should_see("tokens")
     user.find(marker="credits-counter").click()
     await user.should_see("Crédits 1min.AI par ordinateur")
     await user.should_see("PC Windows · pc")
@@ -135,3 +137,14 @@ async def test_module_pages_have_their_own_section_only_when_there_are_modules(u
     await user.open("/")
     await user.should_see("Ma page de module")
     assert user.find(marker="modules-section").elements
+
+
+def test_the_sidebar_counter_uses_short_numbers_and_flags_the_threshold(monkeypatch) -> None:
+    from mailia import ui_fleet
+    assert [ui_fleet.short(n) for n in (0, 950, 1250, 9999, 10_000, 404_382, 999_999, 8_230_000)] == ["0", "950", "1,2 k", "10 k", "10 k", "404 k", "1 M", "8,23 M"]
+    snap = [{"cr_day": 404_382, "cr_month": 8_230_000, "me": True, "name": "a", "version": "", "seen": ""}]
+    monkeypatch.setattr(ui_fleet.aipolicy, "credits_alert", lambda day, month: True)
+    p = ui_fleet.parts(snap)
+    assert p == {"day": "404 k", "month": "8,23 M", "tokens": "1,65 M", "over": True}
+    monkeypatch.setattr(ui_fleet.aipolicy, "credits_alert", lambda day, month: False)
+    assert ui_fleet.parts(snap)["over"] is False and ui_fleet.parts([dict(snap[0], cr_day=0, cr_month=0)]) is None

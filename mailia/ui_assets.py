@@ -147,6 +147,8 @@ body.compact .swrap:hover .rowact{opacity:1}
 .readercol{background:var(--bg);height:100vh;min-width:0;flex-wrap:nowrap}
 .rhead{padding:10px 20px;border-bottom:1px solid var(--line);background:var(--surface);width:100%}
 .rhead h2{margin:0;font-size:19px;font-weight:700;line-height:1.3;letter-spacing:-.01em}
+.crbox{margin:0 8px;padding:7px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}.crline{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.crdot{width:8px;height:8px;border-radius:50%;background:#2e7d32;flex:none}.crdot.over{background:#d9822b}.crico{color:var(--muted)}.crv,.crm{font-size:12px;font-weight:600;color:var(--text)}.crk{font-size:11px;color:var(--muted)}.crsub{margin-top:3px;padding-left:22px;display:block}.crbox.over .crsub{color:#a8600f}
 .rmeta{font-size:13px;color:var(--muted)}.rmeta b{color:var(--text)}
 .rbody{flex:1;width:100%;min-height:0}
 .rcontent{padding:12px 20px 40px;width:100%}.rbody .rcontent{gap:7px}  /* blocs resserrés (7 px) : la hauteur gagnée laisse voir plus du message */

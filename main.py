@@ -466,9 +466,18 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                                 ui.label(label)
         status = f"{c['pending']} à analyser" if (c["pending"] and use_ai) else ""
         ui.label(status).classes("rmeta q-px-sm")
-        credits = ui.label("").classes("rmeta q-px-sm cursor-pointer").mark("credits-counter").on("click", lambda: ui_fleet.dialog(self.settings))
+        credits = ui.element("div").classes("crbox cursor-pointer").mark("credits-counter").on("click", lambda: ui_fleet.dialog(self.settings))
         credits.set_visibility(False)
         with credits:
+            with ui.element("div").classes("crline"):
+                cr_dot = ui.element("span").classes("crdot")
+                ui.icon("auto_awesome", size="14px").classes("crico")
+                cr_day = ui.label("").classes("crv")
+                ui.label("aujourd'hui").classes("crk")
+                ui.element("span").style("flex:1")
+                cr_month = ui.label("").classes("crm")
+                ui.label("/ mois").classes("crk")
+            cr_sub = ui.label("").classes("crk crsub")
             ctip = ui.tooltip("")
         with ui.row().classes("gap-2 q-px-sm"):
             ui.button(icon="sync", on_click=self.do_sync).props(f"flat dense round size=sm{' loading' if self.busy else ''}").tooltip("Synchroniser")
@@ -491,9 +500,14 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                 hb.set_visibility(bool(found))
                 htip.set_text("\n".join(found))
                 htip.style("white-space:pre-line;max-width:360px")
-                text = ui_fleet.summary_text(snap)
-                credits.set_text(text)
-                credits.set_visibility(bool(text))
+                p = ui_fleet.parts(snap)
+                credits.set_visibility(bool(p))
+                if p:
+                    cr_day.set_text(p["day"])
+                    cr_month.set_text(p["month"])
+                    cr_sub.set_text(("Seuil dépassé · " if p["over"] else "") + f"≈ {p['tokens']} tokens")
+                    cr_dot.classes(add="over" if p["over"] else "", remove="" if p["over"] else "over")
+                    credits.classes(add="over" if p["over"] else "", remove="" if p["over"] else "over")
                 ctip.set_text(ui_fleet.tooltip_text(snap))
                 ctip.style("white-space:pre-line;max-width:420px")
 

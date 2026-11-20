@@ -14,6 +14,26 @@ def summary_text(snap: list[dict]) -> str:
     return f"IA : {fleet.compact(day)}" + (f" sur {fleet.compact(cap)}" if cap and len(snap) == 1 else "") + f" crédits aujourd'hui · {fleet.compact(month)} crédits ce mois-ci (≈ {fleet.compact(month // 5)} tokens){over}"
 
 
+def short(n: int) -> str:
+    """Un nombre de crédits court pour la barre latérale : 404382 -> « 404 k », 8230000 -> « 8,23 M », 950 -> « 950 »."""
+    if n >= 999_500:
+        return fleet.compact(max(n, 1_000_000))
+    if n >= 9950:
+        return f"{round(n / 1000)} k"
+    if n >= 1000:
+        return f"{n / 1000:.1f}".replace(".", ",") + " k"
+    return str(n)
+
+
+def parts(snap: list[dict]) -> dict | None:
+    """Les éléments du compteur de la barre latérale (voir main.py), ou None tant que rien n'a été dépensé."""
+    day, month = sum(m["cr_day"] for m in snap), sum(m["cr_month"] for m in snap)
+    if not month and not day:
+        return None
+    over = bool(aipolicy.credits_alert(day, month))
+    return {"day": short(day), "month": short(month), "tokens": fleet.compact(month // 5), "over": over}
+
+
 def tooltip_text(snap: list[dict]) -> str:
     if len(snap) < 2:
         return "Crédits 1min.AI dépensés par cette installation. Cliquez pour le détail."
