@@ -34,6 +34,20 @@ def parts(snap: list[dict]) -> dict | None:
     return {"day": short(day), "month": short(month), "tokens": fleet.compact(month // 5), "over": over}
 
 
+def tip_text(snap: list[dict]) -> str:
+    """L'info-bulle de la pastille : jour, mois, tokens, seuil, puis chaque ordinateur s'il y en a plusieurs."""
+    p = parts(snap)
+    if not p:
+        return ""
+    lines = ["Crédits IA", f"Aujourd'hui : {p['day']}", f"Ce mois-ci : {p['month']} (≈ {p['tokens']} tokens)"]
+    if p["over"]:
+        lines.append("Seuil dépassé")
+    if len(snap) > 1:
+        lines += ["", tooltip_text(snap)]
+    lines.append("Cliquez pour le détail.")
+    return "\n".join(lines)
+
+
 def tooltip_text(snap: list[dict]) -> str:
     if len(snap) < 2:
         return "Crédits 1min.AI dépensés par cette installation. Cliquez pour le détail."

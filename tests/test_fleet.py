@@ -117,9 +117,8 @@ async def test_credits_counter_shows_every_computer_and_opens_the_detail(user: U
     db.kv_set("fleet:top", json.dumps({"v": "1.0.69", "t": _iso(datetime.now(timezone.utc) - timedelta(days=2))}))
     await user.open("/")
     await asyncio.sleep(5.5)  # la première lecture de l'état de santé a lieu à 4 s
-    await user.should_see("aujourd'hui")
-    await user.should_see("/ mois")
-    await user.should_see("tokens")
+    await user.should_see(marker="credits-counter")
+    await user.should_see("1,5 k")  # 1 234 ici + 300 sur l'autre ordinateur
     user.find(marker="credits-counter").click()
     await user.should_see("Crédits 1min.AI par ordinateur")
     await user.should_see("PC Windows · pc")
@@ -148,3 +147,14 @@ def test_the_sidebar_counter_uses_short_numbers_and_flags_the_threshold(monkeypa
     assert p == {"day": "404 k", "month": "8,23 M", "tokens": "1,65 M", "over": True}
     monkeypatch.setattr(ui_fleet.aipolicy, "credits_alert", lambda day, month: False)
     assert ui_fleet.parts(snap)["over"] is False and ui_fleet.parts([dict(snap[0], cr_day=0, cr_month=0)]) is None
+
+
+def test_the_chip_tooltip_gives_day_month_threshold_and_every_computer(monkeypatch) -> None:
+    from mailia import ui_fleet
+    snap = [{"cr_day": 404_382, "cr_month": 8_230_000, "me": True, "name": "Mac", "version": "", "seen": ""}]
+    monkeypatch.setattr(ui_fleet.aipolicy, "credits_alert", lambda day, month: True)
+    t = ui_fleet.tip_text(snap)
+    assert "Aujourd'hui : 404 k" in t and "Ce mois-ci : 8,23 M (≈ 1,65 M tokens)" in t and "Seuil dépassé" in t
+    assert "Mac" not in t  # un seul ordinateur : pas de détail par machine
+    two = snap + [dict(snap[0], name="PC", me=False, cr_day=10, cr_month=20)]
+    assert "PC" in ui_fleet.tip_text(two) and ui_fleet.tip_text([dict(snap[0], cr_day=0, cr_month=0)]) == ""
