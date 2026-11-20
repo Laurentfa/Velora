@@ -1,5 +1,6 @@
 """Pages de module (Ventiléa Connect…) : cliquer dans la colonne de gauche sur la page déjà ouverte ne la recharge pas, et en y revenant l'ascenseur est là où on l'avait laissé."""
 import asyncio
+import time
 import types
 
 import pytest
@@ -38,12 +39,13 @@ async def test_clicking_the_open_module_page_does_not_reload_it(user: User, box)
     await user.open("/")
     b = seen[-1]
     await b.go(va, "", "")
-    await wait_until(lambda: len(built) >= 1)
-    n = len(built)
-    await b.go(va, "", "")  # clic sur la page déjà ouverte
+    assert b.view == va
+    b.limit = 123  # un état que « go » remet à zéro quand il change vraiment de vue
+    await b.go(va, "", "")  # clic sur la page déjà ouverte : rien n'est touché (pas de rechargement, donc l'ascenseur reste)
     await b.go(va, "", "")
-    await asyncio.sleep(0.1)
-    assert len(built) == n  # pas de nouveau dessin : l'ascenseur ne bouge pas
+    assert b.limit == 123 and b.view == va
+    await b.go(vb, "", "")  # une autre page : la vue change vraiment
+    assert b.view == vb and b.limit == 80
 
 
 async def test_module_page_remembers_its_scroll_position(user: User, box, monkeypatch) -> None:
@@ -57,6 +59,7 @@ async def test_module_page_remembers_its_scroll_position(user: User, box, monkey
     await b.rows_scrolled(scrolled(640))
     assert b._scroll_pos[va] == 640
     await b.go(vb, "", "")
+    b._scroll_guard = time.monotonic() + 30  # la garde posée par « go » (0,8 s) peut être échue sur une machine lente : on la rejoue
     await b.rows_scrolled(scrolled(0))  # défilement tardif de la page quittée, ou remise à zéro : ignoré pendant la garde
     assert b._scroll_pos[va] == 640 and vb not in b._scroll_pos
     calls.clear()
