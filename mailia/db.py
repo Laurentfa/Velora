@@ -169,7 +169,7 @@ def msg_id(account: str, folder: str, uid: str) -> str:
     return f"{account}|{folder}|{uid}"
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 # migrations numérotées (PRAGMA user_version) : chacune ne s'exécute qu'une fois, dans l'ordre. Les colonnes ajoutées au fil du temps
 # restent gérées plus bas, de façon idempotente, pour les bases créées avant la numérotation.
 MIGRATIONS = {
@@ -178,6 +178,10 @@ MIGRATIONS = {
         "CREATE INDEX IF NOT EXISTS idx_msg_category ON messages(category)",
         "CREATE INDEX IF NOT EXISTS idx_msg_sender ON messages(lower(sender))"],
     2: ["CREATE INDEX IF NOT EXISTS idx_log_key ON api_log(key_id, action, ts)"],
+    # index « couvrants » : le détecteur de changement (queries.version) et les compteurs de la barre latérale (queries.counts) se lisent dans l'index seul, sans parcourir
+    # les textes des mails (la base fait plusieurs centaines de Mo) : ils gardaient le verrou de la base bien plus longtemps que nécessaire.
+    3: ["CREATE INDEX IF NOT EXISTS idx_msg_ver ON messages(account, is_read, ai_at)",
+        "CREATE INDEX IF NOT EXISTS idx_msg_counts ON messages(folder, account, is_read, category, ckey, needs_reply, priority)"],
 }
 
 

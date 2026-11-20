@@ -6,6 +6,13 @@ from . import aipolicy, config, db, notify, security
 CAT_FR = {"action": "À traiter", "info": "Info", "newsletter": "Newsletter", "notification": "Notification", "personnel": "Perso"}
 
 
+
+def _per_call(calls: int, credits: int) -> str:
+    """« 337 appel(s) · ≈ 5 300 / appel » : de quoi voir ce qui coûte cher à chaque fois, pas seulement au total."""
+    avg = round(credits / calls) if calls and credits else 0
+    return f"{calls} appel(s)" + (f" · ≈ {avg:,} / appel".replace(",", " ") if avg else "")
+
+
 def _lines(text: str) -> list[str]:
     return [x.strip() for x in (text or "").replace(",", "\n").splitlines() if x.strip()]
 
@@ -143,7 +150,7 @@ def usage_panel() -> None:
     for name, calls, credits in aipolicy.day_credits_by_feature():
         with ui.row().classes("w-full items-center no-wrap gap-2"):
             ui.label(name).classes("col")
-            ui.label(f"{calls} appel(s)").classes("text-caption text-grey")
+            ui.label(_per_call(calls, credits)).classes("text-caption text-grey")
             ui.label(f"{credits:,}".replace(",", " ")).style("min-width:90px;text-align:right")
     per_day = aipolicy.credits_by_day(14)
     top_cr = max((c for _, c in per_day), default=0) or 1
@@ -182,7 +189,7 @@ def usage_panel() -> None:
         for name, calls, credits in u["credits_by_feature"]:
             with ui.row().classes("w-full items-center no-wrap gap-2"):
                 ui.label(name).classes("col")
-                ui.label(f"{calls} appel(s)").classes("text-caption text-grey")
+                ui.label(_per_call(calls, credits)).classes("text-caption text-grey")
                 ui.label(f"{credits:,}".replace(",", " ")).style("min-width:90px;text-align:right")
     if len(u["credits_by_month"]) > 1:
         ui.label("Crédits des mois précédents").classes("text-caption q-mt-md")

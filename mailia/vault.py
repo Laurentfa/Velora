@@ -89,10 +89,12 @@ def connect(path, timeout: float = 30, check_same_thread: bool = True):
         c = sc.connect(str(path), timeout=timeout, check_same_thread=check_same_thread)
         c.execute(f"PRAGMA key=\"x'{k}'\"")
         c.execute("PRAGMA synchronous=NORMAL")
+        c.execute("PRAGMA cache_size=-32768")  # 32 Mo de cache de pages (2 Mo par défaut) : les lectures répétées ne retournent pas sur le disque
         c.row_factory = sc.Row
         return c
     c = sqlite3.connect(path, timeout=timeout, check_same_thread=check_same_thread)
     c.execute("PRAGMA synchronous=NORMAL")
+    c.execute("PRAGMA cache_size=-32768")  # 32 Mo de cache de pages (2 Mo par défaut) : les lectures répétées ne retournent pas sur le disque
     c.row_factory = sqlite3.Row
     return c
 

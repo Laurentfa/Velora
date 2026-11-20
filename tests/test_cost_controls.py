@@ -231,3 +231,9 @@ def test_credit_alert_shows_in_the_warning_list_and_the_counter(clean_db, monkey
     db.kv_set("credits_alert", "0")
     assert not any("Consommation IA élevée" in p for p in health.problems())
     assert "seuil dépassé" not in ui_fleet.summary_text(snap)
+
+
+def test_settings_show_the_average_cost_per_call() -> None:
+    from mailia import settings_ui
+    assert settings_ui._per_call(337, 1_786_580) == "337 appel(s) · ≈ 5 301 / appel"
+    assert settings_ui._per_call(0, 0) == "0 appel(s)" and settings_ui._per_call(3, 0) == "3 appel(s)"
