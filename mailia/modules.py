@@ -32,7 +32,7 @@ busy_tasks: dict[int, dict] = {}  # opérations longues en cours déclarées par
 _busy_lock = threading.Lock()
 _busy_counter = itertools.count(1)
 BUSY_MAX_SECONDS = 4 * 3600  # une déclaration oubliée ne bloque pas les mises à jour plus longtemps que cela
-slots: dict[str, list] = {"reader": []}  # emplacements dans l'interface : "reader" = sous les réponses rapides d'un message
+slots: dict[str, list] = {"reader": [], "hover": []}  # emplacements dans l'interface : "reader" = sous les réponses rapides d'un message
 status: dict[str, str] = {}   # identifiant de module -> "ok" ou message d'erreur
 
 
@@ -241,6 +241,12 @@ class ModuleAPI:
         order : position parmi les outils des modules (les plus petits d'abord, à égalité par nom de module)."""
         slots["reader"].append({"module": self.id, "build": build, "order": order})
 
+    def on_message_hover(self, fn) -> None:
+        """Appelle fn(message) quand la souris s'arrête sur un message de la liste (0,35 s sans bouger, un seul appel pour le dernier message survolé).
+        message : le message complet (dict). fn s'exécute hors du fil de la fenêtre et peut donc lire sur le réseau : pour préparer ce qu'on affichera
+        si l'utilisateur ouvre le message. Jamais d'écriture ni d'envoi sur ce simple survol."""
+        slots["hover"].append({"module": self.id, "fn": fn})
+
     def begin_busy(self, label: str) -> int:
         """Déclare une opération longue en cours (analyse, import, envoi en lot…) : Velora n'installe pas de mise à jour automatique, et donc ne se ferme pas, tant qu'elle dure.
         Rend un jeton à passer à `end_busy` (dans un `finally` : une déclaration oubliée est de toute façon ignorée au bout de 4 heures)."""
@@ -402,6 +408,39 @@ def render(view_id: str) -> None:
     except Exception as e:  # noqa: BLE001
         log.exception("module %s : échec d'affichage", v["module"])
         ui.label(f"Ce module a rencontré une erreur : {type(e).__name__} : {str(e)[:200]}").classes("text-negative").style("padding:12px")
+
+
+HOVER_DELAY = 0.35
+_hover: dict = {"timer": None}
+_hover_lock = threading.Lock()
+
+
+def hovered(mid: str) -> None:
+    """La souris est sur un message de la liste : après HOVER_DELAY sans changement de message, les modules inscrits (on_message_hover) en sont informés."""
+    if not slots["hover"]:
+        return
+    with _hover_lock:
+        if _hover["timer"] is not None:
+            _hover["timer"].cancel()
+        t = _hover["timer"] = threading.Timer(HOVER_DELAY, _run_hover, (mid,))
+        t.daemon = True
+        t.start()
+
+
+def _run_hover(mid: str) -> None:
+    try:
+        with db.conn() as c:
+            row = c.execute("SELECT * FROM messages WHERE id=?", (mid,)).fetchone()
+    except Exception:  # noqa: BLE001
+        return
+    if row is None:
+        return
+    message = dict(row)
+    for it in list(slots["hover"]):
+        try:
+            it["fn"](dict(message))
+        except Exception:  # noqa: BLE001 — l'erreur d'un module ne gêne ni la liste ni les autres modules
+            log.debug("module %s : survol en erreur", it["module"], exc_info=True)
 
 
 def render_slot(name: str, mailbox, message: dict) -> None:

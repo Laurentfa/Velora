@@ -592,6 +592,8 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         wrap = ui.element("div").classes("swrap" + (" selmode" if (self.picked or self.select_mode) else "")).on("swipe", lambda e, m=m: self.swiped(m, e.args), args=["detail"])
         wrap._props.update({"draggable": "true", "data-id": m["id"], "data-acct": m["account"], "data-folder": m["folder"]})
         self._row_els[m["id"]] = wrap
+        if modules.slots.get("hover"):  # un module veut préparer le message survolé (lecture à l'avance)
+            wrap.on("mouseenter", lambda e, mid=m["id"]: modules.hovered(mid))
         with wrap:
             with ui.element("div").classes("swl"):  # révélé en glissant vers la droite
                 ui.icon("drafts" if unread else "mark_email_unread", size="22px")
