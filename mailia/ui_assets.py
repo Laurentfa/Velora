@@ -662,10 +662,12 @@ SWIPE_JS = """<script>
       };
       go();
     };
+    // ce script est chargé dans <head> : document.body n'existe pas encore (l'observer se pose donc sur l'élément racine)
     new MutationObserver(() => {
+      if (kept && kept.isConnected) return;  // la colonne n'a pas été redessinée : rien à faire (chemin habituel, très léger)
       const t = document.querySelector(SEL);
       if (t && t !== kept) { kept = t; if (pos > 0) restore(t); }
-    }).observe(document.body, {childList: true, subtree: true});
+    }).observe(document.documentElement, {childList: true, subtree: true});
   })();
   // case décochée pendant que la colonne n'est ouverte que provisoirement : on la remet en place
   window.mailiaAuto = on => {
