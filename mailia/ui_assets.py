@@ -647,6 +647,26 @@ SWIPE_JS = """<script>
     if (a === 'hide') { S.classList.remove('s-peek'); setSideHidden(S, true); }
     else setSideHidden(S, false);
   };
+  // L'ascenseur de la colonne de gauche : la colonne est redessinée à chaque clic sur une entrée (et à chaque synchro qui change un compteur), ce qui le remettait en haut.
+  // On retient sa position et on la rend au nouvel élément dès qu'il apparaît.
+  (() => {
+    const SEL = '.sidescroll .q-scrollarea__container';
+    let pos = 0, kept = null;
+    document.addEventListener('scroll', e => { const t = e.target; if (t && t.matches && t.matches(SEL)) pos = t.scrollTop; }, true);
+    const restore = t => {
+      let n = 0;
+      const go = () => {
+        if (!t.isConnected) return;
+        if (Math.abs(t.scrollTop - pos) > 1) t.scrollTop = pos;
+        if (++n < 12 && t.scrollHeight - t.clientHeight < pos) requestAnimationFrame(go);  // le contenu n'est pas encore tout dessiné : on réessaie
+      };
+      go();
+    };
+    new MutationObserver(() => {
+      const t = document.querySelector(SEL);
+      if (t && t !== kept) { kept = t; if (pos > 0) restore(t); }
+    }).observe(document.body, {childList: true, subtree: true});
+  })();
   // case décochée pendant que la colonne n'est ouverte que provisoirement : on la remet en place
   window.mailiaAuto = on => {
     S.classList.toggle('s-auto', !!on);
