@@ -280,3 +280,24 @@ def test_backups_carry_the_category_corrections_too(clean_db) -> None:
     db.kv_set("domain_cat:exemple.fr", "newsletter")
     kv = backup.export_data()["kv"]
     assert kv["sender_cat:z@exemple.fr"] == "info" and kv["domain_cat:exemple.fr"] == "newsletter"
+
+
+def test_a_module_setting_follows_the_user_to_the_other_computer(world) -> None:
+    world.set("A", "modshare:ventilea_connect:sites", '{"x":1}')
+    assert world.on("A")["pushed"] == ["modshare:ventilea_connect:sites"]
+    assert world.on("B")["pulled"] == ["modshare:ventilea_connect:sites"]
+    assert world.get("B", "modshare:ventilea_connect:sites") == '{"x":1}'
+    world.set("B", "modshare:ventilea_connect:sites", '{"x":2}')
+    world.on("B")
+    world.on("A")
+    assert world.get("A", "modshare:ventilea_connect:sites") == '{"x":2}'  # la dernière modification gagne
+    assert world.on("A") == {"pulled": [], "pushed": [], "conflicts": []}
+
+
+def test_module_settings_api_refuses_bad_keys_and_huge_values(clean_db) -> None:
+    from mailia import modules
+    api = modules.ModuleAPI({"id": "m", "dir": ".", "name": "M"})
+    assert api.shared_set("sites", {"a": 1}) and api.shared_get("sites") == {"a": 1}
+    assert not api.shared_set("Mauvaise cle", 1) and api.shared_get("Mauvaise cle", "d") == "d"
+    assert not api.shared_set("gros", "x" * 16000)
+    assert api.shared_set("sites", None) and api.shared_get("sites") is None

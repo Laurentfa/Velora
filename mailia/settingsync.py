@@ -21,7 +21,7 @@ KEYS = ("prompt:analyze", "prompt:brief", "prompt:draft", "prompt:rules", "user_
 LABELS = {"prompt:analyze": "Consigne de tri et de résumé des mails", "prompt:brief": "Consigne du brief du jour", "prompt:draft": "Style des réponses et des nouveaux mails",
           "prompt:rules": "Règles personnelles", "user_name": "Votre nom"}
 VERSION = 1
-PREFIXES = ("sender_cat:", "domain_cat:")  # corrections de classement : un réglage par adresse ou par domaine
+PREFIXES = ("sender_cat:", "domain_cat:", "modshare:")  # corrections de classement (une par adresse ou domaine) et réglages partagés par les modules (jamais de secret)
 MAX_DYNAMIC = 1500  # plafond du nombre de corrections synchronisées (la boîte garde un seul petit élément)
 INTERVAL = 120  # secondes entre deux lectures de la boîte
 _last_tick = {"t": 0.0}
@@ -88,7 +88,7 @@ def is_key(k: str) -> bool:
 def _valid(k: str, v: str) -> bool:
     """Une correction de classement ne peut valoir que l'une des catégories (ou rien : correction retirée)."""
     from . import aipolicy
-    return k in KEYS or v == "" or v in aipolicy.CATS
+    return k in KEYS or k.startswith("modshare:") or v == "" or v in aipolicy.CATS
 
 
 def decode(raw: str | None) -> dict:
@@ -128,6 +128,13 @@ def _store(k: str, v: str) -> None:
     """Applique ici une valeur reprise de la boîte. Pour une correction de classement : les mails déjà reçus sont reclassés, comme si la correction avait été faite ici."""
     if k in KEYS:
         db.kv_set(k, v)
+        return
+    if k.startswith("modshare:"):  # réglage partagé d'un module : simple valeur, sans effet de bord
+        if v:
+            db.kv_set(k, v)
+        else:
+            with db.conn() as c:
+                c.execute("DELETE FROM kv WHERE k=?", (k,))
         return
     from . import aipolicy
     target = k.split(":", 1)[1]

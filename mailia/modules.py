@@ -277,6 +277,32 @@ class ModuleAPI:
         cfg[key] = value
         db.kv_set(f"module:{self.id}:cfg", json.dumps(cfg))
 
+    def shared_get(self, key: str, default=None):
+        """Réglage du module partagé entre vos ordinateurs (même boîte Exchange que les réglages de Velora). Jamais de mot de passe ni de secret : ce qui est
+        partagé transite par la boîte mail. Clé : a-z, 0-9 et _ (30 caractères au plus)."""
+        if not re.fullmatch(r"[a-z0-9_]{1,30}", str(key)):
+            return default
+        try:
+            raw = db.kv_get(f"modshare:{self.id}:{key}")
+            return json.loads(raw) if raw else default
+        except ValueError:
+            return default
+
+    def shared_set(self, key: str, value) -> bool:
+        """Enregistre un réglage partagé (JSON, 15 000 caractères au plus ; None le retire). Rend False si la clé ou la taille est refusée."""
+        if not re.fullmatch(r"[a-z0-9_]{1,30}", str(key)):
+            return False
+        k = f"modshare:{self.id}:{key}"
+        if value is None:
+            with db.conn() as c:
+                c.execute("DELETE FROM kv WHERE k=?", (k,))
+            return True
+        raw = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        if len(raw) > 15000:
+            return False
+        db.kv_set(k, raw)
+        return True
+
     async def ask_ai(self, system: str, user: str, max_tokens: int = 400) -> str:
         """Pose une question à l'IA de Velora : fournisseur, plafond de dépense et compteur de consommation sont ceux de Velora (la consommation apparaît
         sous « Module : <identifiant> » dans Paramètres › Utilisation). Lève ai.AIError si l'IA est coupée ou si le plafond est atteint.
