@@ -178,6 +178,9 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         self._remote_cache: dict = {}
         self.hl: list[str] = []
         self._more_busy = False
+        self._scroll_pos: dict = {}  # position de l'ascenseur de la liste, par vue de module : retrouvée quand on y revient
+        self.rows_area = None
+        self._scroll_guard = 0.0
         self._folder_paths: dict[tuple, str] = {}
         self._row_els: dict[str, ui.element] = {}  # id du mail -> élément de sa ligne dans la liste (pour ne redessiner que les lignes modifiées)
         self.rows_sig = None
@@ -252,6 +255,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                     self.chips()
                 with (rows_area := ui.scroll_area().classes("rows")):
                     self.rows_view()
+                self.rows_area = rows_area
                 rows_area.on("scroll", self.rows_scrolled, args=["verticalPosition", "verticalContainerSize", "verticalSize"], throttle=0.3)
             with ui.column().classes("readercol gap-0"):
                 self.reader()
@@ -1399,6 +1403,9 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
 
     # ---------- actions ----------
     async def go(self, view: str, acc: str, folder: str = "") -> None:
+        if view in modules.views and (view, acc, folder) == (self.view, self.account, self.folder):
+            return  # un clic sur la page de module déjà ouverte ne la recharge pas : l'ascenseur reste où vous l'avez mis
+        self._scroll_guard = time.monotonic() + 0.8  # les derniers « défilements » de la page quittée ne sont pas ceux de la nouvelle
         self.view, self.account, self.folder, self.q, self.limit = view, acc, folder, "", 80
         self.picked.clear()
         self.select_mode = False
@@ -1416,6 +1423,11 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         self.refresh_title()
         self.chips.refresh()
         await self.reload(force=True)
+        if view in modules.views and self.rows_area is not None:  # page de module : on la retrouve à la hauteur où on l'avait laissée
+            pos = float(self._scroll_pos.get(view, 0) or 0)
+            if pos > 0:
+                with self.host:  # support stable de la page : le minuteur n'est jamais redessiné avec la liste
+                    ui.timer(0.25, lambda: self.rows_area.scroll_to(pixels=pos), once=True)  # laisse à la page le temps de se dessiner
 
     async def set_account(self, acc: str) -> None:
         self.account = acc
@@ -1442,6 +1454,10 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
 
     async def rows_scrolled(self, e) -> None:
         """Approche du bas de la liste : on charge la suite (80 de plus), ajoutée à la fin sans redessiner ce qui est déjà affiché."""
+        if self.view in modules.views:  # page de module : on retient où est l'ascenseur pour le retrouver au retour
+            if time.monotonic() >= self._scroll_guard:
+                self._scroll_pos[self.view] = float((e.args or {}).get("verticalPosition", 0) or 0)
+            return
         if not self.auto_more() or self._more_busy or len(self.rows) < self.limit:
             return
         a = e.args or {}
