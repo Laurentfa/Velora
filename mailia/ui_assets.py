@@ -84,6 +84,14 @@ body.resizing iframe{pointer-events:none}
 .nav.sub{padding:3px 10px;font-size:14px}
 .nav.ghost{color:var(--muted)}.nav.ghost .lbl{opacity:.8}
 .grpfold{display:flex;align-items:center;gap:2px;cursor:pointer;user-select:none;width:100%;box-sizing:border-box}.grpfold:hover{color:var(--text)}
+.grphint{margin-left:auto;font-size:11px;text-transform:none;letter-spacing:0;font-weight:400}
+.mtiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:6px;padding:4px 8px 6px;width:100%;box-sizing:border-box}
+.mtile{display:flex;flex-direction:column;align-items:center;gap:3px;padding:7px 3px 5px;border:1px solid var(--line);border-radius:9px;background:var(--surface);cursor:pointer;user-select:none;min-width:0}
+.mtile:hover{background:var(--surface2)}.mtile.on{background:var(--sel);border-color:var(--accent)}
+.mtile .mti{font-size:19px;line-height:22px;color:var(--accent)}
+.mtile .mtl{font-size:10px;line-height:1.15;text-align:center;color:var(--muted);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow-wrap:anywhere;max-width:100%}
+.mtile{position:relative}.mtbadge{position:absolute;top:-6px;right:-6px;box-sizing:border-box;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:var(--hi);color:#fff;font-size:10px;font-weight:700;line-height:14px;text-align:center;border:2px solid var(--side)}
+.mtile.on .mtl{color:var(--text)}
 .grp{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);padding:11px 10px 3px}
 .listcol{background:var(--surface);border-right:1px solid var(--line);height:100vh;min-width:0;flex-wrap:nowrap}
 .lhead{box-sizing:border-box;height:132.5px;padding:26.5px 14px 0;border-bottom:1px solid var(--line);width:100%}

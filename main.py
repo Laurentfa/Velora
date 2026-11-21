@@ -375,16 +375,16 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
 
         open_box: list = []
 
-        def sect(name: str, mark: str = "") -> None:
+        def sect(name: str, hint: str = "") -> None:
             """Titre de volet (un clic le replie ou le déplie) ; ce qui suit, jusqu'au prochain volet, va dans son conteneur."""
             if open_box:
                 open_box.pop().__exit__(None, None, None)
             fold = self.sect_folded(name)
-            with ui.element("div").classes("grp grpfold").on("click", lambda _, n=name: self.toggle_sect(n)) as head:
+            with ui.element("div").classes("grp grpfold").on("click", lambda _, n=name: self.toggle_sect(n)):
                 ui.icon("chevron_right" if fold else "expand_more", size="16px")
                 ui.label(name)
-            if mark:
-                head.mark(mark)
+                if fold and hint:  # volet replié : un résumé de ce qu'il contient
+                    ui.label(hint).classes("grphint")
             box = ui.column().classes("gap-0 w-full")
             box.set_visibility(not fold)
             box.__enter__()
@@ -403,9 +403,20 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                     "click", js_handler="() => mailiaSide('dock')").tooltip("Garder la colonne ouverte")
             ui.button("Nouveau message", icon="edit", on_click=self.new_message).props("unelevated no-caps color=primary").classes("q-mx-sm q-mb-sm")
         with ui.scroll_area().classes("sidescroll"):  # seule cette partie défile : l'en-tête et les boutons du bas restent en place
+            if modules.views:  # pages ajoutées par les modules personnels : une tuile chacune, tout en haut (la rangée n'existe que s'il y a au moins un module)
+                with ui.element("div").classes("mtiles").mark("modules-section"):
+                    for vid, v in modules.views.items():
+                        with ui.element("div").classes("mtile" + (" on" if self.view == vid else "")).on("click", lambda _, vid=vid: self.go(vid, "")).tooltip(v["title"]):
+                            if icons.name_of(v["icon"]):
+                                ui.html(icons.svg(icons.name_of(v["icon"]), 22), sanitize=False).style("display:flex;justify-content:center;color:var(--accent)")
+                            else:
+                                ui.label(v["icon"]).classes("mti")
+                            ui.label(v["title"].split("→")[0].strip()).classes("mtl")
+                            if v.get("badge"):  # ce que le module signale (ex. sites non connectés) : pastille rouge sur l'angle de la tuile
+                                ui.label(str(v["badge"])).classes("mtbadge")
             if use_ai:
                 item("brief", "", "✦", "Brief du jour", "…" if c["pending"] else "")
-            sect("Boîtes")
+            sect("Boîtes", f"{c['unread']} non lus" if c["unread"] else "")
             item("inbox", "", "svg:tray2", "Toutes les boîtes", c["unread"], True, total=c["tot_all"])
             folded = self.folded()
             ffolded = self.folders_folded()
@@ -430,7 +441,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                     else:
                         item("folder", key, "svg:" + icons.ROLES.get(n["role"], "folder"), n["name"], c["folders"].get(f"{key}|{n['key']}", 0), folder=n["key"], depth=n["depth"] + 1, drop=n["key"],
                              total=c["tot_folders"].get(f"{key}|{n['key']}", 0), fparent=n["parent"], ffold=ffold, tip=tip, extra=hidden)
-            sect("Vues")
+            sect("Vues", " · ".join(x for x in ((f"{c['todo']} à traiter" if use_ai and c["todo"] else ""), (f"{c['unread']} non lus" if c["unread"] else "")) if x))
             if use_ai:
                 item("todo", "", "⚑", "À traiter", c["todo"], True, total=c["tot_todo"])
             item("unread", "", "●", "Non lus", c["unread"])
@@ -458,10 +469,6 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
             if use_ai:
                 item("newsletter", "", "☰", "Newsletters", c["newsletter"], total=c["tot_newsletter"])
                 item("notification", "", "ⓘ", "Notifications", c["notification"], total=c["tot_notification"])
-            if modules.views:  # pages ajoutées par les modules personnels : une section à part, qui n'existe que s'il y a au moins un module
-                sect("Modules", "modules-section")
-                for vid, v in modules.views.items():
-                    item(vid, "", v["icon"], v["title"], 0)
             end_sect()
             saved = self.saved_searches()
             if saved:
