@@ -302,6 +302,14 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         db.kv_set("folder_fold", json.dumps(sorted(cur)))
         self.side.refresh()
 
+    def sect_folded(self, name: str) -> bool:
+        """Volet de la colonne de gauche (Boîtes, Vues, Modules) replié ? Mémorisé d'un démarrage à l'autre."""
+        return db.kv_get(f"side_sect:{name}") == "1"
+
+    def toggle_sect(self, name: str) -> None:
+        db.kv_set(f"side_sect:{name}", "0" if self.sect_folded(name) else "1")
+        self.side.refresh()
+
     def toggle_fold(self, acct: str) -> None:
         cur = self.folded()
         cur.symmetric_difference_update({acct})
@@ -365,6 +373,27 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                     if tip:
                         lbl.tooltip(tip)
 
+        open_box: list = []
+
+        def sect(name: str, mark: str = "") -> None:
+            """Titre de volet (un clic le replie ou le déplie) ; ce qui suit, jusqu'au prochain volet, va dans son conteneur."""
+            if open_box:
+                open_box.pop().__exit__(None, None, None)
+            fold = self.sect_folded(name)
+            with ui.element("div").classes("grp grpfold").on("click", lambda _, n=name: self.toggle_sect(n)) as head:
+                ui.icon("chevron_right" if fold else "expand_more", size="16px")
+                ui.label(name)
+            if mark:
+                head.mark(mark)
+            box = ui.column().classes("gap-0 w-full")
+            box.set_visibility(not fold)
+            box.__enter__()
+            open_box.append(box)
+
+        def end_sect() -> None:
+            if open_box:
+                open_box.pop().__exit__(None, None, None)
+
         with ui.element("div").classes("sidetop"):  # en-tête fixe
             with ui.element("div").classes("sidehead"):
                 ui.html(f'<div class="brand">{logo_img(42)}<span>Velora</span></div>', sanitize=False)
@@ -376,7 +405,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         with ui.scroll_area().classes("sidescroll"):  # seule cette partie défile : l'en-tête et les boutons du bas restent en place
             if use_ai:
                 item("brief", "", "✦", "Brief du jour", "…" if c["pending"] else "")
-            ui.label("Boîtes").classes("grp")
+            sect("Boîtes")
             item("inbox", "", "svg:tray2", "Toutes les boîtes", c["unread"], True, total=c["tot_all"])
             folded = self.folded()
             ffolded = self.folders_folded()
@@ -401,7 +430,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                     else:
                         item("folder", key, "svg:" + icons.ROLES.get(n["role"], "folder"), n["name"], c["folders"].get(f"{key}|{n['key']}", 0), folder=n["key"], depth=n["depth"] + 1, drop=n["key"],
                              total=c["tot_folders"].get(f"{key}|{n['key']}", 0), fparent=n["parent"], ffold=ffold, tip=tip, extra=hidden)
-            ui.label("Vues").classes("grp")
+            sect("Vues")
             if use_ai:
                 item("todo", "", "⚑", "À traiter", c["todo"], True, total=c["tot_todo"])
             item("unread", "", "●", "Non lus", c["unread"])
@@ -430,9 +459,10 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                 item("newsletter", "", "☰", "Newsletters", c["newsletter"], total=c["tot_newsletter"])
                 item("notification", "", "ⓘ", "Notifications", c["notification"], total=c["tot_notification"])
             if modules.views:  # pages ajoutées par les modules personnels : une section à part, qui n'existe que s'il y a au moins un module
-                ui.label("Modules").classes("grp").mark("modules-section")
+                sect("Modules", "modules-section")
                 for vid, v in modules.views.items():
                     item(vid, "", v["icon"], v["title"], 0)
+            end_sect()
             saved = self.saved_searches()
             if saved:
                 ui.label("Recherches").classes("grp")
