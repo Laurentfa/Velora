@@ -32,7 +32,7 @@ busy_tasks: dict[int, dict] = {}  # opérations longues en cours déclarées par
 _busy_lock = threading.Lock()
 _busy_counter = itertools.count(1)
 BUSY_MAX_SECONDS = 4 * 3600  # une déclaration oubliée ne bloque pas les mises à jour plus longtemps que cela
-slots: dict[str, list] = {"reader": [], "hover": []}  # emplacements dans l'interface : "reader" = sous les réponses rapides d'un message
+slots: dict[str, list] = {"reader": [], "hover": [], "sent": []}  # emplacements dans l'interface : "reader" = sous les réponses rapides d'un message ; "sent" = après l'envoi d'un message
 status: dict[str, str] = {}   # identifiant de module -> "ok" ou message d'erreur
 
 
@@ -247,6 +247,55 @@ class ModuleAPI:
         si l'utilisateur ouvre le message. Jamais d'écriture ni d'envoi sur ce simple survol."""
         slots["hover"].append({"module": self.id, "fn": fn})
 
+    def mail_accounts(self) -> list[dict]:
+        """Les boîtes depuis lesquelles un module peut préparer un message : [{"key", "email", "label"}] (boîtes actives et connectées)."""
+        from mailia import sync
+        return [{"key": k, "email": c.email, "label": c.label} for k, c in sync.ACCOUNTS.items() if c.password and c.enabled]
+
+    def create_draft(self, account: str, to: str, subject: str, html: str, files: list | None = None, cc: str = "", bcc: str = "", signature: bool = True) -> str:
+        """Prépare un brouillon dans Velora (vue « Brouillons », copié sur le serveur de la boîte comme tout brouillon) et rend son identifiant. NE L'ENVOIE JAMAIS : c'est l'utilisateur qui le relit et
+        l'envoie (par la file d'envoi de Velora, avec son délai d'annulation). `to`, `cc`, `bcc` : adresses séparées par des virgules (`to` peut rester vide : l'utilisateur le complète). `html` est nettoyé
+        comme tout message sortant ; la signature de la boîte est ajoutée (signature=False : sans). `files` : [(nom, octets, type MIME)], 25 Mo au plus en tout. Lève ValueError (message clair) si la
+        boîte, une adresse ou une pièce jointe n'est pas acceptable."""
+        import re
+        import uuid
+
+        from mailia import compose, htmlmail
+        if account not in {a["key"] for a in self.mail_accounts()}:
+            raise ValueError(f"Boîte « {account} » inconnue ou non connectée.")
+        addrs = lambda s: [a.strip() for a in (s or "").replace(";", ",").split(",") if a.strip()]  # noqa: E731
+        everyone = addrs(to) + addrs(cc) + addrs(bcc)
+        bad = [a for a in everyone if not re.fullmatch(r"[^@\s<>]+@[^@\s<>]+\.[^@\s<>]+", a)]
+        if bad:
+            raise ValueError(f"Adresse invalide : {bad[0]}")
+        if len(everyone) > 20:
+            raise ValueError("Trop de destinataires (20 au plus).")
+        files = list(files or [])
+        if any(not (isinstance(f, (tuple, list)) and len(f) == 3 and isinstance(f[0], str) and isinstance(f[1], (bytes, bytearray)) and isinstance(f[2], str) and f[0].strip()) for f in files):
+            raise ValueError("Pièce jointe invalide : attendu (nom, octets, type MIME).")
+        if sum(len(f[1]) for f in files) > 25 * 1024 * 1024:
+            raise ValueError("Pièces jointes trop lourdes (25 Mo au plus).")
+        body = htmlmail.sanitize_outgoing(html or "")
+        if not body.strip() and not files:
+            raise ValueError("Le message est vide.")
+        if signature:
+            body += compose.sig_block(account)
+        did = uuid.uuid4().hex
+        db.draft_save({"id": did, "account": account, "is_new": True, "reply_to": None, "to": ", ".join(addrs(to)), "cc": ", ".join(addrs(cc)), "bcc": ", ".join(addrs(bcc)),
+                       "subject": (subject or "").strip(), "html": body}, [(re.sub(r"[\\/\x00-\x1f]+", "_", f[0].strip())[:200], bytes(f[1]), f[2]) for f in files])  # (nom de pièce jointe : jamais de chemin)
+        db.draft_mark_module(did, self.id)
+        self.log.info("brouillon préparé (%s pièce(s) jointe(s))", len(files))
+        return did
+
+    def draft_exists(self, draft_id: str) -> bool:
+        """Le brouillon existe-t-il encore (il disparaît quand l'utilisateur l'envoie ou le supprime) ?"""
+        return db.draft_load(draft_id)[0] is not None
+
+    def on_sent(self, fn) -> None:
+        """Appelle fn(info) après l'envoi réel d'un message par Velora. info : {"draft_id", "account", "to", "cc", "bcc", "subject"} (jamais le texte ni les pièces jointes) ; draft_id est celui du brouillon
+        d'origine s'il y en avait un (par exemple celui créé par `create_draft`). fn doit être rapide et ne jamais lever d'erreur bloquante : elle s'exécute dans la tâche qui envoie."""
+        slots["sent"].append({"module": self.id, "fn": fn})
+
     def begin_busy(self, label: str) -> int:
         """Déclare une opération longue en cours (analyse, import, envoi en lot…) : Velora n'installe pas de mise à jour automatique, et donc ne se ferme pas, tant qu'elle dure.
         Rend un jeton à passer à `end_busy` (dans un `finally` : une déclaration oubliée est de toute façon ignorée au bout de 4 heures)."""
@@ -441,6 +490,17 @@ def _run_hover(mid: str) -> None:
             it["fn"](dict(message))
         except Exception:  # noqa: BLE001 — l'erreur d'un module ne gêne ni la liste ni les autres modules
             log.debug("module %s : survol en erreur", it["module"], exc_info=True)
+
+
+def notify_sent(row: dict) -> None:
+    """Prévient les modules qu'un message vient de partir (voir ModuleAPI.on_sent). Aucun module ne peut gêner l'envoi : les erreurs restent dans le journal."""
+    info = {"draft_id": row.get("draft_id") or "", "account": row.get("account") or "", "to": row.get("to_addrs") or "", "cc": row.get("cc") or "", "bcc": row.get("bcc") or "",
+            "subject": row.get("subject") or ""}
+    for it in list(slots.get("sent", [])):
+        try:
+            it["fn"](dict(info))
+        except Exception:  # noqa: BLE001
+            log.exception("module %s : échec après l'envoi", it["module"])
 
 
 def render_slot(name: str, mailbox, message: dict) -> None:

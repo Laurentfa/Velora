@@ -16,6 +16,7 @@ mammoth
 openpyxl
 python-pptx
 pillow-heif
+pdfplumber>=0.11.11  # lecture et repérage du texte des relevés PDF (module Suivi Installations) : MIT, avec pdfminer.six (MIT) et pypdfium2 (Apache-2.0/BSD) ; jamais PyMuPDF (AGPL)
 pypdf>=6.21.4  # audit : la 6.20 a 16 avis de sécurité (aperçu des PDF reçus)
 fpdf2  # PDF du texte d'un message (impression sous Windows)
 zeroconf

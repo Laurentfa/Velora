@@ -591,6 +591,12 @@ def draft_save(d: dict, files: list | None = None) -> None:
                 c.execute("INSERT INTO draft_files(draft_id,name,mime,data) VALUES(?,?,?,?)", (d["id"], name, mime, data))
 
 
+def draft_mark_module(did: str, module_id: str) -> None:
+    """Brouillon préparé par un module : contrairement à ceux des assistants (API), il est copié sur le serveur de la boîte comme n'importe quel brouillon."""
+    with conn() as c:
+        c.execute("UPDATE drafts SET source=? WHERE id=?", (f"module:{module_id}", did))
+
+
 def draft_mark_api(did: str, key_id: str, note: str = "") -> None:
     with conn() as c:
         c.execute("UPDATE drafts SET source='api', api_key=?, api_note=? WHERE id=?", (key_id, note, did))

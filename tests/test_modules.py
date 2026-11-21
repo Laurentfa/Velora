@@ -28,6 +28,7 @@ def mod_dir(tmp_path, monkeypatch):
     modules.views.clear()
     modules.status.clear()
     modules.slots["reader"].clear()
+    modules.slots["sent"].clear()
     modules.services.clear()
     db.kv_set("modules_on", "0")
     db.kv_set("modules_enabled", "[]")
@@ -394,3 +395,113 @@ async def test_a_module_view_takes_the_width_of_the_list_and_the_reader_and_a_ma
     assert any("'wide-view', false" in c for c in calls)  # une vue de mails : colonnes habituelles
     from mailia.ui_assets import CSS
     assert "html.wide-view .readercol" in CSS and "@media (min-width:1024px)" in CSS  # seulement sur grand écran : le téléphone garde sa mise en page
+
+
+# ---------- courrier : un module prépare des brouillons, ne les envoie jamais, et est prévenu quand l'utilisateur envoie ----------
+@pytest.fixture
+def one_account(monkeypatch):
+    """Une boîte connectée (et une suspendue, et une sans mot de passe) ; aucune fonction d'envoi ne peut partir : elles sont des pièges."""
+    from mailia import outgoing
+    from mailia.config import AccountCfg
+    mk = lambda key, pw, enabled=True: AccountCfg(key=key, label=key.title(), kind="ews", email=f"{key}@x.fr", login=key, password=pw, ai_enabled=False, enabled=enabled)  # noqa: E731
+    monkeypatch.setattr(sync, "ACCOUNTS", {"a": mk("a", "pw"), "off": mk("off", "pw", False), "nopw": mk("nopw", "")})
+    sent: list = []
+
+    def trap(name):
+        def f(*a, **k):
+            raise AssertionError(f"{name} ne doit jamais être appelé par un module")
+        return f
+    monkeypatch.setattr(sync, "send_mail", lambda *a, **k: sent.append((a, k)))
+    monkeypatch.setattr(outgoing, "queue", trap("outgoing.queue"))
+    monkeypatch.setattr(db, "outbox_add", trap("db.outbox_add"))
+    return sent
+
+
+def api_of(tmp_path, mid="demo"):
+    return modules.ModuleAPI({"id": mid, "dir": tmp_path / mid, "name": mid.title()})
+
+
+def test_a_module_sees_only_connected_active_mailboxes(mod_dir, one_account) -> None:
+    assert api_of(mod_dir).mail_accounts() == [{"key": "a", "email": "a@x.fr", "label": "A"}]
+
+
+def test_a_module_prepares_a_draft_and_never_sends_it(mod_dir, one_account) -> None:
+    api = api_of(mod_dir)
+    did = api.create_draft("a", "dr@x.fr; autre@x.fr", " Suivi ", "<p>Bonjour <script>alert(1)</script><b>Dr</b></p>", [("rapport.pdf", b"%PDF-1.4 x", "application/pdf")], cc="cc@x.fr")
+    row, files = db.draft_load(did)
+    assert row["account"] == "a" and row["to_addrs"] == "dr@x.fr, autre@x.fr" and row["cc"] == "cc@x.fr" and row["subject"] == "Suivi" and row["source"] == "module:demo"
+    assert "<script" not in row["html"] and "Bonjour" in row["html"] and "<b>Dr</b>" in row["html"]  # nettoyé comme tout message sortant
+    assert files == [("rapport.pdf", b"%PDF-1.4 x", "application/pdf")] and api.draft_exists(did)
+    named = db.draft_load(api.create_draft("a", "", "S", "<p>x</p>", [("../../etc/passwd\n.pdf", b"x", "application/pdf")]))[1]
+    assert named[0][0] == ".._.._etc_passwd_.pdf"  # un nom de pièce jointe ne contient jamais de chemin
+    assert db.drafts_count() >= 1 and one_account == []  # rien n'est parti
+    db.draft_delete(did)
+    assert not api.draft_exists(did)
+
+
+def test_a_draft_may_have_no_recipient_and_no_signature(mod_dir, one_account) -> None:
+    api = api_of(mod_dir)
+    did = api.create_draft("a", "", "Sans destinataire", "<p>Texte</p>", signature=False)
+    row, _ = db.draft_load(did)
+    assert row["to_addrs"] == "" and "msig" not in row["html"]
+    with_sig = db.draft_load(api.create_draft("a", "", "Avec", "<p>Texte</p>"))[0]["html"]
+    assert with_sig.startswith("<p>Texte</p>") and len(with_sig) > len("<p>Texte</p>")  # signature de la boîte ajoutée après le texte
+
+
+@pytest.mark.parametrize("kwargs, text", [
+    ({"account": "inconnue"}, "inconnue"), ({"account": "off"}, "off"), ({"account": "nopw"}, "nopw"),
+    ({"to": "pas une adresse"}, "Adresse invalide"), ({"cc": "a@b"}, "Adresse invalide"),
+    ({"to": ",".join(f"d{i}@x.fr" for i in range(21))}, "Trop de destinataires"),
+    ({"html": "  "}, "vide"), ({"files": [("a.pdf", "pas des octets", "application/pdf")]}, "Pièce jointe invalide"), ({"files": [("", b"x", "application/pdf")]}, "Pièce jointe invalide"),
+    ({"files": [("gros.pdf", b"x" * (25 * 1024 * 1024 + 1), "application/pdf")]}, "trop lourdes")])
+def test_a_module_cannot_create_an_unacceptable_draft(mod_dir, one_account, kwargs, text) -> None:
+    base = {"account": "a", "to": "dr@x.fr", "subject": "S", "html": "<p>x</p>"}
+    before = len(db.drafts_list())
+    with pytest.raises(ValueError, match=text):
+        api_of(mod_dir).create_draft(**{**base, **kwargs})
+    assert len(db.drafts_list()) == before and one_account == []
+
+
+def test_module_drafts_are_copied_to_the_server_but_assistant_drafts_stay_local(mod_dir, one_account) -> None:
+    api = api_of(mod_dir)
+    mine = api.create_draft("a", "dr@x.fr", "Module", "<p>x</p>")
+    other = api.create_draft("a", "dr@x.fr", "Assistant", "<p>y</p>")
+    db.draft_mark_api(other, "cle", "note")
+    pushed = {d["id"] for d in db.drafts_to_push(50)}
+    assert mine in pushed and other not in pushed
+
+
+def test_modules_are_told_when_a_message_is_really_sent(mod_dir, monkeypatch) -> None:
+    from datetime import datetime, timedelta, timezone
+    seen: list = []
+    api = api_of(mod_dir)
+    api.on_sent(seen.append)
+    modules.slots["sent"].append({"module": "casse", "fn": lambda info: 1 / 0})  # un module en panne ne gêne ni l'envoi ni les autres
+    monkeypatch.setattr(sync, "send_mail", lambda *a, **k: seen.append("parti"))
+    monkeypatch.setattr(sync, "mark_answered", lambda *a, **k: None)
+    past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    db.outbox_add({"id": "o1", "account": "a", "to": "dr@x.fr", "cc": "", "bcc": "", "subject": "Suivi", "html": "<p>x</p>", "body": "x", "draft_id": "d123", "reply_to": None, "send_at": past, "followup_days": 0})
+    assert sync.send_due() == 1
+    assert seen[0] == "parti" and seen[1] == {"draft_id": "d123", "account": "a", "to": "dr@x.fr", "cc": "", "bcc": "", "subject": "Suivi"}  # ni le texte ni les pièces jointes
+    assert db.outbox_get("o1") is None
+
+
+def test_modules_are_not_told_about_a_message_that_failed_to_send(mod_dir, monkeypatch) -> None:
+    from datetime import datetime, timedelta, timezone
+    seen: list = []
+    api_of(mod_dir).on_sent(seen.append)
+
+    def boom(*a, **k):
+        raise RuntimeError("serveur injoignable")
+    monkeypatch.setattr(sync, "send_mail", boom)
+    past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    db.outbox_add({"id": "o2", "account": "a", "to": "dr@x.fr", "cc": "", "bcc": "", "subject": "S", "html": "<p>x</p>", "body": "x", "draft_id": None, "reply_to": None, "send_at": past, "followup_days": 0})
+    assert sync.send_due() == 0 and seen == []
+    db.outbox_delete("o2")
+
+
+def test_unloading_a_module_removes_its_sent_hook(mod_dir) -> None:
+    api_of(mod_dir, "tmp").on_sent(lambda info: None)
+    assert any(x["module"] == "tmp" for x in modules.slots["sent"])
+    modules.unload("tmp")
+    assert not any(x["module"] == "tmp" for x in modules.slots["sent"])

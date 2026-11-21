@@ -818,6 +818,11 @@ def send_due() -> int:
             continue
         mark_answered(row["reply_to"])
         db.outbox_mark(row["id"], "sent")  # parti : noté tout de suite, pour qu'un arrêt brutal juste après ne le fasse jamais renvoyer
+        try:
+            from mailia import modules
+            modules.notify_sent(row)  # les modules qui suivent les envois (jamais bloquant)
+        except Exception:  # noqa: BLE001
+            log.debug("modules : notification d'envoi", exc_info=True)
         if row["followup_days"]:
             due = (datetime.now(timezone.utc) + timedelta(days=row["followup_days"])).isoformat()
             db.followup_add(row["account"], row["to_addrs"], row["subject"], due)
