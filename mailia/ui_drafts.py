@@ -109,20 +109,19 @@ class DraftsMixin:
             up = ui.upload(on_upload=self.on_upload, multiple=True, auto_upload=True,
                            max_file_size=25 * 1024 * 1024).props("hide-upload-btn").style("position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden")
             ui.run_javascript(f"window.__mailiaUp = {up.id}")  # cible des fichiers déposés sur la rédaction
-            with ui.row().classes("abtop items-end"):  # Envoyer et Annuler à gauche, les pièces jointes à droite : une seule rangée
-                with ui.element("div").classes("agrp"):
-                    with ui.row().classes("items-center gap-1 no-wrap"):
+            with ui.row().classes("abbottom"):  # Envoyer et Annuler à gauche, les pièces jointes à droite : une seule rangée, jamais de retour à la ligne
+                with ui.element("div").classes("agrp abl"):
+                    with ui.row().classes("items-center gap-1 no-wrap abl"):
                         with ui.button("Envoyer", on_click=self.send).props("unelevated no-caps no-wrap dense").classes("absend"):
                             ui.html(icons.svg("send", 17), sanitize=False)
                         ui.button("Annuler", on_click=self.cancel_compose).props("flat no-caps no-wrap dense").classes("abcancel")
                         self.save_label = ui.label("").classes("abstate")
-                ui.space()
-                with ui.element("div").classes("agrp"):
+                with ui.element("div").classes("agrp abatt"):
                     with ui.element("div").classes("aseg"):
                         tbtn("paperclip", "Joindre un fichier", None).on(
-                            "click", js_handler=f"() => {{ getElement({up.id}).$refs.qRef.pickFiles(); {FOCUS_EDITOR_JS} }}").tooltip("25 Mo au total pour toutes les pièces jointes")
+                            "click", js_handler=f"() => {{ getElement({up.id}).$refs.qRef.pickFiles(); {FOCUS_EDITOR_JS} }}").tooltip("Joindre un fichier (25 Mo au total pour toutes les pièces jointes)")
                         tbtn("scan", "Scanner un document", self.scan_dialog).tooltip(
-                            "Numériser avec un scanner du réseau ou avec votre téléphone, et joindre le résultat en PDF")
+                            "Scanner un document : numériser avec un scanner du réseau ou avec votre téléphone, et joindre le résultat en PDF")
             self.files_view()
             # la barre d'actions (et le bouton Envoyer) est au-dessus du texte : on n'a pas à descendre en bas d'un long message
             self.editor = make_editor(d["html"], lambda e: d.__setitem__("html", e.value or ""))
