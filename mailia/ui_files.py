@@ -9,7 +9,7 @@ from pathlib import Path
 
 from nicegui import app, background_tasks, run, ui
 
-from mailia import ai, aipolicy, compose, config, htmlmail, preview, security, sync
+from mailia import ai, aipolicy, compose, config, htmlmail, modules, preview, security, sync
 
 from mailia.ui_common import SERVER_MODE, can_print, human_size, log, mark_downloaded, open_to_print, reveal
 
@@ -203,6 +203,32 @@ class FilesMixin:
         import hashlib
         name, data = f[0], f[1]
         await self.show_preview(name, data, "draft:" + hashlib.sha1(data).hexdigest()[:20], lambda: self._save_download(name, data))
+
+    def attachment_buttons(self, a: dict, msg: dict | None = None) -> None:
+        """Les boutons des modules à côté d'une pièce jointe reçue (ModuleAPI.on_attachment)."""
+        for it in modules.attachment_actions(a.get("name", "")):
+            ui.button(icon=it["icon"], on_click=lambda _, it=it: self.run_attachment_action(it, a, msg)).props(
+                "flat dense round size=sm color=primary").tooltip(f"{it['label']} : {a.get('name', '')}")
+
+    async def run_attachment_action(self, it: dict, att: dict, msg: dict | None = None) -> None:
+        """Télécharge la pièce jointe et la confie au module (sans l'enregistrer sur le disque). Un fichier dangereux ou trop gros est refusé."""
+        m = msg or self.cur
+        if security.risky_attachment(att.get("name", "")):
+            return ui.notify("Ce fichier est dangereux : il ne peut pas être confié à un module.", type="warning")
+        if (att.get("size") or 0) > 25 * 1024 * 1024:
+            return ui.notify("Pièce jointe trop volumineuse (25 Mo au maximum).", type="warning")
+        try:
+            data, name = await run.io_bound(sync.fetch_attachment, m, att)
+        except Exception as e:
+            return ui.notify(f"Lecture impossible : {e}", type="negative", multi_line=True)
+        info = {"name": name, "size": len(data), "type": att.get("type") or "", "message_id": m["id"], "account": m["account"], "subject": m.get("subject") or "", "sender": m.get("sender") or ""}
+        try:
+            vid = await run.io_bound(it["fn"], info, data)
+        except Exception as e:  # noqa: BLE001 — l'erreur d'un module reste dans son coin
+            log.exception("module %s : échec du bouton de pièce jointe", it["module"])
+            return ui.notify(f"Module « {it['module']} » : {type(e).__name__}", type="negative")
+        if vid and vid in modules.views:
+            await self.go(vid, "")
 
     async def attach_to_new(self, name: str, data: bytes, mime: str) -> None:
         """Nouveau message avec cette pièce jointe déjà jointe (depuis l'aperçu). Le brouillon en cours est d'abord enregistré."""

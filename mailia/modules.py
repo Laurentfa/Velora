@@ -32,7 +32,7 @@ busy_tasks: dict[int, dict] = {}  # opérations longues en cours déclarées par
 _busy_lock = threading.Lock()
 _busy_counter = itertools.count(1)
 BUSY_MAX_SECONDS = 4 * 3600  # une déclaration oubliée ne bloque pas les mises à jour plus longtemps que cela
-slots: dict[str, list] = {"reader": [], "hover": [], "sent": []}  # emplacements dans l'interface : "reader" = sous les réponses rapides d'un message ; "sent" = après l'envoi d'un message
+slots: dict[str, list] = {"reader": [], "hover": [], "sent": [], "attachment": []}  # emplacements dans l'interface : "reader" = sous les réponses rapides d'un message ; "sent" = après l'envoi d'un message
 status: dict[str, str] = {}   # identifiant de module -> "ok" ou message d'erreur
 
 
@@ -252,15 +252,25 @@ class ModuleAPI:
         from mailia import sync
         return [{"key": k, "email": c.email, "label": c.label} for k, c in sync.ACCOUNTS.items() if c.password and c.enabled]
 
-    def create_draft(self, account: str, to: str, subject: str, html: str, files: list | None = None, cc: str = "", bcc: str = "", signature: bool = True) -> str:
+    def create_draft(self, account: str, to: str, subject: str, html: str, files: list | None = None, cc: str = "", bcc: str = "", signature: bool = True, reply_to_message: str = "") -> str:
         """Prépare un brouillon dans Velora (vue « Brouillons », copié sur le serveur de la boîte comme tout brouillon) et rend son identifiant. NE L'ENVOIE JAMAIS : c'est l'utilisateur qui le relit et
         l'envoie (par la file d'envoi de Velora, avec son délai d'annulation). `to`, `cc`, `bcc` : adresses séparées par des virgules (`to` peut rester vide : l'utilisateur le complète). `html` est nettoyé
         comme tout message sortant ; la signature de la boîte est ajoutée (signature=False : sans). `files` : [(nom, octets, type MIME)], 25 Mo au plus en tout. Lève ValueError (message clair) si la
-        boîte, une adresse ou une pièce jointe n'est pas acceptable."""
+        boîte, une adresse ou une pièce jointe n'est pas acceptable.
+        reply_to_message : identifiant d'un message reçu auquel répondre : le brouillon est alors une réponse (boîte du message, destinataire et objet « Re : … » si vous les laissez vides, message cité sous le texte).
+        """
         import re
         import uuid
 
-        from mailia import compose, htmlmail
+        from mailia import compose, htmlmail, queries
+        reply_m = None
+        if reply_to_message:
+            reply_m = queries.get_message(reply_to_message)
+            if not reply_m:
+                raise ValueError("Message auquel répondre introuvable.")
+            account = account or reply_m["account"]
+            to = to or (reply_m.get("sender") or "")
+            subject = subject or ("Re : " + re.sub(r"^\s*(re|tr|fwd?)\s*:\s*", "", reply_m.get("subject") or "", flags=re.I))
         if account not in {a["key"] for a in self.mail_accounts()}:
             raise ValueError(f"Boîte « {account} » inconnue ou non connectée.")
         addrs = lambda s: [a.strip() for a in (s or "").replace(";", ",").split(",") if a.strip()]  # noqa: E731
@@ -280,8 +290,10 @@ class ModuleAPI:
             raise ValueError("Le message est vide.")
         if signature:
             body += compose.sig_block(account)
+        if reply_m:
+            body += compose.quote_html(reply_m)
         did = uuid.uuid4().hex
-        db.draft_save({"id": did, "account": account, "is_new": True, "reply_to": None, "to": ", ".join(addrs(to)), "cc": ", ".join(addrs(cc)), "bcc": ", ".join(addrs(bcc)),
+        db.draft_save({"id": did, "account": account, "is_new": not reply_m, "reply_to": reply_m["id"] if reply_m else None, "to": ", ".join(addrs(to)), "cc": ", ".join(addrs(cc)), "bcc": ", ".join(addrs(bcc)),
                        "subject": (subject or "").strip(), "html": body}, [(re.sub(r"[\\/\x00-\x1f]+", "_", f[0].strip())[:200], bytes(f[1]), f[2]) for f in files])  # (nom de pièce jointe : jamais de chemin)
         db.draft_mark_module(did, self.id)
         self.log.info("brouillon préparé (%s pièce(s) jointe(s))", len(files))
@@ -290,6 +302,13 @@ class ModuleAPI:
     def draft_exists(self, draft_id: str) -> bool:
         """Le brouillon existe-t-il encore (il disparaît quand l'utilisateur l'envoie ou le supprime) ?"""
         return db.draft_load(draft_id)[0] is not None
+
+    def on_attachment(self, label: str, icon: str, extensions, fn) -> None:
+        """(icon : nom d'icône Material, ex. "edit".) Ajoute un bouton à côté des pièces jointes reçues dont le nom finit par l'une des `extensions` (ex. (".pdf",)). Au clic, Velora télécharge la pièce jointe (jamais un fichier
+        dangereux, 25 Mo au plus) et appelle fn(info, data) hors du fil de la fenêtre : info = {"name", "size", "type", "message_id", "account", "subject", "sender"}, data = octets. fn peut rendre
+        l'identifiant d'une vue de ce module (celui que rend add_view) : Velora l'ouvre alors. Rien n'est enregistré sur le disque ni envoyé par Velora."""
+        exts = tuple(e.lower() if e.startswith(".") else "." + e.lower() for e in (extensions or ()))
+        slots["attachment"].append({"module": self.id, "label": label, "icon": icon, "ext": exts, "fn": fn})
 
     def on_sent(self, fn) -> None:
         """Appelle fn(info) après l'envoi réel d'un message par Velora. info : {"draft_id", "account", "to", "cc", "bcc", "subject"} (jamais le texte ni les pièces jointes) ; draft_id est celui du brouillon
@@ -490,6 +509,12 @@ def _run_hover(mid: str) -> None:
             it["fn"](dict(message))
         except Exception:  # noqa: BLE001 — l'erreur d'un module ne gêne ni la liste ni les autres modules
             log.debug("module %s : survol en erreur", it["module"], exc_info=True)
+
+
+def attachment_actions(name: str) -> list[dict]:
+    """Les boutons que des modules ajoutent à une pièce jointe de ce nom (voir ModuleAPI.on_attachment)."""
+    n = (name or "").lower()
+    return sorted((it for it in slots.get("attachment", []) if it["ext"] and n.endswith(it["ext"])), key=lambda it: (it["module"], it["label"]))
 
 
 def notify_sent(row: dict) -> None:

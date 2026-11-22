@@ -1149,6 +1149,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                     if self.preview_kind(a["name"]):
                         ui.button(icon="visibility", on_click=lambda _, a=a: self.preview(a)).props(
                             "flat dense round size=sm color=grey-8").tooltip(f"Aperçu de {a['name']}")
+                    self.attachment_buttons(a)
                 self.attachments_zip_button(atts)
         sg = self.suggestions.get(m["id"])
         if use_ai and sg:
@@ -1341,6 +1342,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                                 if self.preview_kind(a["name"]):
                                     ui.button(icon="visibility", on_click=lambda _, a=a, x=x: self.preview(a, x)).props(
                                         "flat dense round size=sm color=grey-8").tooltip(f"Aperçu de {a['name']}")
+                                self.attachment_buttons(a, x)
                             self.attachments_zip_button(atts, x)
 
     async def print_message(self, x: dict) -> None:

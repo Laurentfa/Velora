@@ -28,7 +28,7 @@ def mod_dir(tmp_path, monkeypatch):
     modules.views.clear()
     modules.status.clear()
     modules.slots["reader"].clear()
-    modules.slots["sent"].clear()
+    modules.slots["sent"].clear(); modules.slots["attachment"].clear()
     modules.services.clear()
     db.kv_set("modules_on", "0")
     db.kv_set("modules_enabled", "[]")
@@ -446,6 +446,28 @@ def test_a_draft_may_have_no_recipient_and_no_signature(mod_dir, one_account) ->
     assert row["to_addrs"] == "" and "msig" not in row["html"]
     with_sig = db.draft_load(api.create_draft("a", "", "Avec", "<p>Texte</p>"))[0]["html"]
     assert with_sig.startswith("<p>Texte</p>") and len(with_sig) > len("<p>Texte</p>")  # signature de la boîte ajoutée après le texte
+
+
+def test_a_module_prepares_a_reply_draft(mod_dir, one_account, monkeypatch) -> None:
+    from mailia import compose, queries
+    msg = {"id": "m1", "account": "a", "sender": "dr@x.fr", "subject": "TR : Ordonnance", "date": "2026-01-01"}
+    monkeypatch.setattr(queries, "get_message", lambda mid: msg if mid == "m1" else None)
+    monkeypatch.setattr(compose, "quote_html", lambda m: "<blockquote>cité</blockquote>")
+    api = api_of(mod_dir)
+    row, files = db.draft_load(api.create_draft("", "", "", "<p>Voici</p>", [("o.pdf", b"x", "application/pdf")], reply_to_message="m1"))
+    assert row["account"] == "a" and row["to_addrs"] == "dr@x.fr" and row["subject"] == "Re : Ordonnance" and row["reply_to"] == "m1" and not row["is_new"]
+    assert "cité" in row["html"] and files[0][0] == "o.pdf" and one_account == []
+    with pytest.raises(ValueError):
+        api.create_draft("a", "", "", "<p>x</p>", reply_to_message="inconnu")
+
+
+def test_attachment_actions_are_offered_by_extension_and_removed_on_unload(mod_dir) -> None:
+    api = api_of(mod_dir)
+    api.on_attachment("Modifier", "edit", ("pdf", ".PNG"), lambda info, data: None)
+    assert [it["label"] for it in modules.attachment_actions("Facture.PDF")] == ["Modifier"]
+    assert modules.attachment_actions("photo.png") and not modules.attachment_actions("note.docx") and not modules.attachment_actions("")
+    modules.unload("demo")
+    assert not modules.attachment_actions("Facture.pdf")
 
 
 @pytest.mark.parametrize("kwargs, text", [
