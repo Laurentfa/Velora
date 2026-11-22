@@ -234,19 +234,57 @@ def test_update_replaces_the_files_from_the_source_folder(mod_dir, tmp_path_fact
     assert "VERSION = 2" in (mod_dir / "alpha" / "module.py").read_text(encoding="utf-8")
 
 
-def _fake_gh(monkeypatch, tmp_path, versions: dict[str, str], ok: bool = True):
-    """Fait passer « gh api …/zipball » pour une archive GitHub : un dossier racine « compte-depot-<commit> » qui contient les modules."""
+def _fake_gh(monkeypatch, tmp_path, versions: dict[str, str], ok: bool = True, sign: bool = True, wrong_key: bool = False, tamper: str = "", extra: str = ""):
+    """Fait passer « gh api …/zipball » pour une archive GitHub : un dossier racine « compte-depot-<commit> » qui contient les modules et, si sign, le manifeste signé
+    (comme sign_modules.py). tamper : un module dont le code est modifié après la signature ; extra : un module qui reçoit un fichier de plus après la signature."""
+    import base64
+    import hashlib
     import io
     import subprocess
     import zipfile
+
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+
+    from mailia import version
+    key = Ed25519PrivateKey.generate()
+    pub = lambda k: base64.b64encode(k.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)).decode()  # noqa: E731
+    monkeypatch.setattr(version, "MODULES_PUBKEY", pub(Ed25519PrivateKey.generate() if wrong_key else key))
+    files = {name: {"module.json": json.dumps({"name": name, "version": v, "api": 1}), "module.py": f"VERSION = '{v}'\ndef register(api): pass\n"} for name, v in versions.items()}
+    manifest = {"v": 1, "modules": {n: {"version": versions[n], "files": {f: hashlib.sha256(c.encode()).hexdigest() for f, c in fs.items()}} for n, fs in files.items()}}
+    if tamper:
+        files[tamper]["module.py"] += "import os  # ajouté après la signature\n"
+    if extra:
+        files[extra]["porte_derobee.py"] = "x = 1\n"
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as z:
-        for name, v in versions.items():
-            z.writestr(f"me-modules-abc123/{name}/module.json", json.dumps({"name": name, "version": v, "api": 1}))
-            z.writestr(f"me-modules-abc123/{name}/module.py", f"VERSION = '{v}'\ndef register(api): pass\n")
+        for name, fs in files.items():
+            for f, c in fs.items():
+                z.writestr(f"me-modules-abc123/{name}/{f}", c)
         z.writestr("me-modules-abc123/README.md", "x")
+        if sign:
+            z.writestr("me-modules-abc123/modules.manifest.json", json.dumps(manifest, sort_keys=True, indent=1))
+            z.writestr("me-modules-abc123/modules.manifest.sig", base64.b64encode(key.sign(json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode())).decode())
     monkeypatch.setattr(modules.shutil, "which", lambda n: "/usr/bin/gh")
     monkeypatch.setattr(modules.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0 if ok else 1, buf.getvalue() if ok else b"", b"" if ok else b"HTTP 404"))
+
+
+@pytest.mark.parametrize("kwargs, text", [({"sign": False}, "pas signé"), ({"wrong_key": True}, "ne correspond pas"), ({"tamper": "alpha"}, "différents"), ({"extra": "alpha"}, "différents")])
+def test_update_from_repo_refuses_anything_not_exactly_as_signed(mod_dir, monkeypatch, kwargs, text) -> None:
+    make(mod_dir, "alpha", "VERSION = '1.0'\ndef register(api): pass\n", version="1.0")
+    _fake_gh(monkeypatch, mod_dir, {"alpha": "1.1"}, **kwargs)
+    with pytest.raises(ValueError, match=text):
+        modules.update_from_repo("moi/modules")
+    assert "1.0" in (mod_dir / "alpha" / "module.py").read_text(encoding="utf-8")  # rien n'a été installé
+
+
+def test_update_from_repo_needs_a_verification_key(mod_dir, monkeypatch) -> None:
+    from mailia import version
+    make(mod_dir, "alpha", "VERSION = '1.0'\ndef register(api): pass\n", version="1.0")
+    _fake_gh(monkeypatch, mod_dir, {"alpha": "1.1"})
+    monkeypatch.setattr(version, "MODULES_PUBKEY", "")
+    with pytest.raises(ValueError, match="clé de vérification"):
+        modules.update_from_repo("moi/modules")
 
 
 def test_update_from_repo_updates_only_newer_installed_modules(mod_dir, monkeypatch) -> None:
@@ -447,6 +485,21 @@ def test_a_draft_may_have_no_recipient_and_no_signature(mod_dir, one_account) ->
     assert row["to_addrs"] == "" and "msig" not in row["html"]
     with_sig = db.draft_load(api.create_draft("a", "", "Avec", "<p>Texte</p>"))[0]["html"]
     assert with_sig.startswith("<p>Texte</p>") and len(with_sig) > len("<p>Texte</p>")  # signature de la boîte ajoutée après le texte
+
+
+def test_unload_calls_the_module_stop_hook_and_survives_its_failure(mod_dir) -> None:
+    calls: list = []
+
+    class Mod:
+        def unload(self):
+            calls.append("stop")
+            raise RuntimeError("échec volontaire")
+    modules.objects["demo"] = Mod()
+    modules.unload("demo")  # n'échoue pas, même si le module échoue en s'arrêtant
+    assert calls == ["stop"] and "demo" not in modules.objects
+    modules.objects["demo"] = object()  # sans unload() : rien à appeler
+    modules.unload("demo")
+    assert "demo" not in modules.objects
 
 
 def test_a_module_opens_only_its_own_drafts_in_the_editor(mod_dir, one_account) -> None:

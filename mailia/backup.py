@@ -51,6 +51,25 @@ def _version(folder: Path) -> str:
         return "0"
 
 
+def module_changes(items: list | None) -> dict:
+    """Ce que la restauration ferait des modules du fichier : {"added": [id], "updated": [(id, ancienne, nouvelle, actif)]}. Un module déjà installé n'est remplacé que par une version
+    plus récente ; « actif » : il est activé ici (son code remplacé s'exécuterait au prochain démarrage : il est donc désactivé après remplacement)."""
+    added, updated = [], []
+    enabled = modules.enabled_ids()
+    for m in items or []:
+        mid = str((m or {}).get("id") or "")
+        if not _MODULE_ID.match(mid) or not isinstance(m.get("files"), dict) or "module.json" not in m["files"]:
+            continue
+        installed = modules.DIR / mid
+        if not installed.exists():
+            added.append(mid)
+        else:
+            new = str(m.get("version") or "0")
+            if modules._vtuple(new) > modules._vtuple(_version(installed)):
+                updated.append((mid, _version(installed), new, mid in enabled))
+    return {"added": added, "updated": updated}
+
+
 def _import_modules(items: list) -> tuple[int, int]:
     """(ajoutés, mis à jour). Un module déjà installé n'est remplacé que par une version plus récente ; des chemins inattendus font refuser le module."""
     added = updated = 0
@@ -74,6 +93,8 @@ def _import_modules(items: list) -> tuple[int, int]:
                 added += 1
             elif modules._vtuple(_version(root)) > modules._vtuple(_version(installed)):
                 modules.import_module(root, replace=True)
+                if mid in modules.enabled_ids():  # le code a changé : il n'est plus celui que vous aviez relu, il doit être réactivé à la main
+                    modules.set_enabled(mid, False)
                 updated += 1
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -107,8 +128,8 @@ def summary(data: dict) -> str:
             f"{n('rules')} règle(s) de tri, {len(data.get('kv') or {})} réglage(s), {n('accounts')} boîte(s) (sans mot de passe), {n('modules')} module(s)")
 
 
-def import_data(data: dict) -> dict:
-    """Fusionne la sauvegarde avec les données actuelles : rien n'est supprimé, ce qui existe déjà est conservé."""
+def import_data(data: dict, with_modules: bool = False) -> dict:
+    """Fusionne la sauvegarde avec les données actuelles : rien n'est supprimé, ce qui existe déjà est conservé. Les modules du fichier (du code) ne sont importés que si with_modules est vrai."""
     if data.get("app") not in ("Velora", "Mail IA") or "kv" not in data:  # « Mail IA » : sauvegardes faites avant le changement de nom
         raise ValueError("Ce fichier n'est pas une sauvegarde de Velora.")
     out = {"réglages": 0, "modèles": 0, "contacts": 0, "groupes": 0, "tâches": 0, "règles": 0, "boîtes": 0, "modules": 0, "modules mis à jour": 0}
@@ -160,7 +181,7 @@ def import_data(data: dict) -> dict:
                 cx.execute("INSERT INTO rules(text,spec,active,hits,created) VALUES(?,?,?,0,?)",
                            (r["text"], r["spec"], int(r.get("active", 1)), datetime.now(timezone.utc).isoformat()))
             out["règles"] += 1
-    out["modules"], out["modules mis à jour"] = _import_modules(data.get("modules"))
+    out["modules"], out["modules mis à jour"] = _import_modules(data.get("modules")) if with_modules else (0, 0)
     return out
 
 

@@ -23,7 +23,10 @@ def test_a_restored_backup_never_enables_a_module_nor_turns_off_certificate_chec
     """Un fichier de sauvegarde piégé ne doit pas pouvoir faire exécuter du code (modules) ni désactiver la vérification des certificats d'une boîte."""
     data = hostile_backup(tmp_path, monkeypatch)
     res = backup.import_data(data)
-    assert res["modules"] == 1 and (modules.DIR / "pirate" / "module.py").is_file()  # le module est copié…
+    assert res["modules"] == 0 and not (modules.DIR / "pirate").exists()  # par défaut, le code d'un fichier n'est jamais importé
+    assert backup.module_changes(data["modules"]) == {"added": ["pirate"], "updated": []}  # mais le dialogue sait annoncer ce qu'il ferait
+    res = backup.import_data(data, with_modules=True)
+    assert res["modules"] == 1 and (modules.DIR / "pirate" / "module.py").is_file()  # le module est copié (accord explicite)…
     assert db.kv_get("modules_on") is None and db.kv_get("modules_enabled") is None  # …mais jamais activé : c'est à l'utilisateur de le faire
     assert modules.enabled_ids() == set() and not modules.master_on()
     acc = next(a for a in config.read_accounts() if a["key"] == "evil")

@@ -7,6 +7,8 @@ Un module est un dossier dans « <dossier de données>/modules/ » :
 Rien n'est chargé tant que les modules ne sont pas activés dans les Paramètres, puis module par module. Le code d'un module s'exécute avec vos droits :
 il n'est jamais téléchargé ni chargé depuis un mail ou un site, seulement depuis ce dossier. Un module qui échoue est noté dans le journal et
 n'empêche jamais l'application de démarrer. Ce dossier ne fait pas partie de ce qui est distribué."""
+import base64
+import hashlib
 import importlib.util
 import itertools
 import json
@@ -27,6 +29,7 @@ log = logging.getLogger("mailia")
 
 API_VERSION = 1
 DIR = config.DATA_DIR / "modules"
+objects: dict[str, object] = {}  # le module chargé de chaque identifiant : sa fonction « unload() » (facultative) est appelée au déchargement, pour arrêter ses tâches de fond et ses serveurs
 views: dict[str, dict] = {}   # identifiant de vue -> {"title", "icon", "build", "module"}
 services: dict[str, dict] = {}  # services optionnels publiés par les modules : nom -> {"module", "fn"} (un module peut s'en servir s'il existe, et fonctionne sans sinon)
 current: dict = {"mailbox": None}  # la fenêtre principale, pour les actions qui ouvrent un écran de Velora (ModuleAPI.open_draft)
@@ -84,6 +87,51 @@ def _vtuple(v: str) -> tuple:
     return tuple(int(x) for x in re.findall(r"\d+", v or ""))
 
 
+def _sha256_files(folder: Path) -> dict:
+    out = {}
+    for f in sorted(folder.rglob("*")):
+        if f.is_file() and not ({"__pycache__", ".DS_Store", ".pytest_cache"} & set(f.relative_to(folder).parts)) and f.suffix != ".pyc":
+            out[f.relative_to(folder).as_posix()] = hashlib.sha256(f.read_bytes()).hexdigest()
+    return out
+
+
+def verified_manifest(root: Path) -> dict:
+    """Le manifeste signé du dépôt (« modules.manifest.json » + « .sig », voir sign_modules.py) : la signature doit correspondre à la clé publique de Velora. ValueError sinon.
+    Sans clé publique dans Velora, les mises à jour de modules depuis GitHub sont refusées (jamais de code non vérifié)."""
+    from mailia.version import MODULES_PUBKEY
+    if not MODULES_PUBKEY:
+        raise ValueError("Aucune clé de vérification des modules dans cette version de Velora : mise à jour depuis le dépôt impossible.")
+    try:
+        manifest = json.loads((root / "modules.manifest.json").read_text(encoding="utf-8"))
+        sig = base64.b64decode((root / "modules.manifest.sig").read_text().strip())
+    except (OSError, ValueError):
+        raise ValueError("Le dépôt n'est pas signé (modules.manifest.json / .sig absents) : mise à jour refusée. Lancez sign_modules.py avant de publier.") from None
+    try:
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+        data = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        Ed25519PublicKey.from_public_bytes(base64.b64decode(MODULES_PUBKEY)).verify(sig, data)
+    except (InvalidSignature, ValueError, TypeError):
+        raise ValueError("La signature du dépôt ne correspond pas à votre clé : mise à jour refusée.") from None
+    if not isinstance(manifest, dict) or manifest.get("v") != 1 or not isinstance(manifest.get("modules"), dict):
+        raise ValueError("Manifeste du dépôt illisible : mise à jour refusée.")
+    return manifest["modules"]
+
+
+def check_signed_module(folder: Path, entry: dict | None) -> None:
+    """Le dossier du module est exactement celui qui a été signé (mêmes fichiers, mêmes empreintes, même version). ValueError sinon."""
+    if not isinstance(entry, dict) or not isinstance(entry.get("files"), dict):
+        raise ValueError(f"Module « {folder.name} » absent du manifeste signé : refusé.")
+    if _sha256_files(folder) != entry["files"]:
+        raise ValueError(f"Module « {folder.name} » : fichiers différents de ceux qui ont été signés (ajouté, retiré ou modifié) : refusé.")
+    try:
+        version = str(json.loads((folder / "module.json").read_text(encoding="utf-8")).get("version", ""))
+    except (OSError, ValueError):
+        version = ""
+    if version != str(entry.get("version", "")):
+        raise ValueError(f"Module « {folder.name} » : version différente de celle qui a été signée : refusé.")
+
+
 def update_from_repo(repo: str) -> list[tuple[str, str, str]]:
     """Met à jour, depuis un dépôt GitHub (même privé), les modules DÉJÀ installés dont la version du dépôt est plus récente.
     Passe par l'outil « gh » de l'ordinateur (connecté à votre compte GitHub) : Velora ne garde aucun jeton. Rend [(identifiant, ancienne, nouvelle version)].
@@ -106,6 +154,7 @@ def update_from_repo(repo: str) -> list[tuple[str, str, str]]:
         _safe_extract(archive, tmp / "x")
         tops = [d for d in (tmp / "x").iterdir() if d.is_dir()]
         root = tops[0] if len(tops) == 1 else tmp / "x"  # GitHub range tout dans un dossier « compte-depot-<commit> »
+        signed = verified_manifest(root)  # sans signature valide, rien n'est installé (ValueError)
         installed = {i["id"]: i for i in discover() if not i.get("error")}
         done = []
         for d in sorted(p for p in root.iterdir() if p.is_dir() and p.name in installed and (p / "module.py").is_file()):
@@ -115,6 +164,7 @@ def update_from_repo(repo: str) -> list[tuple[str, str, str]]:
                 continue
             old = installed[d.name]["version"]
             if _vtuple(new) > _vtuple(old):
+                check_signed_module(d, signed.get(d.name))  # exactement ce qui a été signé
                 import_module(d, True)
                 done.append((d.name, old, new))
         return done
@@ -479,7 +529,7 @@ on_change = lambda: None  # posé par l'interface : redessine la barre latérale
 
 
 def unload(mid: str) -> None:
-    """Retire de Velora tout ce qu'un module avait ajouté (vues, outils sous les messages, services). Ses tâches de fond éventuelles tournent jusqu'au prochain lancement."""
+    """Retire de Velora tout ce qu'un module avait ajouté (vues, outils sous les messages, services) et appelle sa fonction unload() si elle existe (arrêt de ses tâches de fond et de ses serveurs). Une tâche de fond sans unload() tourne jusqu'au prochain lancement."""
     from mailia.ui_common import NOLIST_VIEWS, VIEWS
     for vid in [v for v, d in views.items() if d["module"] == mid]:
         views.pop(vid, None)
@@ -490,6 +540,13 @@ def unload(mid: str) -> None:
     for name in [n for n, it in services.items() if it["module"] == mid]:
         services.pop(name, None)
     _phone_cleanup(mid)
+    mod = objects.pop(mid, None)
+    stop = getattr(mod, "unload", None)
+    if callable(stop):  # le module arrête ses tâches de fond et ses serveurs : un rechargement sans redémarrage ne doit pas les doubler
+        try:
+            stop()
+        except Exception:  # noqa: BLE001 — un module qui échoue en s'arrêtant ne bloque rien
+            log.exception("module %s : échec à l'arrêt", mid)
     status.pop(mid, None)
     from mailia import updater
     updater.hooks.pop(mid, None)  # une source de mise à jour ajoutée par ce module
@@ -507,6 +564,7 @@ def _load(info: dict) -> None:
         spec = importlib.util.spec_from_file_location(f"velora_module_{mid}", info["dir"] / "module.py")
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
+        objects[mid] = mod
         mod.register(ModuleAPI(info))
         status[mid] = "ok"
     except Exception as e:  # noqa: BLE001 — un module ne doit jamais empêcher Velora de démarrer

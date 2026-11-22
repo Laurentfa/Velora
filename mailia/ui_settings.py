@@ -999,15 +999,21 @@ def _tab_use(host) -> None:
         with host, ui.dialog() as cd, ui.card().style("width:520px;max-width:96vw"):
             ui.label("Restaurer cette sauvegarde ?").classes("text-h6")
             ui.label(summary).classes("text-body2")
-            if data.get("modules"):
-                ui.label("⚠ Ce fichier contient des modules : du code qui s'exécutera avec vos droits une fois que vous les aurez activés. Ils restent désactivés après la "
-                         "restauration. N'importez que des fichiers que vous avez produits vous-même.").classes("text-caption text-negative")
+            changes = backup.module_changes(data.get("modules"))
+            with_modules = {"on": False}
+            if changes["added"] or changes["updated"]:
+                ui.label("⚠ Ce fichier contient du code (modules) qui s'exécuterait avec vos droits. Par défaut il n'est PAS importé.").classes("text-caption text-negative")
+                if changes["added"]:
+                    ui.label("Modules ajoutés : " + ", ".join(changes["added"]) + " (désactivés après l'import).").classes("text-caption")
+                for mid, old, new, active in changes["updated"]:
+                    ui.label(f"Module remplacé : {mid} {old} → {new}" + (" (il est actif ici : il sera désactivé après le remplacement)" if active else "") + ".").classes("text-caption text-negative")
+                ui.checkbox("Importer aussi ces modules (seulement si ce fichier vient de vous)", value=False, on_change=lambda ev: with_modules.update(on=bool(ev.value)))
             ui.label("Elle est fusionnée avec vos données actuelles : rien n'est supprimé ; les réglages du fichier remplacent les vôtres, le reste (boîtes, modèles, modules…) n'est ajouté que s'il n'existe pas déjà.").classes("text-caption text-grey")
             with ui.row().classes("justify-end w-full gap-2"):
                 ui.button("Annuler", on_click=lambda: cd.submit(False)).props("flat no-caps")
                 ui.button("Restaurer", on_click=lambda: cd.submit(True)).props("unelevated no-caps color=primary")
         if await cd:
-            res = await run.io_bound(backup.import_data, data)
+            res = await run.io_bound(backup.import_data, data, with_modules["on"])
             sync.reload()
             ui.notify(("Restauré : " + ", ".join(f"{v} {k}" for k, v in res.items() if v) if any(res.values()) else "Rien de nouveau à restaurer.")
                       + (". Les modules restent désactivés : vérifiez-les puis activez-les dans Paramètres › Modules." if res.get("modules") or res.get("modules mis à jour") else "")

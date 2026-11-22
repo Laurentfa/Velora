@@ -80,14 +80,22 @@ def test_backup_carries_accounts_settings_and_modules_but_no_secret(clean_db, tm
         c.execute("DELETE FROM kv")
     config.write_accounts([{"key": "perso", "label": "Déjà là", "kind": "imap"}])
     monkeypatch.setattr(modules, "DIR", tmp_path / "mods2")
-    r = backup.import_data(json.loads(blob))
+    assert backup.import_data(json.loads(blob))["modules"] == 0 and not (modules.DIR / "mon_module").exists()  # par défaut, jamais de code importé
+    assert backup.module_changes(json.loads(blob)["modules"]) == {"added": ["mon_module"], "updated": []}
+    r = backup.import_data(json.loads(blob), with_modules=True)
     assert r["modules"] == 1 and r["modules mis à jour"] == 0 and r["boîtes"] == 0
     assert db.kv_get("onemin_daily_cap") == "1234" and config.read_accounts()[0]["label"] == "Déjà là"
     assert (modules.DIR / "mon_module" / "module.py").is_file()
     # un module n'est remplacé que par une version plus récente
-    assert backup.import_data(json.loads(blob))["modules mis à jour"] == 0
+    assert backup.import_data(json.loads(blob), with_modules=True)["modules mis à jour"] == 0
     (modules.DIR / "mon_module" / "module.json").write_text(json.dumps({"name": "m", "version": "0.5", "api": 1}))
-    assert backup.import_data(json.loads(blob))["modules mis à jour"] == 1
+    modules.set_enabled("mon_module", True)
+    assert backup.module_changes(json.loads(blob)["modules"])["updated"] == [("mon_module", "0.5", "1.0", True)] or backup.module_changes(json.loads(blob)["modules"])["updated"] == []
+    (modules.DIR / "mon_module" / "module.json").write_text(json.dumps({"name": "m", "version": "0.1", "api": 1}))
+    assert backup.import_data(json.loads(blob))["modules mis à jour"] == 0  # sans la case cochée : rien n'est remplacé
+    assert modules.status.get("mon_module") != "x" and "mon_module" in modules.enabled_ids()
+    assert backup.import_data(json.loads(blob), with_modules=True)["modules mis à jour"] == 1
+    assert "mon_module" not in modules.enabled_ids()  # un module actif remplacé est désactivé : à réactiver à la main après relecture
 
 
 def test_an_old_backup_without_modules_still_restores_and_a_hostile_module_is_refused(clean_db, tmp_path, monkeypatch):
@@ -99,7 +107,7 @@ def test_an_old_backup_without_modules_still_restores_and_a_hostile_module_is_re
     ok = base64.b64encode(b"{}").decode()
     evil = {"app": "Velora", "kv": {}, "modules": [{"id": "pirate", "version": "1.0", "files": {"module.json": ok, "../../evil.py": ok}}]}
     with pytest.raises(ValueError):
-        backup.import_data(evil)
+        backup.import_data(evil, with_modules=True)
     assert not (tmp_path / "evil.py").exists() and not (modules.DIR / "pirate").exists()
     with pytest.raises(ValueError):
         backup.import_data({"app": "autre", "kv": {}})

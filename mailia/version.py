@@ -7,3 +7,4 @@ def release_message(version: str, name: str, digest_hex: str) -> bytes:
 
 
 UPDATE_PUBKEY = "rJnzMUYA3VwmW+ZssbBI/EM08VZdwjVEmtRL/Eioi1U="  # clé publique de vérification des mises à jour (la clé privée reste chez vous)
+MODULES_PUBKEY = "8oKhtYUfyfDcDOalOUe0T3krxuhO4yRrittFyNjvuy4="  # clé publique qui vérifie le dépôt des modules (la clé privée est dans le trousseau de l'ordinateur qui publie, voir sign_modules.py du dépôt des modules)
