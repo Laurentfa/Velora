@@ -122,7 +122,11 @@ body.resizing iframe{pointer-events:none}
 .abbottom{display:flex;flex-wrap:nowrap;align-items:flex-end;gap:10px;width:100%;margin-top:6px;container-type:inline-size}
 .abbottom .abl{flex:1 1 0;min-width:0;flex-wrap:nowrap}
 .abbottom .abatt{flex:none}
-@container (max-width:540px){.abatt .q-btn__content .block{display:none}.abatt .abt{padding:0 9px}}
+@container (max-width:720px){.abatt .q-btn__content .block{max-width:0;overflow:hidden;white-space:nowrap;margin:0}.abatt .q-btn__content{gap:0}.abatt .abt{padding:0 9px}}
+.abbottom{margin-top:4px;align-items:center}
+.abbottom .aseg{padding:2px}
+.abbottom .aseg .q-btn{min-height:30px}
+.abbottom + .q-editor{margin-top:2px!important}
 .abcancel{min-height:36px;padding:0 14px!important;border-radius:10px;color:var(--muted)!important}
 .abcancel:hover{background:var(--surface2)!important;color:var(--text)!important}
 .lhead{box-sizing:border-box;height:132.5px;padding:26.5px 14px 0;border-bottom:1px solid var(--line);width:100%}

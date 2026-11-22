@@ -292,7 +292,7 @@ class DraftsMixin:
         self._saved_sig, self._files_sig = sig, files_sig
         if self.save_label is not None:
             try:
-                self.save_label.set_text(f"Brouillon enregistré à {datetime.now():%H:%M}")
+                self.save_label.set_text(f"Enregistré à {datetime.now():%H:%M}")
             except Exception:
                 pass
         return True
