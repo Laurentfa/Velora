@@ -29,6 +29,7 @@ API_VERSION = 1
 DIR = config.DATA_DIR / "modules"
 views: dict[str, dict] = {}   # identifiant de vue -> {"title", "icon", "build", "module"}
 services: dict[str, dict] = {}  # services optionnels publiés par les modules : nom -> {"module", "fn"} (un module peut s'en servir s'il existe, et fonctionne sans sinon)
+current: dict = {"mailbox": None}  # la fenêtre principale, pour les actions qui ouvrent un écran de Velora (ModuleAPI.open_draft)
 phone_scans: dict[str, dict] = {}  # numérisations par téléphone ouvertes par des modules : identifiant -> {"module", "srv"} (arrêtées après 30 minutes, ou au déchargement du module)
 busy_tasks: dict[int, dict] = {}  # opérations longues en cours déclarées par les modules (jeton -> {"module", "label", "since"}) : tant qu'il y en a, Velora ne se met pas à jour tout seul
 _busy_lock = threading.Lock()
@@ -373,6 +374,18 @@ class ModuleAPI:
             phone_scans.pop(scan_id, None)
             v["srv"].stop()
 
+    async def open_draft(self, draft_id: str) -> None:
+        """Ouvre dans l'éditeur de message de Velora un brouillon que CE module a préparé (create_draft), pour que l'utilisateur le relise et l'envoie. À appeler depuis l'interface (un
+        événement de la vue du module). Lève ValueError si le brouillon n'existe plus ou n'a pas été préparé par ce module."""
+        row, _ = db.draft_load(draft_id)
+        if not row or row.get("source") != f"module:{self.id}":
+            raise ValueError("Brouillon introuvable.")
+        mb = current.get("mailbox")
+        if mb is None:
+            raise ValueError("La fenêtre de Velora n'est pas disponible.")
+        await mb.go("drafts", "")
+        await mb.resume_draft(draft_id)
+
     def on_attachment(self, label: str, icon: str, extensions, fn) -> None:
         """(icon : nom d'icône Material, ex. "edit".) Ajoute un bouton à côté des pièces jointes reçues dont le nom finit par l'une des `extensions` (ex. (".pdf",)). Au clic, Velora télécharge la pièce jointe (jamais un fichier
         dangereux, 25 Mo au plus) et appelle fn(info, data) hors du fil de la fenêtre : info = {"name", "size", "type", "message_id", "account", "subject", "sender"}, data = octets. fn peut rendre
@@ -535,12 +548,14 @@ def apply(mid: str | None = None) -> None:
         log.debug("rafraîchissement après changement de module impossible", exc_info=True)
 
 
-def render(view_id: str) -> None:
+def render(view_id: str, mailbox=None) -> None:
     """Dessine la vue d'un module ; une erreur du module s'affiche à sa place, sans toucher au reste."""
     from nicegui import ui
     v = views.get(view_id)
     if not v:
         return
+    if mailbox is not None:
+        current["mailbox"] = mailbox
     api = ModuleAPI({"id": v["module"], "dir": DIR / v["module"], "name": v["title"]})
     try:
         v["build"](api)

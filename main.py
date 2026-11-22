@@ -856,7 +856,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
             self.server_rules_view()
             return
         if self.view in modules.views:
-            modules.render(self.view)
+            modules.render(self.view, self)
             return
         if self.view == "outbox":
             if not self.outbox:

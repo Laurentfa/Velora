@@ -29,6 +29,7 @@ def mod_dir(tmp_path, monkeypatch):
     modules.status.clear()
     modules.slots["reader"].clear()
     modules.slots["sent"].clear(); modules.slots["attachment"].clear()
+    modules.current["mailbox"] = None
     modules.services.clear()
     db.kv_set("modules_on", "0")
     db.kv_set("modules_enabled", "[]")
@@ -446,6 +447,33 @@ def test_a_draft_may_have_no_recipient_and_no_signature(mod_dir, one_account) ->
     assert row["to_addrs"] == "" and "msig" not in row["html"]
     with_sig = db.draft_load(api.create_draft("a", "", "Avec", "<p>Texte</p>"))[0]["html"]
     assert with_sig.startswith("<p>Texte</p>") and len(with_sig) > len("<p>Texte</p>")  # signature de la boîte ajoutée après le texte
+
+
+def test_a_module_opens_only_its_own_drafts_in_the_editor(mod_dir, one_account) -> None:
+    import asyncio
+    run = lambda coro: asyncio.new_event_loop().run_until_complete(coro)  # noqa: E731 — sans fermer la boucle d'autres tests
+    opened: list = []
+
+    class MB:
+        async def go(self, view, acc, folder=""):
+            opened.append(("go", view))
+
+        async def resume_draft(self, did):
+            opened.append(("resume", did))
+    api = api_of(mod_dir)
+    did = api.create_draft("a", "", "S", "<p>x</p>")
+    with pytest.raises(ValueError):  # pas de fenêtre
+        run(api.open_draft(did))
+    modules.current["mailbox"] = MB()
+    try:
+        run(api.open_draft(did))
+        assert opened == [("go", "drafts"), ("resume", did)]
+        with pytest.raises(ValueError):  # le brouillon d'un autre module (ou inconnu) n'est pas ouvert
+            run(api_of(mod_dir, "autre").open_draft(did))
+        with pytest.raises(ValueError):
+            run(api.open_draft("inconnu"))
+    finally:
+        modules.current["mailbox"] = None
 
 
 def test_a_module_prepares_a_reply_draft(mod_dir, one_account, monkeypatch) -> None:
