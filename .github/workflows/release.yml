@@ -45,10 +45,35 @@ jobs:
         run: |
           PY=$([ "$RUNNER_OS" = Windows ] && echo .venv/Scripts/python || echo .venv/bin/python)
           $PY -m pytest -q -m "not network"
+      - name: Certificat de signature Mac
+        if: runner.os == 'macOS'
+        env:
+          MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
+        run: |
+          # Une identité de signature fixe d'une version à l'autre : le trousseau et les autorisations de macOS (Chrome, micro…) ne redemandent pas de mot de passe après chaque mise à jour.
+          # Sans ce secret (copie du dépôt, par exemple) : signature « ad hoc », comme avant.
+          if [ -n "$MAC_CERT_P12" ]; then
+            KC="$RUNNER_TEMP/velora-signing.keychain-db"; KPW=$(uuidgen)
+            echo "$MAC_CERT_P12" | base64 --decode > "$RUNNER_TEMP/velora.p12"
+            security create-keychain -p "$KPW" "$KC"
+            security set-keychain-settings -lut 3600 "$KC"
+            security unlock-keychain -p "$KPW" "$KC"
+            security import "$RUNNER_TEMP/velora.p12" -k "$KC" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
+            security set-key-partition-list -S apple-tool:,apple: -s -k "$KPW" "$KC" > /dev/null
+            security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+            rm -f "$RUNNER_TEMP/velora.p12"
+            ID=$(security find-identity -p codesigning "$KC" | awk '/Velora Release Signing/ {print $2; exit}')
+            test -n "$ID" || { echo "certificat de signature introuvable"; exit 1; }
+            echo "CODESIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
+          else
+            echo "pas de certificat de signature : signature ad hoc"
+          fi
       - name: Construction et empaquetage Mac
         if: runner.os == 'macOS'
         run: |
           ./build_mac.sh
+          if [ -n "$CODESIGN_IDENTITY" ]; then codesign -d -r- dist/Velora.app 2>&1 | grep -q 'certificate leaf' || { echo "signature stable absente"; exit 1; }; fi  # l'identité doit être celle du certificat, pas ad hoc
           test -x dist/Velora.app/Contents/MacOS/velora-dictate  # la dictée ne doit pas disparaître en silence d'une version publiée
           test -x dist/Velora.app/Contents/MacOS/velora-write  # ni les boutons Apple Intelligence
           scripts/package_mac.sh "$VERSION"
