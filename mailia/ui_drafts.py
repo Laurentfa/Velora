@@ -106,8 +106,6 @@ class DraftsMixin:
                                     with ui.menu():
                                         for mode, (label, _) in ai.REWRITE_MODES.items():
                                             ui.menu_item(label, on_click=lambda _, m=mode: self.improve(m))
-                ui.space()
-                self.save_label = ui.label("").classes("rmeta")
             up = ui.upload(on_upload=self.on_upload, multiple=True, auto_upload=True,
                            max_file_size=25 * 1024 * 1024).props("hide-upload-btn").style("position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden")
             ui.run_javascript(f"window.__mailiaUp = {up.id}")  # cible des fichiers déposés sur la rédaction
@@ -117,6 +115,7 @@ class DraftsMixin:
                         with ui.button("Envoyer", on_click=self.send).props("unelevated no-caps no-wrap dense").classes("absend"):
                             ui.html(icons.svg("send", 17), sanitize=False)
                         ui.button("Annuler", on_click=self.cancel_compose).props("flat no-caps no-wrap dense").classes("abcancel")
+                        self.save_label = ui.label("").classes("abstate")
                 ui.space()
                 with ui.element("div").classes("agrp"):
                     with ui.element("div").classes("aseg"):
