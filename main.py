@@ -401,7 +401,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
                     "click", js_handler="() => mailiaSide('hide')").tooltip("Masquer la colonne (la souris au bord gauche la rouvre)")
                 ui.button(icon="push_pin").props("flat dense round size=sm color=negative").classes("sidepinbtn").on(
                     "click", js_handler="() => mailiaSide('dock')").tooltip("Garder la colonne ouverte")
-            ui.button("Nouveau message", icon="edit", on_click=self.new_message).props("unelevated no-caps color=primary").classes("q-mx-sm q-mb-sm")
+            ui.button("Nouveau message", icon="edit", on_click=self.open_new_message).props("unelevated no-caps color=primary").classes("q-mx-sm q-mb-sm")
         with ui.scroll_area().classes("sidescroll"):  # seule cette partie défile : l'en-tête et les boutons du bas restent en place
             if modules.views:  # pages ajoutées par les modules personnels : une tuile chacune, tout en haut (la rangée n'existe que s'il y a au moins un module)
                 with ui.element("div").classes("mtiles").mark("modules-section"):
@@ -1470,6 +1470,8 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         if view in modules.views and (view, acc, folder) == (self.view, self.account, self.folder):
             return  # un clic sur la page de module déjà ouverte ne la recharge pas : l'ascenseur reste où vous l'avez mis
         self._scroll_guard = time.monotonic() + 0.8  # les derniers « défilements » de la page quittée ne sont pas ceux de la nouvelle
+        if view not in modules.views:
+            self._mail_ctx = (view, acc, folder)  # où revenir quand on ouvre un nouveau message depuis la page d'un module
         self.view, self.account, self.folder, self.q, self.limit = view, acc, folder, "", 80
         self.picked.clear()
         self.select_mode = False

@@ -25,7 +25,7 @@ class MailToolsMixin:
         if key == "?":
             return await self.shortcuts_help()
         if key == "c":
-            return self.new_message()
+            return await self.open_new_message()
         if key == "Escape":
             if self.picked or self.select_mode:
                 return self.pick_clear()

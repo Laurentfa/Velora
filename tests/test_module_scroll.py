@@ -76,3 +76,22 @@ async def test_other_views_are_untouched(user: User, box) -> None:
     assert b.view == "inbox" and b.rows_area is not None
     await b.rows_scrolled(scrolled(900))  # une liste de mails : la position n'est pas retenue
     assert b._scroll_pos == {}
+
+
+async def test_new_message_from_a_module_page_returns_to_the_mail_list(user: User, box) -> None:
+    """Depuis la page d'un module, « Nouveau message » ouvre bien l'éditeur (la page du module recouvrait le panneau de lecture)."""
+    seen, built, va, vb = box
+    await user.open("/")
+    b = seen[-1]
+    await b.go("inbox", "", "")
+    await b.go(va, "", "")
+    assert b.view == va
+    with user.client:
+        await b.open_new_message()
+    assert b.view == "inbox" and b.new and b.compose  # retour à la liste des mails, éditeur ouvert
+    b.new = b.compose = False
+    await b.go("folder", "testbox", "Archive")
+    await b.go(vb, "", "")
+    with user.client:
+        await b.open_new_message()
+    assert (b.view, b.account, b.folder) == ("folder", "testbox", "Archive") and b.new  # on revient là où on était

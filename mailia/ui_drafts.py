@@ -175,6 +175,15 @@ class DraftsMixin:
             self.draft["to"] = ", ".join(addresses)
             self.reader.refresh()
 
+    async def open_new_message(self) -> None:
+        """Bouton « Nouveau message » et touche « c ». Depuis la page d'un module, qui recouvre le panneau de lecture, on revient d'abord à la dernière liste de mails : le nouveau
+        message s'ouvre alors là où on le voit."""
+        from mailia import modules
+        if self.view in modules.views:
+            view, acc, folder = getattr(self, "_mail_ctx", None) or ("inbox", "", "")
+            await self.go(view, acc, folder)
+        self.new_message()
+
     def new_message(self) -> None:
         accounts = [k for k, c in sync.ACCOUNTS.items() if c.password]
         if not accounts:
