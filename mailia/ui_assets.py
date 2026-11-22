@@ -94,6 +94,22 @@ body.resizing iframe{pointer-events:none}
 .mtile.on .mtl{color:var(--text)}
 .grp{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);padding:11px 10px 3px}
 .listcol{background:var(--surface);border-right:1px solid var(--line);height:100vh;min-width:0;flex-wrap:nowrap}
+.abar{display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap;width:100%}
+.agrp{display:flex;flex-direction:column;gap:5px}
+.aglab{font-size:11px;color:var(--muted);padding-left:4px;line-height:1}
+.aseg{display:inline-flex;align-items:center;gap:2px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:3px}
+.aseg .q-btn{min-height:32px;border-radius:8px;color:var(--text);transition:background .12s,color .12s}
+.aseg .q-btn svg{display:block}.aseg .q-btn .q-btn__content{gap:6px;flex-wrap:nowrap}.aseg .q-btn .q-btn__content>div:has(>svg){display:flex}
+.aseg .abi{width:32px;min-width:32px;padding:0}
+.aseg .abi:hover{background:var(--accent-soft);color:var(--accent)}
+.aseg .abd:hover{background:var(--hi-soft);color:var(--hi)}
+.aseg .abon{background:var(--accent-soft);color:var(--accent)}
+.aseg .abp{background:var(--accent);color:#fff;padding:0 14px;font-weight:500;font-size:13.5px}
+.aseg .abp:hover{background:color-mix(in srgb,var(--accent) 86%,#000);color:#fff}
+.aseg .abia{background:var(--ai-soft);color:var(--ai);padding:0 10px 0 12px;font-weight:500}
+.aseg .abia:hover{background:var(--sel);color:var(--ai)}
+.qchip{background:var(--surface2);color:var(--text);border-radius:12px;min-height:24px;padding:0 10px;font-size:12.5px}
+.qchip:hover{background:var(--accent-soft)!important;color:var(--accent)}
 .lhead{box-sizing:border-box;height:132.5px;padding:26.5px 14px 0;border-bottom:1px solid var(--line);width:100%}
 .lhead .title{font-size:19px;font-weight:700;letter-spacing:-.02em}
 .ephem{display:flex;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:1px}.eph-i{display:inline-flex;align-items:center;gap:3px}.eph-i img{width:24px;height:24px;margin:-3px 0}.ephem .sep{margin:0 8px}

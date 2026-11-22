@@ -1090,55 +1090,73 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
     def toolbar(self, m: dict) -> None:
         use_ai = config.ai_enabled()
         multi = len([a for a in (m["to_addrs"] + "," + m["cc_addrs"] if m["cc_addrs"] else m["to_addrs"]).split(",") if a.strip()]) > 1
-        with ui.row().classes("gap-1 items-center no-wrap"):
-            ui.button(icon="reply", on_click=self.reply).props("outline no-caps no-wrap color=primary").tooltip("Répondre").mark("reply")
-            if multi:  # les trois actions de réponse côte à côte (Répondre, Répondre à tous, Transférer), avant la réponse rédigée par l'IA
-                ui.button(icon="reply_all", on_click=lambda: self.reply(all_=True)).props("outline no-caps no-wrap color=primary").tooltip("Répondre à tous").mark("reply-all")
-            ui.button(icon="forward", on_click=lambda: self.forward(m)).props("outline no-caps no-wrap color=primary").tooltip("Transférer ce message").mark("forward")
-            if use_ai:
-                with ui.button("✦ Réponse IA").props("outline no-caps no-wrap color=primary icon-right=arrow_drop_down").tooltip(
-                        "L'IA rédige un brouillon : rien n'est envoyé, et aucun appel tant que vous ne choisissez pas"):
-                    with ui.menu():
-                        for it in self.ai_intents():
-                            ui.menu_item(it["label"], on_click=lambda _, it=it: self.ai_reply(it["text"]))
-                        ui.separator()
-                        ui.menu_item("Traduire ce message en français", on_click=lambda: self.translate(m))
-                        ui.menu_item("Autre consigne…", on_click=self.ai_custom)
-                        ui.menu_item("✦ Suggérer des réponses pour ce message", on_click=self.suggest)
-                        ui.menu_item("Gérer cette liste…", on_click=self.manage_intents)
-            if use_ai and not getattr(self, "has_summary", False):
-                ui.button(icon="auto_awesome", on_click=self.summarize_thread).props("flat round dense color=primary").tooltip("Résumer la conversation")
-            if m["folder"] == "INBOX":
-                pinned = m["ckey"] in db.pin_keys()
-                ui.button(icon="push_pin", on_click=lambda: self.toggle_pin(m)).props(
-                    "round dense color=negative " + ("unelevated" if pinned else "flat")).tooltip(
-                    "Retirer l'épingle" if pinned else "Épingler en haut de la boîte de réception")
-            if m["folder"] == "INBOX":
-                with ui.button(icon="schedule").props("flat round dense").tooltip("Reporter : masquer jusqu'à plus tard"):
-                    with ui.menu():
-                        for label, when in self.snooze_options():
-                            ui.menu_item(f"{label}  ·  {self.fr_when(when)}", on_click=lambda _, w=when: self.snooze(m, w))
-                        ui.separator()
-                        ui.menu_item("Choisir la date et l'heure…", on_click=lambda: self.snooze_dialog(m))
-            ui.button(icon="task_alt", on_click=lambda: self.task_dialog(m)).props("flat round dense").tooltip("Créer une tâche à partir de ce message")
-            if config.ai_enabled() and not aipolicy.is_excluded(m):
-                ui.button(icon="gpp_maybe", on_click=lambda: self.phishing_ai(m)).props("flat round dense").tooltip(
-                    "Ce message est-il une arnaque ? Avis de l'IA (à la demande)")
-            google_cal = config.calendar_backend() == "google"
-            if google_cal or (sync.ACCOUNTS.get(m["account"]) and sync.ACCOUNTS[m["account"]].kind == "ews"):
-                ui.button(icon="event", on_click=lambda: self.event_dialog(m)).props("flat round dense").tooltip(
-                    "Ajouter un rendez-vous à Google Agenda" if google_cal else "Ajouter un rendez-vous à l'agenda Exchange")
-            if sync.ACCOUNTS.get(m["account"]) and sync.ACCOUNTS[m["account"]].kind == "ews" and sync.ACCOUNTS[m["account"]].password:
-                ui.button(icon="rule", on_click=lambda: self.srules_from_mail(m)).props("flat round dense").tooltip(
-                    "Créer une règle de tri sur le serveur à partir de ce message").mark("srules-from-mail")
-            ui.button(icon="archive", on_click=lambda: self.act("archive")).props("flat round dense").tooltip("Archiver")
-            ui.button(icon="drive_file_move", on_click=self.move_dialog).props("flat round dense").tooltip("Déplacer")
-            ui.button(icon="mark_email_unread", on_click=lambda: self.act("unread")).props("flat round dense").tooltip("Marquer non lu")
-            ui.button(icon="delete", on_click=lambda: self.act("delete")).props("flat round dense color=negative").tooltip("Supprimer")
-        with ui.row().classes("gap-1 items-center q-mt-xs"):
-            ui.label("Réponse rapide :").classes("rmeta")
+        def abtn(icon: str, tip: str, on_click=None, cls: str = "abi", mark: str = ""):
+            """Un bouton d'icône de la barre d'actions (traits fins, survol bleu ; « abd » : rouge au survol)."""
+            b = ui.button(on_click=on_click).props("flat no-caps no-wrap dense").classes(cls)
+            with b:
+                ui.html(icons.svg(icon, 18), sanitize=False)
+            b.tooltip(tip)
+            if mark:
+                b.mark(mark)
+            return b
+
+        with ui.row().classes("abar"):
+            with ui.element("div").classes("agrp"):
+                ui.label("Répondre").classes("aglab")
+                with ui.element("div").classes("aseg"):
+                    with ui.button(on_click=self.reply).props("unelevated no-caps no-wrap dense").classes("abp").tooltip("Répondre").mark("reply"):
+                        ui.html(icons.svg("reply", 18), sanitize=False)
+                        ui.label("Répondre")
+                    if multi:  # les trois actions de réponse côte à côte (Répondre, Répondre à tous, Transférer), avant la réponse rédigée par l'IA
+                        abtn("reply_all", "Répondre à tous", lambda: self.reply(all_=True), mark="reply-all")
+                    abtn("forward", "Transférer ce message", lambda: self.forward(m), mark="forward")
+                    if use_ai:
+                        with ui.button().props("flat no-caps no-wrap dense").classes("abia").tooltip(
+                                "L'IA rédige un brouillon : rien n'est envoyé, et aucun appel tant que vous ne choisissez pas"):
+                            ui.html(icons.svg("sparkle", 18), sanitize=False)
+                            ui.label("IA")
+                            ui.icon("expand_more", size="16px")
+                            with ui.menu():
+                                for it in self.ai_intents():
+                                    ui.menu_item(it["label"], on_click=lambda _, it=it: self.ai_reply(it["text"]))
+                                ui.separator()
+                                ui.menu_item("Traduire ce message en français", on_click=lambda: self.translate(m))
+                                ui.menu_item("Autre consigne…", on_click=self.ai_custom)
+                                ui.menu_item("✦ Suggérer des réponses pour ce message", on_click=self.suggest)
+                                ui.menu_item("Gérer cette liste…", on_click=self.manage_intents)
+            with ui.element("div").classes("agrp"):
+                ui.label("Organiser").classes("aglab")
+                with ui.element("div").classes("aseg"):
+                    if use_ai and not getattr(self, "has_summary", False):
+                        abtn("sparkle", "Résumer la conversation", self.summarize_thread)
+                    if m["folder"] == "INBOX":
+                        pinned = m["ckey"] in db.pin_keys()
+                        abtn("pin", "Retirer l'épingle" if pinned else "Épingler en haut de la boîte de réception", lambda: self.toggle_pin(m), cls="abi abon" if pinned else "abi")
+                        with abtn("clock", "Reporter : masquer jusqu'à plus tard"):
+                            with ui.menu():
+                                for label, when in self.snooze_options():
+                                    ui.menu_item(f"{label}  ·  {self.fr_when(when)}", on_click=lambda _, w=when: self.snooze(m, w))
+                                ui.separator()
+                                ui.menu_item("Choisir la date et l'heure…", on_click=lambda: self.snooze_dialog(m))
+                    abtn("tasks", "Créer une tâche à partir de ce message", lambda: self.task_dialog(m))
+                    if config.ai_enabled() and not aipolicy.is_excluded(m):
+                        abtn("shield", "Ce message est-il une arnaque ? Avis de l'IA (à la demande)", lambda: self.phishing_ai(m))
+                    google_cal = config.calendar_backend() == "google"
+                    if google_cal or (sync.ACCOUNTS.get(m["account"]) and sync.ACCOUNTS[m["account"]].kind == "ews"):
+                        abtn("calendar", "Ajouter un rendez-vous à Google Agenda" if google_cal else "Ajouter un rendez-vous à l'agenda Exchange", lambda: self.event_dialog(m))
+                    if sync.ACCOUNTS.get(m["account"]) and sync.ACCOUNTS[m["account"]].kind == "ews" and sync.ACCOUNTS[m["account"]].password:
+                        abtn("rules", "Créer une règle de tri sur le serveur à partir de ce message", lambda: self.srules_from_mail(m), mark="srules-from-mail")
+            with ui.element("div").classes("agrp"):
+                ui.label("Ranger").classes("aglab")
+                with ui.element("div").classes("aseg"):
+                    abtn("archive", "Archiver", lambda: self.act("archive"))
+                    abtn("folder_move", "Déplacer", self.move_dialog)
+                    abtn("mail_unread", "Marquer non lu", lambda: self.act("unread"))
+                    abtn("trash", "Supprimer", lambda: self.act("delete"), cls="abi abd")
+        with ui.row().classes("gap-1 items-center q-mt-sm"):
+            ui.label("Réponse rapide").classes("rmeta")
             for q in self.quick_replies():
-                ui.button(q["label"], on_click=lambda _, q=q: self.quick_reply(q["text"])).props("outline dense no-caps size=sm color=primary").tooltip(q["text"])
+                ui.button(q["label"], on_click=lambda _, q=q: self.quick_reply(q["text"])).props("flat dense no-caps size=sm").classes("qchip").tooltip(q["text"])
             ui.button(icon="tune", on_click=self.manage_quick).props("flat dense round size=sm").tooltip("Gérer mes réponses rapides")
         atts = json.loads(m["att_json"]) if m["att_json"] else []
         if atts:
