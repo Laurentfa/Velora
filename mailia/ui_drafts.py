@@ -6,10 +6,10 @@ from datetime import datetime
 
 from nicegui import background_tasks, run, ui
 
-from mailia import ai, compose, config, contacts_ui, db, htmlmail, queries, sync
+from mailia import ai, apple_writer, compose, config, contacts_ui, db, htmlmail, icons, queries, sync
 from mailia.textutil import html_to_text
 
-from mailia.ui_common import ago, label_of, log, make_editor
+from mailia.ui_common import ago, label_of, log, make_editor, tbtn
 from mailia.ui_sigmodels import signature_models_dialog
 
 # Après un clic sur « Joindre un fichier », le focus restait sur ce bouton : la touche Entrée tapée ensuite le réactivait et rouvrait le sélecteur de fichiers.
@@ -70,50 +70,60 @@ class DraftsMixin:
             self.rcpt_add.update(cc=add_cc, bcc=add_bcc)
             self.bcc_field = bcc_field
             self.subject_input = ui.input("Objet").bind_value(d, "subject").props("outlined dense").classes("w-full q-mt-sm")
-            with ui.row().classes("gap-1 q-mt-xs"):
-                ui.button("Cci", icon="visibility_off", on_click=lambda: bcc_field.set_visibility(not bcc_field.visible)).props(
-                    "flat dense no-caps size=sm").tooltip("Ajouter des destinataires en copie cachée (invisibles pour les autres)")
-                self.importance_tool()
-                self.apple_tool()
-                self.dictation_widget("body")
-                ui.button("Image", icon="image", on_click=self.insert_image).props("flat dense no-caps size=sm").tooltip("Insérer une image dans le message")
-                ui.button("Ma signature", icon="draw", on_click=self.insert_signature).props("flat dense no-caps size=sm").tooltip("Insérer ma signature à l'endroit du curseur")
-                with ui.button("Modèle de signature", icon="celebration").props("flat dense no-caps size=sm").tooltip(
-                        "Choisir la signature de ce message : la vôtre, un modèle de Noël, ou aucune").mark("sig-model-tool"):
-                    with ui.menu():
-                        for key, label in (("", "Ma signature"), *((k, v[0]) for k, v in compose.all_models().items()), (compose.NO_SIGNATURE, "Sans signature")):
-                            ui.menu_item(label, on_click=lambda _, k=key: self.choose_signature(k)).mark(f"sig-model-{key or 'mine'}")
-                        ui.separator()
-                        ui.menu_item("Gérer mes modèles de signature…", on_click=lambda: signature_models_dialog(self.host, self.reader.refresh)).mark("sig-model-manage")
-                with ui.button("Modèles", icon="description").props("flat dense no-caps size=sm"):
-                    with ui.menu():
-                        tpls = db.templates_list()
-                        for t in tpls:
-                            ui.menu_item(t["name"], on_click=lambda _, t=t: self.use_template(t))
-                        if not tpls:
-                            ui.menu_item("Aucun modèle pour l'instant").props("disable")
-                        ui.separator()
-                        ui.menu_item("Enregistrer mon message comme modèle…", on_click=self.save_as_template)
-                        ui.menu_item("Gérer mes modèles…", on_click=self.manage_templates)
-                if config.ai_enabled():
-                    with ui.button("Améliorer", icon="auto_fix_high").props("flat dense no-caps size=sm").tooltip("Corriger ou réécrire avec l'IA"):
-                        with ui.menu():
-                            for mode, (label, _) in ai.REWRITE_MODES.items():
-                                ui.menu_item(label, on_click=lambda _, m=mode: self.improve(m))
+            with ui.row().classes("abtop"):
+                with ui.element("div").classes("agrp"):
+                    with ui.element("div").classes("aseg"):
+                        tbtn("eye_off", "Cci", lambda: bcc_field.set_visibility(not bcc_field.visible)).tooltip("Ajouter des destinataires en copie cachée (invisibles pour les autres)")
+                        self.importance_tool()
+                        self.dictation_widget("body", compact=True)
+                with ui.element("div").classes("agrp"):
+                    with ui.element("div").classes("aseg"):
+                        tbtn("image", "Image", self.insert_image).tooltip("Insérer une image dans le message")
+                        tbtn("signature", "Ma signature", self.insert_signature).tooltip("Insérer ma signature à l'endroit du curseur")
+                        with tbtn("stamp", "Modèle de signature").tooltip(
+                                "Choisir la signature de ce message : la vôtre, un modèle de Noël, ou aucune").mark("sig-model-tool"):
+                            with ui.menu():
+                                for key, label in (("", "Ma signature"), *((k, v[0]) for k, v in compose.all_models().items()), (compose.NO_SIGNATURE, "Sans signature")):
+                                    ui.menu_item(label, on_click=lambda _, k=key: self.choose_signature(k)).mark(f"sig-model-{key or 'mine'}")
+                                ui.separator()
+                                ui.menu_item("Gérer mes modèles de signature…", on_click=lambda: signature_models_dialog(self.host, self.reader.refresh)).mark("sig-model-manage")
+                        with tbtn("doc", "Modèles"):
+                            with ui.menu():
+                                tpls = db.templates_list()
+                                for t in tpls:
+                                    ui.menu_item(t["name"], on_click=lambda _, t=t: self.use_template(t))
+                                if not tpls:
+                                    ui.menu_item("Aucun modèle pour l'instant").props("disable")
+                                ui.separator()
+                                ui.menu_item("Enregistrer mon message comme modèle…", on_click=self.save_as_template)
+                                ui.menu_item("Gérer mes modèles…", on_click=self.manage_templates)
+                if config.ai_enabled() or (apple_writer.enabled() and apple_writer.available()):
+                    with ui.element("div").classes("agrp"):
+                        with ui.element("div").classes("aseg"):
+                            self.apple_tool()
+                            if config.ai_enabled():
+                                with tbtn("wand", "Améliorer").tooltip("Corriger ou réécrire avec l'IA"):
+                                    with ui.menu():
+                                        for mode, (label, _) in ai.REWRITE_MODES.items():
+                                            ui.menu_item(label, on_click=lambda _, m=mode: self.improve(m))
                 ui.space()
                 self.save_label = ui.label("").classes("rmeta")
             up = ui.upload(on_upload=self.on_upload, multiple=True, auto_upload=True,
                            max_file_size=25 * 1024 * 1024).props("hide-upload-btn").style("position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden")
             ui.run_javascript(f"window.__mailiaUp = {up.id}")  # cible des fichiers déposés sur la rédaction
-            with ui.row().classes("q-mt-xs items-center gap-2"):  # Envoyer et Annuler à gauche, les pièces jointes à droite : une seule rangée
-                ui.button("Envoyer", on_click=self.send).props("unelevated no-caps color=primary")
-                ui.button("Annuler", on_click=self.cancel_compose).props("flat no-caps")
+            with ui.row().classes("abtop items-end"):  # Envoyer et Annuler à gauche, les pièces jointes à droite : une seule rangée
+                with ui.element("div").classes("agrp"):
+                    with ui.row().classes("items-center gap-1 no-wrap"):
+                        with ui.button("Envoyer", on_click=self.send).props("unelevated no-caps no-wrap dense").classes("absend"):
+                            ui.html(icons.svg("send", 17), sanitize=False)
+                        ui.button("Annuler", on_click=self.cancel_compose).props("flat no-caps no-wrap dense").classes("abcancel")
                 ui.space()
-                ui.button("Joindre un fichier (25 Mo max)", icon="attach_file",
-                          on_click=None).props("flat no-caps dense").on(
-                    "click", js_handler=f"() => {{ getElement({up.id}).$refs.qRef.pickFiles(); {FOCUS_EDITOR_JS} }}").tooltip("25 Mo au total pour toutes les pièces jointes")
-                ui.button("Scanner un document", icon="document_scanner", on_click=self.scan_dialog).props("flat no-caps dense").tooltip(
-                    "Numériser avec un scanner du réseau ou avec votre téléphone, et joindre le résultat en PDF")
+                with ui.element("div").classes("agrp"):
+                    with ui.element("div").classes("aseg"):
+                        tbtn("paperclip", "Joindre un fichier", None).on(
+                            "click", js_handler=f"() => {{ getElement({up.id}).$refs.qRef.pickFiles(); {FOCUS_EDITOR_JS} }}").tooltip("25 Mo au total pour toutes les pièces jointes")
+                        tbtn("scan", "Scanner un document", self.scan_dialog).tooltip(
+                            "Numériser avec un scanner du réseau ou avec votre téléphone, et joindre le résultat en PDF")
             self.files_view()
             # la barre d'actions (et le bouton Envoyer) est au-dessus du texte : on n'a pas à descendre en bas d'un long message
             self.editor = make_editor(d["html"], lambda e: d.__setitem__("html", e.value or ""))
@@ -128,8 +138,7 @@ class DraftsMixin:
         """Importance du message (comme Outlook et Apple Mail) : normale, haute (« ! » chez le destinataire) ou basse. Une réponse part toujours en normale d'abord."""
         level = self.draft.get("importance", 1)
         names = {2: "Importance haute", 1: "Importance", 0: "Importance basse"}
-        props = "flat dense no-caps size=sm" + (" color=negative" if level == 2 else "")
-        with ui.button(names[level], icon={2: "priority_high", 1: "flag", 0: "arrow_downward"}[level]).props(props).tooltip(
+        with tbtn({2: "flag", 1: "flag", 0: "arrow_down"}[level], names[level], cls="abneg" if level == 2 else "").tooltip(
                 "Marquer le message comme important ou peu important : le destinataire le voit dans sa liste").mark("importance-tool"):
             with ui.menu():
                 for lvl, label in ((1, "Normale"), (2, "Haute (!)"), (0, "Basse")):

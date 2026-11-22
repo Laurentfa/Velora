@@ -6,6 +6,7 @@ import json
 from nicegui import run, ui
 
 from mailia import apple_writer
+from mailia.ui_common import tbtn
 
 
 class AppleWriterMixin:
@@ -14,7 +15,7 @@ class AppleWriterMixin:
     def apple_tool(self) -> None:
         if not (apple_writer.enabled() and apple_writer.available()):
             return
-        with ui.button("Apple Intelligence", icon="auto_fix_high").props("flat dense no-caps size=sm").tooltip(
+        with tbtn("wand", "Apple Intelligence").tooltip(
                 "Corriger ou reformuler le texte avec Apple Intelligence : gratuit, sur ce Mac, rien n'est envoyé. S'applique à la sélection, sinon à tout votre message.").mark("apple-tool"):
             with ui.menu():
                 for key, (title, hint) in apple_writer.MODES.items():

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from nicegui import ui
 
-from mailia import config, db, i18n, sync
+from mailia import config, db, i18n, icons, sync
 
 
 SERVER_MODE = "--server" in sys.argv
@@ -351,3 +351,11 @@ def initial_view() -> tuple[str, str, str]:
 def label_of(key: str) -> str:
     c = sync.ACCOUNTS.get(key)
     return c.label if c else key
+
+
+def tbtn(icon: str, label: str = "", on_click=None, cls: str = ""):
+    """Un bouton de capsule d'outils (icône à trait fin devant son libellé) : celui du texte de la rédaction, des pièces jointes… Le libellé reste le texte du bouton."""
+    b = ui.button(label, on_click=on_click).props("flat no-caps no-wrap dense").classes(("abt " + cls).strip())
+    with b:
+        ui.html(icons.svg(icon, 18), sanitize=False)
+    return b

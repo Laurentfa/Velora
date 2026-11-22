@@ -9,7 +9,8 @@ import time
 from nicegui import background_tasks, run, ui
 
 from mailia import db, dictation, dictation_text, dictation_vocab, whisper_engine
-from mailia.ui_common import log
+from mailia import icons
+from mailia.ui_common import log, tbtn
 
 
 async def whisper_download_dialog(host, key: str, engine=None) -> bool:
@@ -71,13 +72,17 @@ def preload_soon() -> None:
 class DictationMixin:
     dict_state: dict | None = None
 
-    def dictation_widget(self, target: str) -> None:
+    def dictation_widget(self, target: str, compact: bool = False) -> None:
         """Le bouton micro (« body » : le message, « ins » : la consigne de l'IA) et sa ligne d'état. Absent quand la dictée n'est pas possible sur cette machine."""
         if not dictation.usable():
             return
         preload_soon()
-        btn = ui.button(icon="mic", on_click=lambda t=target: self.toggle_dictation(t)).props("flat dense round size=sm color=primary").tooltip(
-            "Dicter : un clic pour parler, un clic pour arrêter").mark(f"dictate-{target}")
+        if compact:  # dans la capsule d'outils de la rédaction
+            btn = tbtn("mic", "Dicter", lambda t=target: self.toggle_dictation(t)).tooltip("Dicter : un clic pour parler, un clic pour arrêter").mark(f"dictate-{target}")
+            btn._compact = True
+        else:
+            btn = ui.button(icon="mic", on_click=lambda t=target: self.toggle_dictation(t)).props("flat dense round size=sm color=primary").tooltip(
+                "Dicter : un clic pour parler, un clic pour arrêter").mark(f"dictate-{target}")
         status = ui.label("").classes("rmeta").style("max-width:340px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-style:italic").mark(f"dictate-status-{target}")
         self.dict_widgets = getattr(self, "dict_widgets", {})
         self.dict_widgets[target] = (btn, status)
@@ -85,7 +90,14 @@ class DictationMixin:
     def _dict_paint(self, target: str, recording: bool, text: str = "") -> None:
         btn, status = getattr(self, "dict_widgets", {}).get(target, (None, None))
         try:
-            if btn is not None:
+            if btn is not None and getattr(btn, "_compact", False):
+                btn.text = "Arrêter" if recording else "Dicter"
+                btn.clear()
+                with btn:
+                    ui.html(icons.svg("stop" if recording else "mic", 18), sanitize=False)
+                btn.classes(add="abrec") if recording else btn.classes(remove="abrec")
+                btn.update()
+            elif btn is not None:
                 btn.props(f"icon={'stop' if recording else 'mic'} color={'negative' if recording else 'primary'}")
                 btn.update()
             if status is not None:

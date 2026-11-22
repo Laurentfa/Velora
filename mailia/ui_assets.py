@@ -110,6 +110,16 @@ body.resizing iframe{pointer-events:none}
 .aseg .abia:hover{background:var(--sel);color:var(--ai)}
 .qchip{background:var(--surface2);color:var(--text);border-radius:12px;min-height:24px;padding:0 10px;font-size:12.5px}
 .qchip:hover{background:var(--accent-soft)!important;color:var(--accent)}
+.aseg .abt{padding:0 10px;font-size:13px;font-weight:400;min-height:32px;color:var(--text)}
+.aseg .q-btn .q-btn__content>div:has(>svg){order:-1}
+.aseg .abt:hover{background:var(--accent-soft);color:var(--accent)}
+.aseg .abt.abneg{color:var(--hi)}
+.aseg .abt.abrec{background:var(--hi-soft);color:var(--hi)}
+.abtop{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;width:100%;margin-top:6px}
+.absend{background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 84%,#fff),var(--accent))!important;color:#fff!important;min-height:36px;padding:0 22px!important;border-radius:10px;font-weight:600;font-size:14px}
+.absend:hover{filter:brightness(.95)}
+.abcancel{min-height:36px;padding:0 14px!important;border-radius:10px;color:var(--muted)!important}
+.abcancel:hover{background:var(--surface2)!important;color:var(--text)!important}
 .lhead{box-sizing:border-box;height:132.5px;padding:26.5px 14px 0;border-bottom:1px solid var(--line);width:100%}
 .lhead .title{font-size:19px;font-weight:700;letter-spacing:-.02em}
 .ephem{display:flex;align-items:center;flex-wrap:wrap;font-size:13px;color:var(--muted);margin-top:1px}.eph-i{display:inline-flex;align-items:center;gap:3px}.eph-i img{width:24px;height:24px;margin:-3px 0}.ephem .sep{margin:0 8px}
@@ -500,6 +510,15 @@ SWIPE_JS = """<script>
     const root = document.querySelector('.root');
     if (root) root.dispatchEvent(new CustomEvent('agslot', {detail: {day: col.dataset.day, min: min}}));
   });
+  // Première ligne : si tout ce qui précède la signature (ou la citation) est vide, c'est là que le texte démarre ; sinon, juste au-dessus d'elle.
+  const startSlot = (c, mark) => {
+    if (!mark) return null;
+    const blank = el => !el.textContent.trim() && !el.querySelector('img,table');
+    const first = c.firstElementChild;
+    if (!first || first === mark || first.contains(mark)) return null;
+    for (let e = first; e && e !== mark && !e.contains(mark); e = e.nextElementSibling) if (!blank(e)) return null;
+    return first;
+  };
   window.mailiaLive = (htmlId, text, mode) => {
     const root = document.getElementById(htmlId);
     const c = root && root.querySelector('.q-editor__content');
@@ -515,8 +534,9 @@ SWIPE_JS = """<script>
       else {
         r = document.createRange();
         if (mark) {
-          const prev = mark.previousElementSibling;
-          if (prev && !prev.textContent.trim() && !prev.querySelector('img,table')) { r.selectNodeContents(prev); r.collapse(true); }
+          const top = startSlot(c, mark), prev = mark.previousElementSibling;
+          if (top) { r.selectNodeContents(top); r.collapse(true); }
+          else if (prev && !prev.textContent.trim() && !prev.querySelector('img,table')) { r.selectNodeContents(prev); r.collapse(true); }
           else { r.setStartBefore(mark); r.collapse(true); }
         } else { r.selectNodeContents(c); r.collapse(false); }
       }
@@ -594,8 +614,10 @@ SWIPE_JS = """<script>
     else {
       const r = document.createRange();
       if (mark) {
+        const top = startSlot(c, mark);
         let prev = mark.previousElementSibling;
-        if (prev && !prev.textContent.trim() && !prev.querySelector('img,table')) { r.selectNodeContents(prev); r.collapse(true); }
+        if (top) { r.selectNodeContents(top); r.collapse(true); }
+        else if (prev && !prev.textContent.trim() && !prev.querySelector('img,table')) { r.selectNodeContents(prev); r.collapse(true); }
         else { r.setStartBefore(mark); r.collapse(true); }
       } else { r.selectNodeContents(c); r.collapse(false); }
       s.removeAllRanges(); s.addRange(r);
