@@ -99,6 +99,7 @@ from mailia.ui_search import SearchMixin
 from mailia.ui_settings import open_settings
 from mailia.ui_tasks import TasksMixin
 from mailia.ui_update import auto_check
+from mailia.ui_vulnwatch import auto_check as vuln_auto_check
 from mailia.ui_aishare import notice_once as ai_share_notice, notice_settings_once as settings_notice
 from mailia import ui_weather
 from mailia.ui_weather import WeatherMixin
@@ -2225,6 +2226,8 @@ async def index_page() -> None:
     ui.timer(5, box.autosave)
     ui.timer(2, box.watch_outbox)
     ui.timer(20, auto_check, once=True)  # laisse l'appli s'afficher d'abord
+    ui.timer(90, vuln_auto_check, once=True)  # avis de sécurité des composants : une vérification par semaine au plus (voir vulnwatch)
+    ui.timer(6 * 3600, vuln_auto_check)
     ui.timer(600, auto_check)  # puis toutes les 10 minutes : la recherche a lieu toutes les 6 heures, l'installation attend un moment calme
     ui.timer(35, ai_share_notice, once=True)  # avis unique : le partage des analyses entre ordinateurs
     ui.timer(55, settings_notice, once=True)  # avis unique : les consignes de l'IA suivent d'un ordinateur à l'autre

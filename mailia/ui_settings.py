@@ -203,6 +203,8 @@ def _tab_about() -> None:
             with ui.row().classes("items-baseline gap-3 no-wrap"):
                 ui.label("Projet").classes("rmeta").style("width:70px;font-weight:600")
                 ui.link(f"github.com/{UPDATE_REPO}", f"https://github.com/{UPDATE_REPO}", new_tab=True)
+    from . import ui_vulnwatch
+    ui_vulnwatch.panel()
     ui.label("© Laurent Fauvel. Logiciel gratuit.").classes("rmeta q-mt-lg")
 
 

@@ -33,6 +33,13 @@ jobs:
           python -m venv .venv
           PY=$([ "$RUNNER_OS" = Windows ] && echo .venv/Scripts/python || echo .venv/bin/python)
           $PY -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Avis de sécurité des dépendances
+        shell: bash
+        run: |
+          PY=$([ "$RUNNER_OS" = Windows ] && echo .venv/Scripts/python || echo .venv/bin/python)
+          $PY -m pip install pip-audit
+          # une version qui embarque une bibliothèque avec une faille connue n'est pas publiée (pour passer outre un avis sans objet : ajouter --ignore-vuln <identifiant>)
+          $PY -m pip_audit -r requirements.txt
       - name: Tests
         shell: bash
         run: |

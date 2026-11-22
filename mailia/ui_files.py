@@ -196,7 +196,7 @@ class FilesMixin:
         except Exception as e:
             return ui.notify(f"Aperçu impossible : {e}", type="negative", multi_line=True)
         await self.show_preview(name, data, f"{m['id']}:{att['id']}", lambda: self.download(att, m), excluded=aipolicy.is_excluded(m),
-                                send=lambda: self.attach_to_new(name, data, att.get("type") or "application/octet-stream"))
+                                send=lambda: self.attach_to_new(name, data, att.get("type") or "application/octet-stream"), source=m)
 
     async def preview_draft(self, f: tuple) -> None:
         """Aperçu d'une pièce jointe du message en cours de rédaction (un scan, par exemple) : aperçu et résumé IA avant l'envoi."""
@@ -221,7 +221,16 @@ class FilesMixin:
             data, name = await run.io_bound(sync.fetch_attachment, m, att)
         except Exception as e:
             return ui.notify(f"Lecture impossible : {e}", type="negative", multi_line=True)
-        info = {"name": name, "size": len(data), "type": att.get("type") or "", "message_id": m["id"], "account": m["account"], "subject": m.get("subject") or "", "sender": m.get("sender") or ""}
+        await self.hand_to_module(it, name, data, att.get("type") or "", m)
+
+    async def hand_to_module(self, it: dict, name: str, data: bytes, mime: str = "", msg: dict | None = None) -> None:
+        """Confie un fichier déjà lu à un module (bouton d'une pièce jointe ou de l'aperçu) ; le module peut rendre une vue de lui, que Velora ouvre."""
+        if security.risky_attachment(name):
+            return ui.notify("Ce fichier est dangereux : il ne peut pas être confié à un module.", type="warning")
+        if len(data) > 25 * 1024 * 1024:
+            return ui.notify("Fichier trop volumineux (25 Mo au maximum).", type="warning")
+        m = msg or {}
+        info = {"name": name, "size": len(data), "type": mime, "message_id": m.get("id", ""), "account": m.get("account", ""), "subject": m.get("subject") or "", "sender": m.get("sender") or ""}
         try:
             vid = await run.io_bound(it["fn"], info, data)
         except Exception as e:  # noqa: BLE001 — l'erreur d'un module reste dans son coin
@@ -241,7 +250,7 @@ class FilesMixin:
         self.files_view.refresh()
         self.reader.refresh()
 
-    async def show_preview(self, name: str, data: bytes, key: str, download, excluded: bool = False, send=None) -> None:
+    async def show_preview(self, name: str, data: bytes, key: str, download, excluded: bool = False, send=None, source: dict | None = None) -> None:
         import shutil
         import tempfile
         kind = self.preview_kind(name)
@@ -294,6 +303,11 @@ class FilesMixin:
                         await send()
                     ui.button("Envoyer", icon="forward_to_inbox", on_click=send_it).props("flat dense no-caps color=primary").tooltip(
                         "Écrire un nouveau mail avec cette pièce jointe déjà jointe")
+                for it in modules.attachment_actions(name):  # boutons des modules (ex. « Modifier le PDF ») : le fichier leur est confié, l'aperçu se ferme
+                    async def hand_over(it=it) -> None:
+                        dlg.close()
+                        await self.hand_to_module(it, name, data, "", source)
+                    ui.button(it["label"], icon=it["icon"], on_click=hand_over).props("flat dense no-caps color=primary").tooltip(f"{it['label']} : {name}")
                 ui.button("Télécharger", icon="download", on_click=download).props("flat dense no-caps color=primary")
                 ui.button(icon="close", on_click=dlg.close).props("flat round dense")
             sum_box = ui.element("div").style(

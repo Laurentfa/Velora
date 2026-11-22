@@ -95,3 +95,25 @@ async def test_new_message_from_a_module_page_returns_to_the_mail_list(user: Use
     with user.client:
         await b.open_new_message()
     assert (b.view, b.account, b.folder) == ("folder", "testbox", "Archive") and b.new  # on revient là où on était
+
+
+async def test_a_file_handed_to_a_module_from_the_preview_reaches_it_and_opens_its_view(user: User, box) -> None:
+    """Le bouton d'un module dans l'aperçu (« Modifier le PDF ») lui confie le fichier avec le message d'origine, puis ouvre sa vue ; jamais un fichier dangereux ou trop gros."""
+    seen, built, va, vb = box
+    await user.open("/")
+    b = seen[-1]
+    got: list = []
+    it = {"module": "essai", "label": "Modifier le PDF", "icon": "edit", "ext": (".pdf",), "fn": lambda info, data: (got.append((info, data)), va)[1]}
+    msg = {"id": "m1", "account": "testbox", "subject": "Facture", "sender": "a@x.fr"}
+    with user.client:
+        await b.hand_to_module(it, "Devis.pdf", b"%PDF-1.4 x", "application/pdf", msg)
+    assert got and got[0][0] == {"name": "Devis.pdf", "size": 10, "type": "application/pdf", "message_id": "m1", "account": "testbox", "subject": "Facture", "sender": "a@x.fr"}
+    assert got[0][1] == b"%PDF-1.4 x" and b.view == va  # le module a reçu le fichier, sa vue est ouverte
+    got.clear()
+    with user.client:
+        await b.hand_to_module(it, "virus.pdf.exe", b"x", "", msg)
+        await b.hand_to_module(it, "Gros.pdf", b"x" * (25 * 1024 * 1024 + 1), "", msg)
+    assert got == []  # dangereux ou trop gros : refusé sans même appeler le module
+    with user.client:
+        await b.hand_to_module(it, "Sans message.pdf", b"%PDF", "", None)
+    assert got[0][0]["message_id"] == "" and got[0][0]["name"] == "Sans message.pdf"  # aperçu d'un fichier hors message (brouillon, impression)
