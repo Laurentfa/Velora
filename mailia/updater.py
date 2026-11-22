@@ -30,11 +30,28 @@ SWAP_SCRIPT = """#!/bin/sh
 PID="$1"; NEW="$2"; DST="$3"; OPEN="${4:-open}"; LOG="${5:-/dev/null}"
 note() { echo "$(date '+%Y-%m-%d %H:%M:%S') mise à jour : $1" >> "$LOG" 2>/dev/null; }
 note "attente de la fermeture de Velora (processus $PID)"
+# empêche la mise en veille du Mac pendant le remplacement et le démarrage (une veille survenue en plein démarrage l'avait figé plus d'un quart d'heure)
+[ "$OPEN" = open ] && command -v caffeinate >/dev/null 2>&1 && { caffeinate -i -t 600 >/dev/null 2>&1 & }
 while kill -0 "$PID" 2>/dev/null; do sleep 0.5; done
 BAK="$DST.old"
 rm -rf "$BAK"
 if mv "$DST" "$BAK" && mv "$NEW" "$DST"; then rm -rf "$BAK"; note "application remplacée"; else [ -d "$BAK" ] && [ ! -d "$DST" ] && mv "$BAK" "$DST"; note "remplacement impossible, ancienne version remise"; fi
 "$OPEN" "$DST" && note "relance demandée" || note "relance impossible"
+# Vérifie que la nouvelle version a bien démarré (elle répond sur le port de la copie unique) ; sinon relance, jusqu'à trois essais.
+if [ "$OPEN" = open ]; then
+  TRY=0
+  while [ "$TRY" -lt 3 ]; do
+    N=0
+    while [ "$N" -lt 60 ]; do
+      nc -z 127.0.0.1 8764 >/dev/null 2>&1 && { note "Velora a démarré (après $((N * 2)) s)"; exit 0; }
+      sleep 2; N=$((N + 1))
+    done
+    TRY=$((TRY + 1))
+    note "Velora ne répond pas après 120 s : nouvelle relance ($TRY/3)"
+    "$OPEN" "$DST" || note "relance impossible"
+  done
+  note "Velora ne répond toujours pas : relancez-la à la main"
+fi
 """
 
 # Windows : attend la fermeture de Velora, lance l'installateur (silencieux) jusqu'au bout, puis relance Velora.
