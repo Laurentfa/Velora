@@ -470,6 +470,56 @@ def test_attachment_actions_are_offered_by_extension_and_removed_on_unload(mod_d
     assert not modules.attachment_actions("Facture.pdf")
 
 
+def test_a_module_scans_with_velora_scanners_and_phone(mod_dir, monkeypatch) -> None:
+    from mailia import scan
+    calls: list = []
+    monkeypatch.setattr(scan, "known", lambda: [{"name": "Brother", "base": "http://10.0.0.5/eSCL"}])
+    monkeypatch.setattr(scan, "discover", lambda t=3.0: [{"name": "HP", "base": "http://10.0.0.9/eSCL"}])
+    monkeypatch.setattr(scan, "remember", lambda name, base, used=False: calls.append(("remember", name, base, used)))
+    monkeypatch.setattr(scan, "capabilities", lambda base: {"name": "Epson"})
+    monkeypatch.setattr(scan, "scan", lambda base, source, color, dpi, caps=None: calls.append(("scan", base, source, color, dpi)) or [b"jpeg1", b"jpeg2"])
+    api = api_of(mod_dir)
+    assert api.scanners() == [{"id": "http://10.0.0.5/eSCL", "name": "Brother"}]
+    api.find_scanners(99)
+    assert ("remember", "HP", "http://10.0.0.9/eSCL", False) in calls
+    assert api.add_scanner("10.0.0.7") == {"id": "http://10.0.0.7/eSCL", "name": "Epson"}
+    assert api.scan_pages("http://10.0.0.5/eSCL", "feeder", "gray", 300) == [b"jpeg1", b"jpeg2"]
+    assert ("scan", "http://10.0.0.5/eSCL", "feeder", "gray", 300) in calls
+    for bad in ({"scanner_id": "http://evil/eSCL"}, {"scanner_id": "http://10.0.0.5/eSCL", "source": "x"}, {"scanner_id": "http://10.0.0.5/eSCL", "dpi": 5}):
+        with pytest.raises(ValueError):
+            api.scan_pages(**bad)
+
+    def boom(*a, **k):
+        raise scan.ScanError("occupé")
+    monkeypatch.setattr(scan, "scan", boom)
+    with pytest.raises(ValueError, match="occupé"):
+        api.scan_pages("http://10.0.0.5/eSCL")
+    stopped: list = []
+
+    class Srv:
+        class session:
+            pages = [b"p1"]
+            done = False
+            lock = __import__("threading").Lock()
+            expired = False
+
+        def url(self): return "http://10.0.0.1:1/s/t"
+        def stop(self): stopped.append(1)
+    monkeypatch.setattr(scan, "PhoneServer", Srv)
+    monkeypatch.setattr(scan, "qr_svg", lambda u: "<svg/>")
+    st = api.phone_scan_start()
+    assert st["url"].startswith("http://") and st["qr_svg"] == "<svg/>"
+    assert api.phone_scan_poll(st["id"], 0) == {"pages": [b"p1"], "seen": 1, "done": False}
+    assert api.phone_scan_poll(st["id"], 1)["pages"] == []
+    with pytest.raises(ValueError):
+        api_of(mod_dir, "autre").phone_scan_poll(st["id"])  # une numérisation n'est visible que de son module
+    api.phone_scan_stop(st["id"])
+    assert stopped == [1] and not modules.phone_scans
+    api.phone_scan_start()
+    modules.unload("demo")
+    assert len(stopped) == 2 and not modules.phone_scans
+
+
 @pytest.mark.parametrize("kwargs, text", [
     ({"account": "inconnue"}, "inconnue"), ({"account": "off"}, "off"), ({"account": "nopw"}, "nopw"),
     ({"to": "pas une adresse"}, "Adresse invalide"), ({"cc": "a@b"}, "Adresse invalide"),

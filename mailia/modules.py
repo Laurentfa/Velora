@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import uuid
 import zipfile
 from pathlib import Path
 
@@ -28,6 +29,7 @@ API_VERSION = 1
 DIR = config.DATA_DIR / "modules"
 views: dict[str, dict] = {}   # identifiant de vue -> {"title", "icon", "build", "module"}
 services: dict[str, dict] = {}  # services optionnels publiés par les modules : nom -> {"module", "fn"} (un module peut s'en servir s'il existe, et fonctionne sans sinon)
+phone_scans: dict[str, dict] = {}  # numérisations par téléphone ouvertes par des modules : identifiant -> {"module", "srv"} (arrêtées après 30 minutes, ou au déchargement du module)
 busy_tasks: dict[int, dict] = {}  # opérations longues en cours déclarées par les modules (jeton -> {"module", "label", "since"}) : tant qu'il y en a, Velora ne se met pas à jour tout seul
 _busy_lock = threading.Lock()
 _busy_counter = itertools.count(1)
@@ -303,6 +305,74 @@ class ModuleAPI:
         """Le brouillon existe-t-il encore (il disparaît quand l'utilisateur l'envoie ou le supprime) ?"""
         return db.draft_load(draft_id)[0] is not None
 
+    # ---------- numérisation (les scanners et le téléphone de Velora) ----------
+    def scanners(self) -> list[dict]:
+        """Les scanners réseau connus de Velora : [{"id", "name"}] (le dernier utilisé en premier). `id` se passe à scan_pages."""
+        from mailia import scan
+        return [{"id": s["base"], "name": s.get("name") or s["base"]} for s in scan.known()]
+
+    def find_scanners(self, timeout: float = 3.0) -> list[dict]:
+        """Cherche les scanners du réseau (AirScan / eSCL, quelques secondes : à appeler hors du fil de la fenêtre), les mémorise et rend la liste complète comme scanners()."""
+        from mailia import scan
+        for r in scan.discover(max(1.0, min(float(timeout), 10.0))):
+            scan.remember(r["name"], r["base"])
+        return self.scanners()
+
+    def add_scanner(self, address: str) -> dict:
+        """Ajoute un scanner par son adresse (« 192.168.1.20 »). Rend {"id", "name"} ; lève ValueError (message clair) s'il ne répond pas comme un scanner réseau."""
+        from mailia import scan
+        try:
+            base = scan.normalize_base(address)
+            caps = scan.capabilities(base)
+        except scan.ScanError as e:
+            raise ValueError(str(e))
+        scan.remember(caps["name"], base)
+        return {"id": base, "name": caps["name"]}
+
+    def scan_pages(self, scanner_id: str, source: str = "auto", color: str = "color", dpi: int = 200) -> list[bytes]:
+        """Numérise sur un scanner connu et rend les pages (JPEG). source : auto | platen | feeder | duplex ; color : color | gray | bw. Long : hors du fil de la fenêtre.
+        Lève ValueError (message clair) si le scanner est inconnu ou échoue."""
+        from mailia import scan
+        if scanner_id not in {s["base"] for s in scan.known()}:
+            raise ValueError("Scanner inconnu : cherchez-le ou ajoutez-le d'abord.")
+        if source not in ("auto", "platen", "feeder", "duplex") or color not in ("color", "gray", "bw") or not 50 <= int(dpi) <= 1200:
+            raise ValueError("Réglage de numérisation invalide.")
+        try:
+            pages = scan.scan(scanner_id, source, color, int(dpi))
+        except scan.ScanError as e:
+            raise ValueError(str(e))
+        scan.remember("", scanner_id, used=True)
+        return pages
+
+    def phone_scan_start(self) -> dict:
+        """Ouvre une numérisation par téléphone (même Wi-Fi) : rend {"id", "url", "qr_svg"}. L'utilisateur scanne le QR code ; les pages photographiées et recadrées arrivent par phone_scan_poll.
+        Elle s'arrête d'elle-même après 30 minutes, ou par phone_scan_stop."""
+        from mailia import scan
+        _phone_cleanup()
+        if sum(1 for v in phone_scans.values() if v["module"] == self.id) >= 2:
+            raise ValueError("Trop de numérisations par téléphone ouvertes.")
+        srv = scan.PhoneServer()
+        sid = uuid.uuid4().hex[:12]
+        phone_scans[sid] = {"module": self.id, "srv": srv}
+        url = srv.url()
+        return {"id": sid, "url": url, "qr_svg": scan.qr_svg(url)}
+
+    def phone_scan_poll(self, scan_id: str, seen: int = 0) -> dict:
+        """Les pages reçues depuis la position `seen` : {"pages": [JPEG], "seen": nouvelle position, "done": le téléphone a terminé}."""
+        v = phone_scans.get(scan_id)
+        if not v or v["module"] != self.id:
+            raise ValueError("Numérisation inconnue ou terminée.")
+        sess = v["srv"].session
+        with sess.lock:
+            new = list(sess.pages[int(seen):])
+            return {"pages": new, "seen": int(seen) + len(new), "done": bool(sess.done)}
+
+    def phone_scan_stop(self, scan_id: str) -> None:
+        v = phone_scans.get(scan_id)
+        if v and v["module"] == self.id:
+            phone_scans.pop(scan_id, None)
+            v["srv"].stop()
+
     def on_attachment(self, label: str, icon: str, extensions, fn) -> None:
         """(icon : nom d'icône Material, ex. "edit".) Ajoute un bouton à côté des pièces jointes reçues dont le nom finit par l'une des `extensions` (ex. (".pdf",)). Au clic, Velora télécharge la pièce jointe (jamais un fichier
         dangereux, 25 Mo au plus) et appelle fn(info, data) hors du fil de la fenêtre : info = {"name", "size", "type", "message_id", "account", "subject", "sender"}, data = octets. fn peut rendre
@@ -406,6 +476,7 @@ def unload(mid: str) -> None:
         lst[:] = [x for x in lst if x["module"] != mid]
     for name in [n for n, it in services.items() if it["module"] == mid]:
         services.pop(name, None)
+    _phone_cleanup(mid)
     status.pop(mid, None)
     from mailia import updater
     updater.hooks.pop(mid, None)  # une source de mise à jour ajoutée par ce module
@@ -509,6 +580,14 @@ def _run_hover(mid: str) -> None:
             it["fn"](dict(message))
         except Exception:  # noqa: BLE001 — l'erreur d'un module ne gêne ni la liste ni les autres modules
             log.debug("module %s : survol en erreur", it["module"], exc_info=True)
+
+
+def _phone_cleanup(module: str | None = None) -> None:
+    """Arrête les numérisations par téléphone expirées (ou toutes celles d'un module qu'on décharge)."""
+    for sid, v in list(phone_scans.items()):
+        if (module and v["module"] == module) or v["srv"].session.expired:
+            phone_scans.pop(sid, None)
+            v["srv"].stop()
 
 
 def attachment_actions(name: str) -> list[dict]:
