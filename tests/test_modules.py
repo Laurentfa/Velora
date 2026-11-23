@@ -658,3 +658,118 @@ def test_unloading_a_module_removes_its_sent_hook(mod_dir) -> None:
     assert any(x["module"] == "tmp" for x in modules.slots["sent"])
     modules.unload("tmp")
     assert not any(x["module"] == "tmp" for x in modules.slots["sent"])
+
+
+# ---------- envoi automatique : réservé aux modules que l'utilisateur a autorisés, éteint par défaut ----------
+@pytest.fixture
+def mailbox(monkeypatch):
+    """Une boîte connectée ; l'envoi réel (sync.send_mail) est un piège : la file d'envoi de Velora, elle, fonctionne (base de test)."""
+    from mailia.config import AccountCfg
+    monkeypatch.setattr(sync, "ACCOUNTS", {"a": AccountCfg(key="a", label="A", kind="ews", email="a@x.fr", login="a", password="pw", ai_enabled=False, enabled=True)})
+    monkeypatch.setattr(sync, "send_mail", lambda *a, **k: (_ for _ in ()).throw(AssertionError("l'envoi réel ne doit pas être appelé : seulement la file")))
+    for k in ("modules_send_allowed", "modules_send_cap"):
+        db.kv_set(k, "")
+    yield "a"
+    db.kv_set("modules_send_allowed", "")
+    db.kv_set("modules_send_cap", "")
+
+
+def test_a_module_cannot_send_without_the_users_authorisation(mod_dir, mailbox) -> None:
+    api = api_of(mod_dir)
+    did = api.create_draft("a", "dr@x.fr", "S", "<p>x</p>")
+    assert api.can_send() is False and modules.send_allowed_ids() == set()
+    with pytest.raises(PermissionError, match="interrupteur"):
+        api.send_draft(did)
+    assert db.outbox_list() == [] and api.draft_exists(did)  # rien n'est parti, le brouillon est intact
+
+
+def test_an_authorised_module_queues_its_own_draft_with_the_undo_delay(mod_dir, mailbox) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from mailia import outgoing
+    api = api_of(mod_dir)
+    modules.set_send_allowed("demo", True)
+    assert api.can_send() and modules.send_allowed_ids() == {"demo"} and not api_of(mod_dir, "autre").can_send()  # l'autorisation est propre à chaque module
+    did = api.create_draft("a", "dr@x.fr", "Suivi", "<p>x</p>", [("r.pdf", b"%PDF", "application/pdf")], cc="cc@x.fr")
+    before = datetime.now(timezone.utc)
+    oid = api.send_draft(did)
+    row = db.outbox_get(oid)
+    assert row["status"] == "pending" and row["source"] == "module:demo" and row["to_addrs"] == "dr@x.fr" and row["cc"] == "cc@x.fr" and row["subject"] == "Suivi" and row["draft_id"] == did
+    assert db.outbox_files(oid) == [("r.pdf", b"%PDF", "application/pdf")]
+    assert datetime.fromisoformat(row["send_at"]) >= before + timedelta(seconds=outgoing.undo_delay()) - timedelta(seconds=2)  # jamais avant le délai d'annulation
+    assert not api.draft_exists(did)  # le brouillon est devenu un envoi en file (et peut y être annulé)
+    later = api.send_draft(api.create_draft("a", "dr@x.fr", "S2", "<p>y</p>"), delay_seconds=10 ** 9)
+    assert datetime.fromisoformat(db.outbox_get(later)["send_at"]) <= datetime.now(timezone.utc) + timedelta(days=7, minutes=1)  # report plafonné à 7 jours
+
+
+def test_a_module_cannot_send_a_draft_it_did_not_prepare(mod_dir, mailbox) -> None:
+    api = api_of(mod_dir)
+    modules.set_send_allowed("demo", True)
+    mine = db.new_draft_id() if hasattr(db, "new_draft_id") else "user-draft"
+    db.draft_save({"id": mine, "account": "a", "is_new": True, "reply_to": None, "to": "dr@x.fr", "cc": "", "bcc": "", "subject": "À moi", "html": "<p>x</p>"}, [])
+    with pytest.raises(PermissionError, match="pas été préparé par ce module"):
+        api.send_draft(mine)
+    other = api_of(mod_dir, "autre").create_draft("a", "dr@x.fr", "Autre", "<p>x</p>")
+    with pytest.raises(PermissionError, match="pas été préparé par ce module"):
+        api.send_draft(other)
+    assert db.outbox_list() == []
+
+
+def test_sending_needs_a_recipient_a_valid_mailbox_and_an_existing_draft(mod_dir, mailbox) -> None:
+    api = api_of(mod_dir)
+    modules.set_send_allowed("demo", True)
+    with pytest.raises(ValueError, match="introuvable"):
+        api.send_draft("inconnu")
+    with pytest.raises(ValueError, match="destinataire"):
+        api.send_draft(api.create_draft("a", "", "Sans destinataire", "<p>x</p>"))
+    assert db.outbox_list() == []
+
+
+def test_the_daily_cap_and_the_revocation_stop_a_module(mod_dir, mailbox) -> None:
+    api = api_of(mod_dir)
+    modules.set_send_allowed("demo", True)
+    db.kv_set("modules_send_cap", "2")
+    for i in range(2):
+        api.send_draft(api.create_draft("a", "dr@x.fr", f"S{i}", "<p>x</p>"))
+    third = api.create_draft("a", "dr@x.fr", "S3", "<p>x</p>")
+    with pytest.raises(PermissionError, match="Plafond"):
+        api.send_draft(third)
+    assert len(db.outbox_list()) == 2 and api.draft_exists(third)
+    db.kv_set("modules_send_cap", "")
+    modules.set_send_allowed("demo", False)  # l'utilisateur retire l'autorisation : plus rien ne part
+    with pytest.raises(PermissionError, match="interrupteur"):
+        api.send_draft(third)
+
+
+def test_a_module_declares_that_it_can_send_and_the_switch_is_off_by_default(mod_dir) -> None:
+    (mod_dir / "m1").mkdir()
+    (mod_dir / "m1" / "module.json").write_text(json.dumps({"name": "M1", "version": "1", "sends_mail": True}), encoding="utf-8")
+    (mod_dir / "m1" / "module.py").write_text("def register(api):\n    pass\n", encoding="utf-8")
+    (mod_dir / "m2").mkdir()
+    (mod_dir / "m2" / "module.json").write_text(json.dumps({"name": "M2", "version": "1"}), encoding="utf-8")
+    (mod_dir / "m2" / "module.py").write_text("def register(api):\n    pass\n", encoding="utf-8")
+    found = {i["id"]: i for i in modules.discover()}
+    assert found["m1"].get("sends_mail") is True and not found["m2"].get("sends_mail")
+    assert "m1" not in modules.send_allowed_ids()  # déclarer ne suffit pas : l'utilisateur doit autoriser
+
+
+async def test_settings_offers_the_send_switch_only_to_modules_that_declare_it(user: User, mod_dir) -> None:
+    make(mod_dir, "alpha", "def register(api): pass\n")
+    make(mod_dir, "beta", "def register(api): pass\n", sends_mail=True)
+    db.kv_set("modules_on", "1")
+    db.kv_set("modules_send_allowed", "")
+
+    @ui.page("/settings-modules-send")
+    def page() -> None:
+        open_settings(ui.element("div"), lambda acct: None)
+    await user.open("/settings-modules-send")
+    await user.should_see("Importer un module")
+    with pytest.raises(AssertionError):  # pas de déclaration : pas d'interrupteur
+        user.find(marker="module-send-alpha")
+    user.find(marker="module-send-beta").click()  # allumer demande une confirmation, rien n'est encore autorisé
+    await user.should_see("Autoriser « Beta » à envoyer des mails ?")
+    assert modules.send_allowed_ids() == set()
+    user.find(marker="module-send-confirm").click()
+    await user.should_see("Envoi automatique autorisé")
+    assert modules.send_allowed_ids() == {"beta"}
+    db.kv_set("modules_send_allowed", "")

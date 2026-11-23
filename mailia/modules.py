@@ -253,7 +253,7 @@ def remove_module(mid: str) -> None:
 
 
 def discover() -> list[dict]:
-    """Les modules présents dans le dossier : {id, name, version, description, api, error?}."""
+    """Les modules présents dans le dossier : {id, name, version, description, api, sends_mail?, error?}. sends_mail : le module déclare pouvoir mettre des mails en file d'envoi (voir ModuleAPI.send_draft) : Velora propose alors l'interrupteur d'autorisation, éteint par défaut."""
     out = []
     try:
         DIR.mkdir(parents=True, exist_ok=True)  # le dossier existe toujours : l'utilisateur n'a rien à créer à la main
@@ -264,13 +264,31 @@ def discover() -> list[dict]:
     for d in sorted(p for p in DIR.iterdir() if p.is_dir() and not p.name.startswith((".", "_"))):
         info = {"id": d.name, "name": d.name, "version": "", "description": "", "api": 1, "dir": d}
         try:
-            info.update({k: v for k, v in json.loads((d / "module.json").read_text(encoding="utf-8")).items() if k in ("name", "version", "description", "api")})
+            info.update({k: v for k, v in json.loads((d / "module.json").read_text(encoding="utf-8")).items() if k in ("name", "version", "description", "api", "sends_mail")})
         except (OSError, ValueError):
             info["error"] = "module.json absent ou illisible"
         if not (d / "module.py").is_file():
             info["error"] = info.get("error") or "module.py absent"
         out.append(info)
     return out
+
+
+SEND_CAP_DEFAULT = 50  # envois automatiques par module et par jour au plus (réglage « modules_send_cap »)
+_send_lock = threading.Lock()
+
+
+def send_allowed_ids() -> set[str]:
+    """Modules que l'utilisateur a autorisés à mettre des mails en file d'envoi (Paramètres › Modules). Vide par défaut : un module ne peut jamais envoyer sans cette autorisation."""
+    try:
+        return set(json.loads(db.kv_get("modules_send_allowed") or "[]"))
+    except ValueError:
+        return set()
+
+
+def set_send_allowed(mid: str, on: bool) -> None:
+    ids = send_allowed_ids()
+    ids.add(mid) if on else ids.discard(mid)
+    db.kv_set("modules_send_allowed", json.dumps(sorted(ids)))
 
 
 class ModuleAPI:
@@ -306,8 +324,8 @@ class ModuleAPI:
         return [{"key": k, "email": c.email, "label": c.label} for k, c in sync.ACCOUNTS.items() if c.password and c.enabled]
 
     def create_draft(self, account: str, to: str, subject: str, html: str, files: list | None = None, cc: str = "", bcc: str = "", signature: bool = True, reply_to_message: str = "") -> str:
-        """Prépare un brouillon dans Velora (vue « Brouillons », copié sur le serveur de la boîte comme tout brouillon) et rend son identifiant. NE L'ENVOIE JAMAIS : c'est l'utilisateur qui le relit et
-        l'envoie (par la file d'envoi de Velora, avec son délai d'annulation). `to`, `cc`, `bcc` : adresses séparées par des virgules (`to` peut rester vide : l'utilisateur le complète). `html` est nettoyé
+        """Prépare un brouillon dans Velora (vue « Brouillons », copié sur le serveur de la boîte comme tout brouillon) et rend son identifiant. NE L'ENVOIE JAMAIS lui-même : c'est l'utilisateur qui le relit et
+        l'envoie (sauf `send_draft`, réservée aux modules que l'utilisateur a expressément autorisés) (par la file d'envoi de Velora, avec son délai d'annulation). `to`, `cc`, `bcc` : adresses séparées par des virgules (`to` peut rester vide : l'utilisateur le complète). `html` est nettoyé
         comme tout message sortant ; la signature de la boîte est ajoutée (signature=False : sans). `files` : [(nom, octets, type MIME)], 25 Mo au plus en tout. Lève ValueError (message clair) si la
         boîte, une adresse ou une pièce jointe n'est pas acceptable.
         reply_to_message : identifiant d'un message reçu auquel répondre : le brouillon est alors une réponse (boîte du message, destinataire et objet « Re : … » si vous les laissez vides, message cité sous le texte).
@@ -351,6 +369,46 @@ class ModuleAPI:
         db.draft_mark_module(did, self.id)
         self.log.info("brouillon préparé (%s pièce(s) jointe(s))", len(files))
         return did
+
+    def can_send(self) -> bool:
+        """L'utilisateur a-t-il autorisé ce module à mettre des mails en file d'envoi ? (interrupteur de Paramètres › Modules, éteint par défaut ; réservé aux modules qui déclarent « sends_mail » dans module.json)."""
+        return self.id in send_allowed_ids()
+
+    def send_draft(self, draft_id: str, delay_seconds: int = 0) -> str:
+        """Met dans la file d'envoi de Velora un brouillon que CE module a préparé (create_draft) et rend l'identifiant de l'envoi. Rien ne part tout de suite : le message suit les règles de tout envoi
+        (délai d'annulation de l'utilisateur, au plus tôt ; `delay_seconds` le repousse, 7 jours au plus), il apparaît dans la file d'envoi et peut y être annulé, puis redevient un brouillon.
+        Lève PermissionError si le module n'est pas autorisé (interrupteur éteint), si le brouillon n'est pas le sien ou si le plafond du jour est atteint (50 par défaut), et ValueError si le brouillon est
+        introuvable, sans destinataire ou sans boîte valide. Garde-fous : jamais un brouillon d'un autre module ni de l'utilisateur, jamais sans destinataire, un journal à chaque envoi."""
+        from datetime import datetime, timedelta
+
+        from mailia import outgoing
+        if not self.can_send():
+            raise PermissionError("Ce module n'est pas autorisé à envoyer des mails : l'interrupteur « Envoi automatique de mails » est éteint (Paramètres › Modules).")
+        d, files = db.draft_load(draft_id)
+        if d is None:
+            raise ValueError("Brouillon introuvable (déjà envoyé ou supprimé).")
+        if (d.get("source") or "") != f"module:{self.id}":
+            raise PermissionError("Ce brouillon n'a pas été préparé par ce module : il ne peut pas l'envoyer.")
+        if not (d.get("to_addrs") or "").strip():
+            raise ValueError("Le brouillon n'a pas de destinataire.")
+        if d["account"] not in {a["key"] for a in self.mail_accounts()}:
+            raise ValueError(f"Boîte « {d['account']} » inconnue ou non connectée.")
+        try:
+            cap = max(1, int(db.kv_get("modules_send_cap") or SEND_CAP_DEFAULT))
+        except ValueError:
+            cap = SEND_CAP_DEFAULT
+        day = datetime.now().strftime("%Y-%m-%d")
+        key = f"modsend:{self.id}:{day}"
+        with _send_lock:
+            done = int(db.kv_get(key) or 0)
+            if done >= cap:
+                raise PermissionError(f"Plafond atteint : {cap} envoi(s) automatique(s) par jour pour ce module.")
+            at = outgoing.earliest() + timedelta(seconds=max(0, min(int(delay_seconds or 0), 7 * 86400)))
+            oid = outgoing.queue(d["account"], d["to_addrs"], d.get("cc") or "", d.get("bcc") or "", d["subject"], d["html"], files, at, draft_id=draft_id, reply_to=d.get("reply_to"),
+                                 source=f"module:{self.id}")
+            db.kv_set(key, str(done + 1))
+        self.log.info("envoi automatique mis en file (%d aujourd'hui sur %d)", done + 1, cap)
+        return oid
 
     def draft_exists(self, draft_id: str) -> bool:
         """Le brouillon existe-t-il encore (il disparaît quand l'utilisateur l'envoie ou le supprime) ?"""

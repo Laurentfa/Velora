@@ -85,6 +85,11 @@ def modules_settings() -> None:
                             ui.button(icon="sync", on_click=lambda i=info["id"], p=src: update_from_source(i, p)).props("flat round dense color=primary").tooltip(
                                 f"Mettre à jour depuis {src}").mark(f"module-update-{info['id']}")
                         ui.button(icon="delete_outline", on_click=lambda i=info: ask_remove(i)).props("flat round dense color=grey").tooltip("Supprimer ce module").mark(f"module-delete-{info['id']}")
+                    if info.get("sends_mail") and not info.get("error"):  # le module déclare pouvoir mettre des mails en file d'envoi : autorisation distincte, éteinte par défaut
+                        with ui.row().classes("items-center gap-2 w-full no-wrap").style("padding-left:40px"):
+                            ui.switch("Autoriser l'envoi automatique de mails", value=info["id"] in modules.send_allowed_ids(),
+                                      on_change=lambda e, i=info: ask_send(i, bool(e.value))).props("dense color=negative keep-color").style("color:#b3261e;font-weight:600").mark(f"module-send-{info['id']}")
+                            ui.label("Éteint : le module prépare seulement des brouillons, que vous envoyez.").classes("text-caption text-grey")
             with ui.row().classes("items-center gap-2 q-mt-sm w-full no-wrap"):
                 repo = ui.input("Dépôt GitHub des modules", value=db.kv_get("modules_repo") or "", placeholder="moncompte/mes-modules").props("dense outlined stack-label").classes("col").mark("modules-repo")
                 repo.on("blur", lambda: db.kv_set("modules_repo", (repo.value or "").strip()))
@@ -174,6 +179,26 @@ def modules_settings() -> None:
             f = Path(d) / (Path(e.file.name).name or "module.zip")
             f.write_bytes(data)
             await import_from(f)
+
+    async def ask_send(info: dict, on: bool) -> None:
+        """Autoriser (avec confirmation) ou retirer l'autorisation d'envoi : un module autorisé peut mettre en file d'envoi les brouillons qu'il a lui-même préparés, sans que vous les relisiez."""
+        if not on:
+            modules.set_send_allowed(info["id"], False)
+            ui.notify("Envoi automatique retiré : ce module ne prépare plus que des brouillons.", type="positive")
+            return draw()
+        from mailia import outgoing
+        with ui.dialog() as dlg, ui.card().style("max-width:520px"):
+            ui.label(f"Autoriser « {info['name']} » à envoyer des mails ?").classes("text-h6")
+            ui.label("Le module pourra mettre en file d'envoi, sans que vous les releviez, les brouillons qu'il a lui-même préparés. Chaque message garde le délai d'annulation "
+                     f"de Velora ({outgoing.undo_delay()} s) et apparaît dans la file d'envoi, où vous pouvez l'annuler ; au plus {modules.SEND_CAP_DEFAULT} envois par jour. "
+                     "Il ne peut jamais envoyer un brouillon qu'il n'a pas préparé. Le module a aussi son propre interrupteur, qu'il faut allumer pour qu'il envoie réellement.").classes("text-body2")
+            with ui.row().classes("justify-end w-full gap-2"):
+                ui.button("Annuler", on_click=lambda: dlg.submit(False)).props("flat no-caps")
+                ui.button("Autoriser", on_click=lambda: dlg.submit(True)).props("unelevated no-caps color=negative").mark("module-send-confirm")
+        if await dlg:
+            modules.set_send_allowed(info["id"], True)
+            ui.notify("Envoi automatique autorisé pour ce module.", type="warning")
+        draw()
 
     async def ask_remove(info: dict) -> None:
         with ui.dialog() as dlg, ui.card().style("max-width:480px"):
