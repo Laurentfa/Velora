@@ -69,7 +69,7 @@ os.environ.setdefault("NICEGUI_STORAGE_PATH", str(_config.DATA_DIR / ".nicegui")
 
 from nicegui import Client, app, background_tasks, native, run, ui
 
-from mailia import ai, aipolicy, apiserver, compose, config, db, folder_order, folder_tree, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, vault, wizard
+from mailia import ai, aipolicy, apiserver, compose, config, db, folder_order, folder_tree, htmlmail, i18n, logs, notify, queries, search, security, settings_ui, sync, tile_order, vault, wizard
 from html import escape as html_escape
 from mailia import alerts, chromebridge, fleet, health, modules, ui_fleet
 from mailia.mailpdf import message_pdf
@@ -290,6 +290,15 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         folder_order.save(acct, new)
         self.side.refresh()
 
+    def tile_dropped(self, args: dict | None, target: str) -> None:
+        """Une tuile de module a été déposée avant ou après `target` : l'ordre est mémorisé (préférence d'affichage)."""
+        d = (args or {}).get("detail") or {}
+        new = tile_order.move(list(modules.views), tile_order.load(), d.get("from", ""), target, bool(d.get("after")))
+        if new is None:
+            return
+        tile_order.save(new)
+        self.side.refresh()
+
     def folders_folded(self) -> set[str]:
         """Dossiers dont les sous-dossiers sont repliés (« boîte|clé »)."""
         try:
@@ -406,8 +415,12 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         with ui.scroll_area().classes("sidescroll"):  # seule cette partie défile : l'en-tête et les boutons du bas restent en place
             if modules.views:  # pages ajoutées par les modules personnels : une tuile chacune, tout en haut (la rangée n'existe que s'il y a au moins un module)
                 with ui.element("div").classes("mtiles").mark("modules-section"):
-                    for vid, v in modules.views.items():
-                        with ui.element("div").classes("mtile" + (" on" if self.view == vid else "")).on("click", lambda _, vid=vid: self.go(vid, "")).tooltip(v["title"]):
+                    for vid in tile_order.arrange(list(modules.views), tile_order.load()):  # l'ordre choisi par glisser-déposer
+                        v = modules.views[vid]
+                        tile = ui.element("div").classes("mtile" + (" on" if self.view == vid else "")).on("click", lambda _, vid=vid: self.go(vid, "")).tooltip(v["title"])
+                        tile._props.update({"draggable": "true", "data-vid": vid})
+                        tile.on("tiledrop", lambda e, vid=vid: self.tile_dropped(e.args, vid), args=["detail"])
+                        with tile:
                             if icons.name_of(v["icon"]):
                                 ui.html(icons.svg(icons.name_of(v["icon"]), 22), sanitize=False).style("display:flex;justify-content:center;color:var(--accent)")
                             else:

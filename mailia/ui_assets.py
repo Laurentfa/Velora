@@ -277,6 +277,7 @@ body.body--dark .mailframe{background:#dae0e9}
 .mailedit .q-btn{color:var(--text)}
 .swrap.dragging{opacity:.45}
 body.dragging-mail .droptarget:not(.valid){opacity:.38}
+.mtile.dragging-t{opacity:.4}.mtile.tins-before{box-shadow:-3px 0 0 0 var(--accent)}.mtile.tins-after{box-shadow:3px 0 0 0 var(--accent)}
 .navfolder.dragging-f{opacity:.4}
 .navfolder.ins-before{box-shadow:0 -2px 0 0 var(--accent)}.navfolder.ins-after{box-shadow:0 2px 0 0 var(--accent)}
 .droptarget.valid{outline:1.5px dashed var(--accent);outline-offset:-2px}
@@ -1272,6 +1273,35 @@ SWIPE_JS = """<script>
     if (dragF) dragF.el.classList.remove('dragging-f');
     dragF = null; fclear();
     document.querySelectorAll('.fvalid').forEach(x => x.classList.remove('fvalid'));
+  });
+  // réorganisation des tuiles de modules (en haut de la colonne de gauche) : une tuile se dépose avant ou après une autre
+  let dragT = null;
+  const tclear = () => document.querySelectorAll('.tins-before, .tins-after').forEach(x => x.classList.remove('tins-before', 'tins-after'));
+  const ttarget = e => e.target.closest && e.target.closest('.mtile[data-vid]');
+  const tafter = (e, t) => { const r = t.getBoundingClientRect(); return e.clientX > r.left + r.width / 2; };
+  document.addEventListener('dragstart', e => {
+    const n = e.target.closest && e.target.closest('.mtile[data-vid]');
+    if (!n) return;
+    dragT = {el: n, vid: n.dataset.vid};
+    e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', 'tuile');
+    n.classList.add('dragging-t');
+  });
+  document.addEventListener('dragover', e => {
+    const t = dragT && ttarget(e);
+    if (!t || t === dragT.el) return;
+    e.preventDefault(); e.dataTransfer.dropEffect = 'move';
+    tclear(); t.classList.add(tafter(e, t) ? 'tins-after' : 'tins-before');
+  });
+  document.addEventListener('drop', e => {
+    const t = dragT && ttarget(e);
+    if (!t || t === dragT.el) return;
+    e.preventDefault();
+    t.dispatchEvent(new CustomEvent('tiledrop', {detail: {from: dragT.vid, after: tafter(e, t)}}));
+    tclear();
+  });
+  document.addEventListener('dragend', () => {
+    if (dragT) dragT.el.classList.remove('dragging-t');
+    dragT = null; tclear();
   });
   // trackpad Mac : balayage horizontal à deux doigts sur une ligne
   document.addEventListener('wheel', e => {
