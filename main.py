@@ -2184,6 +2184,7 @@ async def index_page() -> None:
         render_lock_screen()
         return
     box = Mailbox()
+    modules.client_boxes[ui.context.client.id] = box  # ModuleAPI.preview_file retrouve ainsi l'aperçu de cette fenêtre
     ua = ""
     try:
         ua = ui.context.client.request.headers.get("user-agent", "")

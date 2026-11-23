@@ -30,6 +30,7 @@ log = logging.getLogger("mailia")
 API_VERSION = 1
 DIR = config.DATA_DIR / "modules"
 objects: dict[str, object] = {}  # le module chargé de chaque identifiant : sa fonction « unload() » (facultative) est appelée au déchargement, pour arrêter ses tâches de fond et ses serveurs
+client_boxes = __import__("weakref").WeakValueDictionary()  # identifiant de client (fenêtre) -> sa fenêtre principale ; sert à ModuleAPI.preview_file
 views: dict[str, dict] = {}   # identifiant de vue -> {"title", "icon", "build", "module"}
 services: dict[str, dict] = {}  # services optionnels publiés par les modules : nom -> {"module", "fn"} (un module peut s'en servir s'il existe, et fonctionne sans sinon)
 current: dict = {"mailbox": None}  # la fenêtre principale, pour les actions qui ouvrent un écran de Velora (ModuleAPI.open_draft)
@@ -409,6 +410,20 @@ class ModuleAPI:
             db.kv_set(key, str(done + 1))
         self.log.info("envoi automatique mis en file (%d aujourd'hui sur %d)", done + 1, cap)
         return oid
+
+    async def preview_file(self, name: str, data: bytes) -> None:
+        """Ouvre un fichier dans l'aperçu de Velora (PDF, image, Word, Excel…, avec les boutons des modules comme « Modifier le PDF »), sans l'enregistrer sur le disque. À appeler depuis un clic de la page
+        du module (`await api.preview_file(nom, octets)`). Lève RuntimeError si aucune fenêtre n'est ouverte ; un fichier dangereux ou de plus de 25 Mo est refusé."""
+        from nicegui import ui
+        if len(data) > 25 * 1024 * 1024:
+            raise ValueError("Fichier trop volumineux (25 Mo au maximum).")
+        from mailia import security
+        if security.risky_attachment(name):
+            raise ValueError("Ce fichier est dangereux : il ne peut pas être ouvert.")
+        box = client_boxes.get(ui.context.client.id)
+        if box is None:
+            raise RuntimeError("Aucune fenêtre Velora ouverte.")
+        await box.show_preview(name, data, "module:" + hashlib.sha1(data).hexdigest()[:20], lambda: box._save_download(name, data))
 
     def draft_exists(self, draft_id: str) -> bool:
         """Le brouillon existe-t-il encore (il disparaît quand l'utilisateur l'envoie ou le supprime) ?"""
