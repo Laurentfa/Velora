@@ -196,6 +196,25 @@ async def test_settings_can_delete_a_module_after_confirmation(user: User, mod_d
     assert not (mod_dir / "alpha").exists()
 
 
+async def test_settings_can_hide_a_module_tile(user: User, mod_dir) -> None:
+    from mailia import tile_order
+    make(mod_dir, "alpha", "def register(api):\n    api.add_view('v', 'Alpha', 'star', lambda a: None)\n")
+    db.kv_set("modules_on", "1")
+    modules.set_enabled("alpha", True)
+    modules.apply("alpha")
+
+    @ui.page("/settings-modules-tile")
+    def page() -> None:
+        open_settings(ui.element("div"), lambda acct: None)
+    await user.open("/settings-modules-tile")
+    await user.should_see("Importer un module")
+    assert tile_order.hidden() == set()
+    user.find(marker="module-tile-alpha").click()  # masquer
+    assert tile_order.hidden() == {"alpha"}
+    user.find(marker="module-tile-alpha").click()  # afficher de nouveau
+    assert tile_order.hidden() == set()
+
+
 def test_a_module_can_be_enabled_and_removed_without_restarting(mod_dir, monkeypatch) -> None:
     make(mod_dir, "alpha", "def register(api):\n    api.add_view('v', 'Alpha', 'star', lambda a: None)\n    api.add_reader_widget(lambda a, m, msg: None)\n    api.provide('s', lambda: 1)\n")
     db.kv_set("modules_on", "1")

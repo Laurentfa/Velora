@@ -415,7 +415,7 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         with ui.scroll_area().classes("sidescroll"):  # seule cette partie défile : l'en-tête et les boutons du bas restent en place
             if modules.views:  # pages ajoutées par les modules personnels : une tuile chacune, tout en haut (la rangée n'existe que s'il y a au moins un module)
                 with ui.element("div").classes("mtiles").mark("modules-section"):
-                    for vid in tile_order.arrange(list(modules.views), tile_order.load()):  # l'ordre choisi par glisser-déposer
+                    for vid in tile_order.visible(tile_order.arrange(list(modules.views), tile_order.load()), modules.views, tile_order.hidden()):  # l'ordre choisi par glisser-déposer, sans les tuiles masquées dans Paramètres › Modules
                         v = modules.views[vid]
                         tile = ui.element("div").classes("mtile" + (" on" if self.view == vid else "")).on("click", lambda _, vid=vid: self.go(vid, "")).tooltip(v["title"])
                         tile._props.update({"draggable": "true", "data-vid": vid})

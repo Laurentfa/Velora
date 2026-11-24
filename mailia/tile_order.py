@@ -7,6 +7,7 @@ import json
 from . import db
 
 KEY = "tile_order"
+HIDDEN_KEY = "tiles_hidden"  # identifiants des MODULES dont la tuile est masquée (le module fonctionne toujours ; seule la tuile de la colonne de gauche disparaît)
 
 
 def load() -> list[str]:
@@ -19,6 +20,24 @@ def load() -> list[str]:
 
 def save(order: list[str]) -> None:
     db.kv_set(KEY, json.dumps(order, ensure_ascii=False))
+
+
+def hidden() -> set[str]:
+    try:
+        return {k for k in json.loads(db.kv_get(HIDDEN_KEY) or "[]") if isinstance(k, str)}
+    except ValueError:
+        return set()
+
+
+def set_hidden(module_id: str, on: bool) -> None:
+    ids = hidden()
+    ids.add(module_id) if on else ids.discard(module_id)
+    db.kv_set(HIDDEN_KEY, json.dumps(sorted(ids)))
+
+
+def visible(view_ids: list[str], views: dict, hidden_modules: set[str]) -> list[str]:
+    """Les vues dont la tuile s'affiche : celles dont le module n'est pas masqué."""
+    return [v for v in view_ids if (views.get(v) or {}).get("module") not in hidden_modules]
 
 
 def reset() -> None:

@@ -60,3 +60,15 @@ async def test_tiles_follow_the_chosen_order_and_a_drop_saves_it(user, monkeypat
     box = [o for o in __import__("gc").get_objects() if type(o).__name__ == "Mailbox"][-1]
     box.tile_dropped({"detail": {"from": "mod_b_v", "after": False}}, "mod_c_v")
     assert tile_order.load()[:3] == ["mod_b_v", "mod_c_v", "mod_a_v"]
+
+
+def test_hidden_module_tiles_are_filtered_and_remembered():
+    views = {"a_v": {"module": "mod_a"}, "b_v": {"module": "mod_b"}, "c_v": {"module": "mod_a"}}
+    assert tile_order.hidden() == set()
+    tile_order.set_hidden("mod_a", True)
+    assert tile_order.hidden() == {"mod_a"}
+    assert tile_order.visible(["a_v", "b_v", "c_v"], views, tile_order.hidden()) == ["b_v"]  # toutes les vues du module masqué disparaissent
+    tile_order.set_hidden("mod_a", True)  # sans doublon
+    tile_order.set_hidden("mod_a", False)
+    assert tile_order.hidden() == set() and tile_order.visible(["a_v", "b_v"], views, set()) == ["a_v", "b_v"]
+    assert tile_order.visible(["inconnu"], views, {"mod_a"}) == ["inconnu"]  # une vue sans module connu reste affichée

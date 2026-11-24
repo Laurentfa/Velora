@@ -4,7 +4,7 @@ from pathlib import Path
 
 from nicegui import app, run, ui
 
-from mailia import db, modules
+from mailia import db, modules, tile_order
 
 
 def modules_settings() -> None:
@@ -29,6 +29,15 @@ def modules_settings() -> None:
         except Exception as e:  # noqa: BLE001 — le réglage est enregistré ; on le dit au lieu de laisser l'interrupteur sans réaction
             modules.log.exception("module %s : échec de l'application du changement", mid)
             ui.notify(f"Le changement est enregistré, mais n'a pas pu être appliqué tout de suite ({type(e).__name__}). Relancez Velora.", type="warning")
+        draw()
+
+    def toggle_tile(mid: str, hide: bool) -> None:
+        tile_order.set_hidden(mid, hide)
+        try:
+            if modules.on_change:  # la colonne de gauche se redessine tout de suite
+                modules.on_change()
+        except Exception:  # noqa: BLE001 — le réglage est enregistré ; l'affichage suivra au prochain rafraîchissement
+            modules.log.debug("tuile : redessin impossible", exc_info=True)
         draw()
 
     def state_of(info: dict, wanted: bool) -> tuple[str, str]:
@@ -85,6 +94,9 @@ def modules_settings() -> None:
                             ui.button(icon="sync", on_click=lambda i=info["id"], p=src: update_from_source(i, p)).props("flat round dense color=primary").tooltip(
                                 f"Mettre à jour depuis {src}").mark(f"module-update-{info['id']}")
                         ui.button(icon="delete_outline", on_click=lambda i=info: ask_remove(i)).props("flat round dense color=grey").tooltip("Supprimer ce module").mark(f"module-delete-{info['id']}")
+                    if not info.get("error") and (info["id"] in tile_order.hidden() or any(d["module"] == info["id"] for d in modules.views.values())):  # un module sans tuile n'a rien à masquer
+                        ui.checkbox("Afficher la tuile dans la colonne de gauche", value=info["id"] not in tile_order.hidden(),
+                                    on_change=lambda e, i=info["id"]: toggle_tile(i, not bool(e.value))).props("dense").classes("text-caption text-grey").style("padding-left:40px").mark(f"module-tile-{info['id']}")
                     if info.get("sends_mail") and not info.get("error"):  # le module déclare pouvoir mettre des mails en file d'envoi : autorisation distincte, éteinte par défaut
                         with ui.row().classes("items-center gap-2 w-full no-wrap").style("padding-left:40px"):
                             ui.switch("Autoriser l'envoi automatique de mails", value=info["id"] in modules.send_allowed_ids(),
