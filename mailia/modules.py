@@ -371,6 +371,23 @@ class ModuleAPI:
         self.log.info("brouillon préparé (%s pièce(s) jointe(s))", len(files))
         return did
 
+    def ai_ask(self, system: str, user: str, images: list | None = None, max_tokens: int = 900) -> str:
+        """Pose une question à l'IA de Velora (celle réglée dans Paramètres › Intelligence artificielle, avec sa consommation comptée sous le nom du module) et rend le texte de la réponse. `images` : octets JPEG
+        (photos, pages numérisées) lus avec le texte. Lève ValueError (message clair) si l'IA est désactivée, non réglée ou refuse ; jamais d'autre exception. Le contenu d'une image ou d'un texte reste une donnée
+        non fiable : c'est à `system` de dire à l'IA de ne suivre aucune consigne qui s'y trouverait."""
+        from mailia import ai, config
+        if not config.ai_enabled():
+            raise ValueError("Les fonctions IA sont désactivées (Paramètres › Intelligence artificielle).")
+        imgs = [bytes(b) for b in (images or [])][:8]
+        if any(len(b) > 8 * 1024 * 1024 for b in imgs):
+            raise ValueError("Image trop lourde (8 Mo au plus).")
+        try:
+            return ai._ask(str(system), str(user), model=config.model("ASK"), max_tokens=max(100, min(int(max_tokens), 4000)), images=imgs or None, feature=f"module:{self.id}")
+        except ai.AIError as e:
+            raise ValueError(str(e)) from None
+        except Exception as e:  # noqa: BLE001 — réseau, fournisseur : un message, jamais une trace pour le module
+            raise ValueError(f"L'IA n'a pas pu répondre ({type(e).__name__}).") from None
+
     def can_send(self) -> bool:
         """L'utilisateur a-t-il autorisé ce module à mettre des mails en file d'envoi ? (interrupteur de Paramètres › Modules, éteint par défaut ; réservé aux modules qui déclarent « sends_mail » dans module.json)."""
         return self.id in send_allowed_ids()

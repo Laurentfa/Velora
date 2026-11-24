@@ -792,3 +792,36 @@ async def test_settings_offers_the_send_switch_only_to_modules_that_declare_it(u
     await user.should_see("Envoi automatique autorisé")
     assert modules.send_allowed_ids() == {"beta"}
     db.kv_set("modules_send_allowed", "")
+
+
+def test_module_api_ai_ask(monkeypatch) -> None:
+    from mailia import ai, config
+    from pathlib import Path
+    api = modules.ModuleAPI({"id": "alpha", "dir": Path("."), "name": "Alpha"})
+    seen = {}
+
+    def fake_ask(system, user, *, model, max_tokens, effort="low", images=None, feature=""):
+        seen.update(system=system, user=user, max_tokens=max_tokens, images=images, feature=feature)
+        return "réponse"
+    monkeypatch.setattr(ai, "_ask", fake_ask)
+    monkeypatch.setattr(config, "ai_enabled", lambda: False)
+    with pytest.raises(ValueError, match="désactivées"):
+        api.ai_ask("s", "u")
+    monkeypatch.setattr(config, "ai_enabled", lambda: True)
+    assert api.ai_ask("s", "u", images=[b"\xff\xd8x"], max_tokens=5) == "réponse"
+    assert seen["feature"] == "module:alpha" and seen["images"] == [b"\xff\xd8x"] and seen["max_tokens"] == 100  # plancher de 100 jetons
+    with pytest.raises(ValueError, match="trop lourde"):
+        api.ai_ask("s", "u", images=[b"x" * (9 * 1024 * 1024)])
+
+    def boom(*a, **k):
+        raise ai.AIError("Clé invalide")
+    monkeypatch.setattr(ai, "_ask", boom)
+    with pytest.raises(ValueError, match="Clé invalide"):
+        api.ai_ask("s", "u")
+
+    def boom2(*a, **k):
+        raise RuntimeError("secret interne")
+    monkeypatch.setattr(ai, "_ask", boom2)
+    with pytest.raises(ValueError) as e:
+        api.ai_ask("s", "u")
+    assert "secret interne" not in str(e.value)  # jamais le détail d'une erreur interne
