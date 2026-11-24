@@ -388,6 +388,20 @@ class ModuleAPI:
         except Exception as e:  # noqa: BLE001 — réseau, fournisseur : un message, jamais une trace pour le module
             raise ValueError(f"L'IA n'a pas pu répondre ({type(e).__name__}).") from None
 
+    def ocr_available(self) -> bool:
+        """Cet ordinateur sait-il lire le texte d'une image sans IA (Mac : Vision ; Windows : moteur de Windows) ?"""
+        from mailia import ocr
+        return ocr.available()
+
+    def ocr_text(self, image: bytes) -> str:
+        """Le texte lu sur une image (JPEG ou PNG), une ligne par ligne de texte, par le moteur de l'ordinateur : gratuit, hors ligne, rien n'est envoyé. "" s'il n'y a pas de texte.
+        Lève ValueError (message clair) si la lecture n'est pas possible ici."""
+        from mailia import ocr
+        try:
+            return ocr.read_text(bytes(image))
+        except ocr.OcrUnavailable as e:
+            raise ValueError(str(e)) from None
+
     def can_send(self) -> bool:
         """L'utilisateur a-t-il autorisé ce module à mettre des mails en file d'envoi ? (interrupteur de Paramètres › Modules, éteint par défaut ; réservé aux modules qui déclarent « sends_mail » dans module.json)."""
         return self.id in send_allowed_ids()

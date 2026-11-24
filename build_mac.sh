@@ -29,6 +29,12 @@ if swiftc -swift-version 5 -parse-as-library -O -target "$(uname -m)-apple-macos
 else
   echo "→ Apple Intelligence (rédaction) non incluse (voir /tmp/velora-write-build.log)"
 fi
+# Lecture de texte sur une photo (module « Photo vers mail » et autres) : framework Vision d'Apple, sur l'ordinateur, sans IA ; fonctionne sur tout macOS récent
+if swiftc -swift-version 5 -O tools/ocr/velora-ocr.swift -o dist/Velora.app/Contents/MacOS/velora-ocr 2>/tmp/velora-ocr-build.log; then
+  echo "→ lecture de texte (Vision) incluse"
+else
+  echo "→ lecture de texte (Vision) non incluse (voir /tmp/velora-ocr-build.log)"
+fi
 # Images distantes en http:// (logo de signature hébergé sans HTTPS, newsletters) : sans cette exception, la fenêtre macOS les bloque
 /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PL" 2>/dev/null
 /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoadsInWebContent bool true" "$PL" 2>/dev/null

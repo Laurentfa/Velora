@@ -75,6 +75,7 @@ jobs:
           ./build_mac.sh
           if [ -n "$CODESIGN_IDENTITY" ]; then codesign -d -r- dist/Velora.app 2>&1 | grep -q 'certificate leaf' || { echo "signature stable absente"; exit 1; }; fi  # l'identité doit être celle du certificat, pas ad hoc
           test -x dist/Velora.app/Contents/MacOS/velora-dictate  # la dictée ne doit pas disparaître en silence d'une version publiée
+          test -x dist/Velora.app/Contents/MacOS/velora-ocr  # la lecture de texte des photos non plus
           test -x dist/Velora.app/Contents/MacOS/velora-write  # ni les boutons Apple Intelligence
           scripts/package_mac.sh "$VERSION"
       - name: Construction et installateur Windows
