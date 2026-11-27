@@ -614,18 +614,53 @@ class EwsProvider:
         `importance` : 0 basse, 1 normale, 2 haute."""
         box = lambda s: [Mailbox(email_address=a.strip()) for a in s.replace(";", ",").split(",") if a.strip()]
         if ref and env("MAILIA_THREADED_SEND", "1") != "0":  # MAILIA_THREADED_SEND=0 : retour à l'envoi simple (dépannage)
-            try:
-                if self._send_threaded(ref, subject, body, box(to), box(cc), box(bcc), attachments, html, inline, importance, receipt):
-                    _stat("threaded")
-                    return
-            except _AlreadySent:
-                _stat("uncertain", subject)
-                raise
-            except Exception:
-                _stat("fallback", subject)
-                log.warning("envoi rattaché à la conversation impossible : envoi simple", exc_info=True)
+            for attempt in (1, 2):
+                try:
+                    if self._send_threaded(ref, subject, body, box(to), box(cc), box(bcc), attachments, html, inline, importance, receipt):
+                        _stat("threaded")
+                        return
+                    break
+                except _AlreadySent:
+                    _stat("uncertain", subject)
+                    raise
+                except Exception:
+                    if attempt == 1:  # une erreur du serveur (dossier Brouillons introuvable après une veille, par exemple) : on repart d'une connaissance fraîche des dossiers et on réessaie une fois
+                        log.warning("envoi rattaché à la conversation impossible : nouvel essai", exc_info=True)
+                        self._forget_folders()
+                        continue
+                    _stat("fallback", subject)
+                    log.warning("envoi rattaché à la conversation impossible : envoi simple", exc_info=True)
         m = self.build(subject, body, box(to), box(cc), attachments, html, inline, box(bcc), importance, receipt)
+        if ref and ref[0] == "reply":  # envoi simple d'une réponse : les en-têtes de réponse permettent quand même au destinataire de la ranger dans la bonne conversation
+            irt, refs = self._reply_headers(ref)
+            if irt:
+                m.in_reply_to, m.references = irt, refs
         m.send()  # une copie est enregistrée dans les éléments envoyés
+
+    def _forget_folders(self) -> None:
+        """Oublie les dossiers déjà résolus (Brouillons…) pour que le prochain appel les demande de nouveau au serveur."""
+        try:
+            self.account.root.clear_cache()
+        except Exception:
+            log.debug("cache des dossiers non vidé", exc_info=True)
+        for name in ("drafts", "sent", "inbox", "root"):
+            self.account.__dict__.pop(name, None)
+        self._fmap = None
+
+    def _reply_headers(self, ref) -> tuple:
+        """(In-Reply-To, References) d'une réponse, lus sur le message d'origine ; (None, None) si on ne peut pas les lire (message disparu, serveur muet)."""
+        try:
+            orig = next(iter(self.account.fetch(ids=[ItemId(id=ref[2])], only_fields=["message_id", "references"])))
+            if isinstance(orig, Exception):
+                return None, None
+            mid = (getattr(orig, "message_id", None) or "").strip()
+            if not mid:
+                return None, None
+            chain = [x for x in (getattr(orig, "references", None) or "").split() if x] + [mid]
+            return mid, " ".join(chain[-20:])
+        except Exception:
+            log.debug("en-têtes de réponse illisibles", exc_info=True)
+            return None, None
 
     def _send_threaded(self, ref, subject, body, to, cc, bcc, attachments, html, inline, importance: int = 1, receipt: bool = False) -> bool:
         """Réponse ou transfert rattaché à la conversation de l'original, quel que soit son âge ou son objet exact : Exchange le fait quand
