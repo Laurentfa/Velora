@@ -290,13 +290,30 @@ passage entre [crochets] à compléter. Réponds par le corps du message uniquem
 {_UNTRUSTED}"""
 
 
+def _with_bodies(msgs: list[dict]) -> list[dict]:
+    """Les messages avec leur texte : ceux enregistrés sans corps (reçus en-têtes seulement) sont relus sur le serveur, sinon l'IA ne verrait que des en-têtes et le dirait."""
+    from . import sync
+    out = []
+    for x in msgs:
+        if not (x.get("body") or "").strip():
+            try:
+                x = sync.ensure_details(x)
+            except Exception:  # noqa: BLE001 — message déplacé, serveur muet : on continue avec ce qu'on a
+                logging.getLogger("ai").info("texte d'un message du fil non chargé", exc_info=True)
+        out.append(x)
+    return out
+
+
 def _thread_context(m: dict, keep: int = 4) -> str:
     """Les derniers échanges du fil (hors message auquel on répond) : donne le contexte à l'IA."""
-    earlier = [x for x in db.thread_rows(m["ckey"]) if x["id"] != m["id"] and x["date"] <= m["date"] and not aipolicy.is_excluded(x)][-keep:]
+    earlier = _with_bodies([x for x in db.thread_rows(m["ckey"]) if x["id"] != m["id"] and x["date"] <= m["date"] and not aipolicy.is_excluded(x)][-keep:])
     if not earlier:
         return ""
     return "Échanges précédents de la conversation (du plus ancien au plus récent) :\n" + "\n---\n".join(
         f"{x['sender_name'] or x['sender']} ({x['date'][:10]}) : {for_ai(x['body'] or '', 800)}" for x in earlier) + "\n\n"
+
+
+_BODYLESS = ("je ne vois pas le contenu", "uniquement les en-têtes", "uniquement les en-tetes", "corps des messages échangés", "ne vois que les en-têtes")
 
 
 def summarize_thread(ckey: str) -> str:
@@ -311,9 +328,14 @@ def _summarize_thread(ckey: str) -> str:
         aipolicy.guard(x)
     cached = db.kv_get(f"thread_sum:{ckey}")
     if cached and cached.split("\n", 1)[0] == str(len(msgs)):
-        return cached.split("\n", 1)[1]
+        low = cached.lower()
+        if not any(k in low for k in _BODYLESS):  # un résumé fait sans le texte des messages (« je ne vois que les en-têtes ») n'est jamais resservi
+            return cached.split("\n", 1)[1]
+    msgs = msgs[:-12] + _with_bodies(msgs[-12:])
+    if not any((x.get("body") or "").strip() for x in msgs[-12:]):
+        raise AIError("Le texte de ces messages n'a pas pu être chargé (serveur injoignable ou messages déplacés) : il n'y a rien à résumer pour l'instant. Réessayez dans un instant.")
     text = "\n---\n".join(
-        f"[{x['date'][:16]}] {x['sender_name'] or x['sender']} : {for_ai(x['body'] or '', 1500)}" for x in msgs[-12:])
+        f"[{x['date'][:16]}] {x['sender_name'] or x['sender']} : {for_ai(x['body'] or '', 1500) or '(texte indisponible)'}" for x in msgs[-12:])
     out = _ask(THREAD_SYS, f"Objet : {msgs[-1]['subject']}\n\n{text}", model=config.model("ANALYZE"), max_tokens=700, feature="summarize_thread")
     out = out.replace("**", "")
     db.kv_set(f"thread_sum:{ckey}", f"{len(msgs)}\n{out}")
