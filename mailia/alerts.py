@@ -1,9 +1,10 @@
 """Alertes qui restent affichées jusqu'à ce que l'utilisateur clique sur OK (par exemple : 1min.AI refuse la connexion).
 Une alerte n'est montrée qu'une fois : après le clic sur OK elle ne revient que si le problème a disparu (resolve) puis reparaît."""
 import threading
+import time
 
 _lock = threading.Lock()
-_pending: dict[str, dict] = {}   # clé -> {"key", "title", "text"}, dans l'ordre d'arrivée
+_pending: dict[str, dict] = {}   # clé -> {"key", "title", "text", "t"}, dans l'ordre d'arrivée
 _acked: set[str] = set()
 
 
@@ -11,7 +12,7 @@ def raise_alert(key: str, title: str, text: str) -> None:
     """Signale un problème ; sans effet s'il est déjà signalé ou si l'utilisateur a déjà cliqué sur OK."""
     with _lock:
         if key not in _pending and key not in _acked:
-            _pending[key] = {"key": key, "title": title, "text": text}
+            _pending[key] = {"key": key, "title": title, "text": text, "t": time.time()}
 
 
 def pending() -> list[dict]:

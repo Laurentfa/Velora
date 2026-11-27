@@ -77,6 +77,7 @@ def box(monkeypatch):
     real_provider = sync.provider
     monkeypatch.setattr(sync, "provider", lambda key: prov if key == "testbox" else real_provider(key))
     ui.page("/")(main.index_page)
+    monkeypatch.setattr(main, "ALERT_QUIET_S", 0)
     seen = []
     real = main.Mailbox.__init__
     monkeypatch.setattr(main.Mailbox, "__init__", lambda self, *a, **k: (real(self, *a, **k), seen.append(self))[0])
@@ -99,3 +100,38 @@ async def test_the_alert_window_stays_until_ok_is_clicked(user, box) -> None:
     assert b._alert_open == ""
     await b.tick()
     assert alerts.pending() == []  # acquittée : elle ne se rouvre pas
+
+
+async def test_several_alerts_share_one_window_and_one_ok(user, box) -> None:
+    await user.open("/")
+    b = box[-1]
+    await b.tick()
+    alerts.raise_alert("connect:philips:down", "Connexion perdue : Philips", "Philips n'est plus connecté.")
+    alerts.raise_alert("connect:resmed:down", "Connexion perdue : ResMed", "ResMed n'est plus connecté.")
+    alerts.raise_alert("etat:x", "État : un module", "Le module n'a pas été relu.")
+    await b.tick()
+    await user.should_see("3 points à regarder")
+    for t in ("Connexion perdue : Philips", "Connexion perdue : ResMed", "État : un module"):
+        await user.should_see(t)
+    for _ in range(3):
+        await b.tick()
+    assert len(user.find(content="3 points à regarder").elements) == 1  # une seule fenêtre
+    user.find(marker="alert-ok").click()
+    await wait_until(lambda: alerts.pending() == [])  # un seul OK les acquitte toutes
+    assert b._alert_open == ""
+    alerts.raise_alert("connect:philips:down", "Connexion perdue : Philips", "encore")
+    await b.tick()
+    assert alerts.pending() == []  # une alerte déjà acquittée ne revient pas
+
+
+async def test_alerts_wait_for_a_quiet_moment(user, box, monkeypatch) -> None:
+    monkeypatch.setattr(main, "ALERT_QUIET_S", 3600)
+    await user.open("/")
+    b = box[-1]
+    await b.tick()
+    alerts.raise_alert("a", "Titre A", "texte")
+    await b.tick()
+    assert b._alert_open == "" and len(alerts.pending()) == 1  # pas encore : d'autres alertes peuvent arriver
+    monkeypatch.setattr(main, "ALERT_QUIET_S", 0)
+    await b.tick()
+    assert b._alert_open == "a"

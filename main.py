@@ -162,6 +162,9 @@ class _ReaderRefreshable(ui.refreshable_method):
         return super()._execute_refresh(args, kwargs, instance=instance)
 
 
+ALERT_QUIET_S = 12  # secondes de calme avant d'afficher les alertes en attente (elles arrivent souvent par grappes, au réveil du Mac)
+
+
 class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, FilesMixin, OutboxMixin, TasksMixin, MailToolsMixin, ComposeAiMixin, DraftsMixin, DictationMixin, AppleWriterMixin, WeatherMixin, AgendaMixin, FeedMixin, ServerRulesMixin):
     """État et interface d'une fenêtre (chaque client a la sienne)."""
 
@@ -1670,24 +1673,34 @@ class Mailbox(PrivacyMixin, BulkMixin, ScanMixin, CleanupMixin, SearchMixin, Fil
         return True
 
     def show_alerts(self) -> None:
-        """Une alerte en attente (1min.AI refuse la connexion…) s'affiche dans une fenêtre qu'on ne ferme qu'avec « OK » ; une seule à la fois."""
+        """Les alertes en attente (1min.AI refuse la connexion, un site perdu au réveil…) s'affichent TOUTES dans une seule fenêtre qu'on ne ferme qu'avec « OK » : un OK pour l'ensemble.
+        On attend ALERT_QUIET_S secondes de calme après la dernière arrivée : au réveil du Mac, les modules testent leurs sites l'un après l'autre et leurs alertes se regroupent."""
         if self._alert_open:
             return
-        a = next(iter(alerts.pending()), None)
-        if not a:
+        pend = alerts.pending()
+        if not pend or time.time() - max(p.get("t", 0) for p in pend) < ALERT_QUIET_S:
             return
-        self._alert_open = a["key"]
+        keys = [p["key"] for p in pend]
+        self._alert_open = "|".join(keys)
 
         def ok() -> None:
-            alerts.acknowledge(a["key"])
+            for k in keys:
+                alerts.acknowledge(k)
             self._alert_open = ""
             dlg.close()
 
-        with self.host, ui.dialog().props("persistent") as dlg, ui.card().style("width:min(520px,96vw)"):
+        with self.host, ui.dialog().props("persistent") as dlg, ui.card().style("width:min(560px,96vw)"):
             with ui.row().classes("items-center no-wrap gap-2"):
                 ui.icon("warning", size="28px").style("color:#c62828")
-                ui.label(a["title"]).classes("text-h6")
-            ui.label(a["text"]).classes("text-body2").style("white-space:pre-line")
+                ui.label(pend[0]["title"] if len(pend) == 1 else f"{len(pend)} points à regarder").classes("text-h6")
+            if len(pend) == 1:
+                ui.label(pend[0]["text"]).classes("text-body2").style("white-space:pre-line")
+            else:
+                with ui.scroll_area().style("max-height:60vh;width:100%"):
+                    for i, a in enumerate(pend):
+                        with ui.column().classes("gap-0").style("padding:8px 0" + (";border-top:1px solid var(--line)" if i else "")):
+                            ui.label(a["title"]).style("font-weight:600")
+                            ui.label(a["text"]).classes("text-body2").style("white-space:pre-line")
             with ui.row().classes("justify-end w-full"):
                 ui.button("OK", on_click=ok).props("unelevated no-caps color=primary").mark("alert-ok")
         dlg.open()
