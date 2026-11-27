@@ -205,13 +205,13 @@ class OutboxMixin:
             if r is None:
                 self._watch.pop(oid)
                 ui.notify(f"Message envoyé : {subject}", type="positive")
-                alert = settings_ui.send_alert()
+                alert = settings_ui.take_send_alert()
                 if alert:
                     ui.notify(settings_ui.alert_text(alert), type="warning", multi_line=True, timeout=12000)
                 await self.reload(force=True)
             elif r["status"] == "error":
                 self._watch.pop(oid)
-                alert = settings_ui.send_alert()
+                alert = settings_ui.take_send_alert()
                 note = f" {settings_ui.alert_text(alert)}" if alert and alert["kind"] == "uncertain" else ""
                 ui.notify(f"Échec d'envoi de « {subject} » : {r['error']}. Il reste dans « En attente d'envoi ».{note}", type="negative", multi_line=True, timeout=15000)
         if self.view == "outbox":

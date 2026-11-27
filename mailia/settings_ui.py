@@ -224,6 +224,22 @@ def send_alert() -> dict | None:
     return a if isinstance(a, dict) and a.get("kind") else None
 
 
+def take_send_alert(max_age: int = 900) -> dict | None:
+    """L'alerte d'envoi à annoncer maintenant : elle n'est annoncée qu'UNE fois (retirée dès qu'on la prend) et seulement si elle est récente
+    (sinon l'alerte d'un ancien message reparaissait après chaque envoi suivant)."""
+    from datetime import datetime, timezone
+    from . import db
+    a = send_alert()
+    if not a:
+        return None
+    db.kv_set("send_alert", "")
+    try:
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(a["at"])).total_seconds()
+    except (KeyError, ValueError, TypeError):
+        return None
+    return a if 0 <= age <= max_age else None
+
+
 def alert_text(a: dict) -> str:
     subject = f" (« {a['subject']} »)" if a.get("subject") else ""
     if a["kind"] == "uncertain":

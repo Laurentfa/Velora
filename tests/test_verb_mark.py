@@ -127,6 +127,25 @@ def test_send_alert_is_raised_for_fallback_and_uncertain_only():
     assert settings_ui.send_alert() is None
 
 
+def test_send_alert_is_announced_once_and_only_when_recent():
+    """L'alerte d'un message ne reparaît pas après l'envoi du suivant (elle est annoncée une seule fois, et seulement si elle est récente)."""
+    import json
+    from datetime import datetime, timedelta, timezone
+    from mailia import settings_ui
+    from mailia.providers import ews
+    db.kv_set("send_alert", "")
+    assert settings_ui.take_send_alert() is None
+    ews._stat("fallback", "RE: Maloine")
+    a = settings_ui.take_send_alert()
+    assert a and a["kind"] == "fallback"
+    assert settings_ui.take_send_alert() is None  # déjà annoncée : plus rien à l'envoi suivant
+    old = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+    db.kv_set("send_alert", json.dumps({"kind": "fallback", "subject": "ancien", "at": old}))
+    assert settings_ui.take_send_alert() is None and settings_ui.send_alert() is None  # trop ancienne : ignorée et retirée
+    db.kv_set("send_alert", json.dumps({"kind": "fallback", "subject": "x", "at": "pas une date"}))
+    assert settings_ui.take_send_alert() is None
+
+
 def test_imap_message_id_uses_the_senders_domain():
     from mailia.config import AccountCfg
     from mailia.providers.imap import ImapProvider
